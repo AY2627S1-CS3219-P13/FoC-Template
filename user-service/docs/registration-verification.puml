@@ -1,0 +1,68 @@
+@startuml registration-verification
+title User Service - Registration and email verification
+autonumber
+hide footbox
+
+actor Student
+participant Frontend
+participant "User Service" as User
+database PostgreSQL as DB
+participant "Email / local Mailpit" as Email
+
+note over Frontend, User
+  Frontend is a planned caller of the implemented API.
+  Credit integration and event publishing are deferred.
+end note
+
+Student -> Frontend: Enter email, display name and password
+Frontend -> User: POST /api/v1/auth/register
+User -> User: Validate input and hash password
+group One database transaction (eligible signup)
+  User -> DB: Save pending account and verification challenge
+  note right of DB
+    Store password hash, code HMAC,
+    registration token digest and expiry.
+  end note
+  User -> DB: Commit
+  DB --> User: Committed
+end
+User -> Email: Send verification code
+alt Email accepted by SMTP
+  Email --> User: Accepted
+  User --> Frontend: 202 + registrationToken
+else Email delivery fails
+  User --> Frontend: 503 + registrationToken
+  note over Frontend, User: Keep token and use resend; account remains pending.
+end
+note over Frontend: Keep registrationToken for this signup attempt.
+
+== After receiving the email ==
+Student -> Email: Read verification code
+Student -> Frontend: Enter code
+Frontend -> User: POST /api/v1/auth/verify-email\nemail + code + registrationToken
+User -> DB: Begin transaction; lock pending account\nand load verification challenge
+DB --> User: Account and challenge
+User -> User: Check token, code, expiry and attempt limit
+
+alt Valid verification and available display name
+  User -> DB: Activate account and delete challenge
+  User -> DB: Commit
+  DB --> User: Committed
+  User --> Frontend: 200 - account verified
+  Frontend --> Student: You can now log in
+else Wrong code with valid registration token and eligible challenge
+  User -> DB: Increment failed attempts and commit
+  User --> Frontend: 400 - verification rejected
+else Invalid token, expired, used or exhausted challenge
+  User -> DB: Roll back; account stays unchanged
+  User --> Frontend: 400 - verification rejected
+else Display name was taken by another verified account
+  User -> DB: Roll back; preserve the challenge
+  User --> Frontend: 409 - retry with another displayName
+end
+
+note over Frontend, User
+  registrationToken binds the code to the signup attempt.
+  It is not a login session. Verification codes expire in 30 minutes.
+end note
+@enduml

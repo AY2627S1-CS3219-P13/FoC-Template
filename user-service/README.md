@@ -3,6 +3,8 @@
 Accounts and authentication for Friend on Campus, written in Go with PostgreSQL.
 Start here for setup; [API.md](API.md) describes the HTTP API for frontend and backend teammates.
 
+PlantUML sequence diagrams: [registration and verification](docs/registration-verification.puml), and [login, session validation and logout](docs/login-session-logout.puml).
+
 ## What is implemented
 
 - Register with a school email, display name and password.
