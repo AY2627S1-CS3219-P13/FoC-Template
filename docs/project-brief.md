@@ -2,7 +2,9 @@
 
 CS3219 AY2627 Semester 1 · Group 13 · Updated 18 September 2026
 
-This document records the project backlog, current technology direction and deployment strategy before implementation. The backlog below is a paraphrased summary of the supplied D1 document. Sprint labels are its planned iterations, not claims of completed work. Unresolved technical choices remain explicitly open.
+This document records the project backlog, technology direction and deployment strategy. The backlog below is a paraphrased summary of the supplied D1 document. Sprint labels are its planned iterations, not claims of completed work. Unresolved technical choices remain explicitly open.
+
+User Service implementation is now authorised, following the recommended Go/PostgreSQL/session design. Its [README](../user-service/README.md) records implemented behaviour and its [API guide](../user-service/API.md) describes the contract for teammates. **Credit integration is explicitly deferred**, including wallet creation, initial credits and verification events. These User Service choices do not finalise technology choices for every other service.
 
 ## Product and scope
 
@@ -29,15 +31,15 @@ Payment for purchased items, supplier menus/catalogues/inventory/checkout and li
 | Backend | Go for the services | Current team stack direction; framework and versions open |
 | Application hosting | AWS EC2 | Confirmed team decision |
 | Account access | Own email/password registration and school-email verification | Current product direction; external provider login not requested |
-| Authentication mechanism | Sessions versus tokens, and cross-service identity validation | Not finalised |
-| Database | PostgreSQL discussed as a candidate | Not finalised |
+| Authentication mechanism | PostgreSQL-backed sessions; internal session validation endpoint | Adopted for User Service |
+| Database | PostgreSQL for User Service | Adopted for User Service; other services open |
 | Database hosting | Database on EC2 versus managed RDS | Not finalised |
 | Messaging | RabbitMQ discussed as a candidate | Not finalised |
 | Event reliability | Outbox discussed as an option | **Not finalised; not a requirement to implement** |
-| Container tooling | Docker and Docker Compose proposed | Containerisation required; exact tooling/configuration to confirm |
-| Email delivery | Local email testing and a deployed delivery provider | Provider not selected; SES is an option |
+| Container tooling | Docker and Docker Compose | Local User Service setup implemented; full-team deployment open |
+| Email delivery | Local Mailpit capture; SMTP adapter with STARTTLS for deployment | Production provider not selected; SES remains an option |
 
-The frontend provides the user experience; the four backend services cover the required business areas. Protocols, schemas, endpoints, libraries and internal workflows will be designed separately. Previously discussed designs are proposals, not approved implementation instructions.
+The frontend provides the user experience; the four backend services cover the required business areas. User Service's current design is documented in its service folder. Other previously discussed designs remain proposals unless explicitly adopted.
 
 ## Functional backlog
 
@@ -116,12 +118,12 @@ These are selected backlog items, not completed features. Ownership and appropri
 
 **Readiness:** confirm account access, budget and permitted services before finalising infrastructure. Agree responsibility for secure access, secrets, persistent data, backups, logs, server maintenance and recovery. Keep local and shared cloud data separate. These are deployment concerns to resolve, not a provisioned setup.
 
-**Delivery sequence:** establish the local application first, target cloud deployment in S2 as recorded in the backlog, and validate a small working journey on EC2 once access becomes available. No cloud resources or application implementation are authorised by this planning document.
+**Delivery sequence:** establish the local application first, target cloud deployment in S2 as recorded in the backlog, and validate a small working journey on EC2 once access becomes available. User Service implementation was separately authorised; no cloud resources have been provisioned.
 
 ## Decisions still needed
 
-- Authentication mechanism, session/token policies, accepted school domains, verification resend policy and first-admin provisioning. Supplier administration is S1 while role management is S2.
-- Database engine/hosting, message broker, email provider and container tooling. **Outbox remains undecided**, as do service communication and event-recovery designs.
+- Confirm User Service's documented defaults with teammates, especially accepted school domains and session/rate-limit policies. First-admin provisioning uses an operator command for a verified account; Supplier can use this in S1.
+- Database hosting, other services' database choices, message broker, production email provider and full-team container deployment. **Outbox remains undecided; Credit integration is deferred**, including recovery and eventual onboarding of accounts verified before integration exists.
 - Cancellation eligibility, expiry duration and post-pickup penalty rules. Reconcile FR3.6.1's penalty with FR4.1.6's release rule, and clarify the release-on-completion wording in FR4.1.7.
 - Physical quantity limits, supported pickup-location choices, and the meaning of S1 assignment notification versus S2 general notifications.
 - Behaviour of rating-based simultaneous acceptance, and ownership of frontend, integration, deployment and nice-to-have work.
@@ -133,4 +135,4 @@ These are selected backlog items, not completed features. Ownership and appropri
 - `Project-D1-Template.docx`, supplied by the user: functional/non-functional requirements, selected nice-to-haves and S1–S4 allocation. The summaries here paraphrase those tables.
 - Team discussion: Next.js/TypeScript and Go stack direction; EC2 application hosting; own email verification; outbox explicitly not finalised.
 
-The source attachments are not stored in this repository. This brief records requirements and decisions only; implementation design is intentionally deferred.
+The source attachments are not stored in this repository. This brief records requirements and decisions; service-specific implementation details belong in the service documentation.

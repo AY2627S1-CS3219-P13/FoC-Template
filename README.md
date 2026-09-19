@@ -24,6 +24,8 @@ withdrawn, or exchanged for money, and only circulate within the platform.
 
 ## Repository Structure
 
+User Service is available for local development. See [setup and design](user-service/README.md) and the [API guide for teammates](user-service/API.md).
+
 This repository follows a **one-service-per-folder** structure: each
 microservice (`user-service/`, `supplier-service/`, `order-service/`,
 `credit-service/`) lives in its own top-level folder.
