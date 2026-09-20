@@ -1,0 +1,74 @@
+@startuml login-session-logout
+title User Service - Login, session validation and logout
+autonumber
+hide footbox
+
+participant Browser
+participant "Other Service" as Other
+participant "User Service" as User
+database PostgreSQL as DB
+
+note over Other, User
+  Other Service illustrates the intended integration contract.
+  Its application behaviour is not implemented by User Service.
+end note
+
+== Login ==
+Browser -> User: POST /api/v1/auth/login\nemail + password
+User -> DB: Begin transaction; load and lock verified account
+DB --> User: Account and password hash (if found)
+User -> User: Check password
+
+alt Valid credentials
+  User -> User: Generate random session token
+  User -> DB: Store token digest, user ID and expiry\nReplace this browser's prior session, if present
+  User -> DB: Commit
+  DB --> User: Committed
+  User --> Browser: 200 + HttpOnly session cookie
+else Invalid credentials or unverified account
+  User -> DB: Roll back
+  User --> Browser: 401 - login rejected
+end
+
+== Protected request after successful login ==
+Browser -> Other: Protected request + session cookie
+Other -> User: POST /internal/v1/sessions/validate\nsessionToken + service credential
+User -> User: Check service credential
+
+alt Service credential invalid
+  User --> Other: 401 - invalid service credentials
+  Other --> Browser: Reject request
+else Service credential valid
+  User -> DB: Find unexpired session by token digest\nand read current user roles
+  alt Session valid
+    DB --> User: User ID, roles and session expiry
+    User --> Other: 200 - userId, roles, expiresAt
+    Other -> Other: Check permission for the operation
+    Other --> Browser: Result, or 403 if forbidden
+  else Session expired or revoked
+    DB --> User: No valid session
+    User --> Other: 401 - invalid session
+    Other --> Browser: 401 - please log in
+  else Database unavailable
+    DB --> User: Lookup fails
+    User --> Other: 503 - authentication unavailable
+    Other --> Browser: 503 - try again later
+  end
+end
+
+note over Other, User
+  Validate once per protected incoming request; do not cache success
+  across requests initially. On timeout/network failure, fail closed.
+  Other services enforce their own permissions and never read User DB.
+end note
+
+== Logout ==
+Browser -> User: POST /api/v1/auth/logout\nsession cookie
+User -> DB: Delete current session
+DB --> User: Deleted
+User --> Browser: 204 + clear cookie
+note over Browser, User
+  Subsequent validation of that session fails.
+  A request authorised before logout may still finish.
+end note
+@enduml

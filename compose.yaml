@@ -1,0 +1,67 @@
+name: foc
+
+services:
+  user-db:
+    image: postgres:18-bookworm
+    environment:
+      POSTGRES_USER: foc_user
+      POSTGRES_DB: foc_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run sh user-service/scripts/init-env.sh}
+    volumes:
+      - user-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foc_user -d foc_user"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:v1.29
+    ports:
+      - "127.0.0.1:8025:8025"
+
+  user-service:
+    build: ./user-service
+    env_file: .env
+    ports:
+      - "127.0.0.1:8080:8080"
+    # Port 8081 is accessible only inside the container network.
+    depends_on:
+      user-db:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  user-test-db:
+    image: postgres:18-bookworm
+    profiles: [test]
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: user_service_test
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d user_service_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  user-tests:
+    profiles: [test]
+    build:
+      context: ./user-service
+      target: development
+    environment:
+      USER_TEST_DATABASE_URL: postgres://test:test@user-test-db:5432/user_service_test?sslmode=disable
+    depends_on:
+      user-test-db:
+        condition: service_healthy
+    command: ["sh", "scripts/check.sh"]
+
+volumes:
+  user-data:
