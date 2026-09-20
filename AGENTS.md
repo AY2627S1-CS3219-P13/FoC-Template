@@ -1,6 +1,6 @@
-# Agent Working Guidance
+# Global Codex Guidance (~/.codex/AGENTS.md)
 
-Generic working agreements for agents in this repository. Keep project requirements, technology choices and deployment plans in separate project documents under `docs/`.
+Global working agreements for Codex CLI.
 
 ## Accuracy, recency, and sourcing (REQUIRED)
 
@@ -18,7 +18,7 @@ When a request depends on recency (e.g., "latest", "current", "today", "as of no
 
 ### Context7 MCP
 
-- Use Context7 when available for library/API docs; otherwise use official documentation.
+- Use Context7 when you need library/API docs.
 - If known, pin the library with slash syntax (e.g., `use library /supabase/supabase`).
 - Mention the target version.
 - Fetch minimal targeted docs; summarize (no large dumps).
@@ -58,8 +58,8 @@ When a request depends on recency (e.g., "latest", "current", "today", "as of no
 - Prefer container images to supply all tooling used by the project.
 - For code projects and dependencies: **use containers by default**.
 - If the repo has an existing container workflow (Dockerfile/compose/Makefile targets), follow it.
-- If implementation is requested and the repo has no container workflow, create a minimal one within the requested scope. Do not scaffold containers or application code for documentation-only tasks.
-- Keep repo-specific container details in the project documentation under `docs/`.
+- If the repo has no container workflow, create a minimal one.
+- Keep repo-specific container details in the repo’s `AGENTS.md`.
 
 ### Secrets and sensitive data
 
@@ -73,7 +73,7 @@ When a request depends on recency (e.g., "latest", "current", "today", "as of no
 - Start every task by determining:
   1. Goal + acceptance criteria.
   2. Constraints (time, safety, scope).
-  3. What must be inspected (files, commands, tests, docs). Read relevant project documentation under `docs/` before relying on assumptions.
+  3. What must be inspected (files, commands, tests, docs).
   4. Whether the request depends on **recency** (if yes, apply the "Accuracy, recency, and sourcing" rules).
   5. If requirements are ambiguous, ask targeted clarifying questions before making irreversible changes.
 
@@ -102,7 +102,7 @@ Update `.agent/CONTINUITY.md` only when there is a meaningful delta in:
   - a date in ISO timestamp (e.g., `2026-01-13T09:42Z`)
   - a provenance tag: `[USER]`, `[CODE]`, `[TOOL]`, `[ASSUMPTION]`
   - If unknown, write `UNCONFIRMED` (never guess). If something changes, supersede it explicitly (don't silently rewrite history).
-- Keep the file bounded, short and high-signal (anti-bloat).
+- Keep the file bounded, short and high-signal (anti-bloat). 
 - If sections begin to become bloated, compress older items into milestone (`[MILESTONE]`) bullets.
 
 ## Definition of done

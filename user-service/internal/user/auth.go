@@ -299,8 +299,8 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) error {
 	defer tx.Rollback(r.Context())
 	var u User
 	var hash string
-	var admin bool
-	err = tx.QueryRow(r.Context(), `SELECT id,email,display_name,password_hash,is_admin,verified_at FROM users WHERE email=$1 AND verified_at IS NOT NULL FOR UPDATE`, email).Scan(&u.ID, &u.Email, &u.DisplayName, &hash, &admin, &u.VerifiedAt)
+	var isAdmin bool
+	err = tx.QueryRow(r.Context(), `SELECT id,email,display_name,password_hash,is_admin,verified_at FROM users WHERE email=$1 AND verified_at IS NOT NULL FOR UPDATE`, email).Scan(&u.ID, &u.Email, &u.DisplayName, &hash, &isAdmin, &u.VerifiedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		checkPassword(a.dummyHash, body.Password)
 		return invalid
@@ -328,7 +328,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) error {
 	if err = tx.Commit(r.Context()); err != nil {
 		return err
 	}
-	u.Roles = roles(admin)
+	u.Roles = roles(isAdmin)
 	a.setCookie(w, token, expiry)
 	a.log.Info("session created", "userId", u.ID)
 	writeJSON(w, 200, map[string]any{"user": u, "expiresAt": expiry})
