@@ -27,9 +27,11 @@ Payment for purchased items, supplier menus/catalogues/inventory/checkout and li
 
 Update, 26 September 2026: the team confirmed TypeScript/Next.js, Go, server-side sessions, PostgreSQL, RabbitMQ, and EC2 with Docker Compose for Supplier work. The Supplier skeleton now implements its own Go/PostgreSQL service, existing User authentication integration, a minimal shared frontend and local reverse proxy. RabbitMQ remains unimplemented; Supplier's current HTTP workflow has no broker or Redis dependency. Cloud ingress and database hosting remain open.
 
+Update, 27 September 2026: the Supplier branch incorporates main's shared navy/orange frontend and Credit Service configuration. The account UI uses the real User API through the gateway; the shared Supplier screens still use labelled demo data while the Supplier API is completed and connected. See the [D2 implementation checkpoints](d2-supplier-progress.md).
+
 | Area | Current direction | Status |
 | --- | --- | --- |
-| Frontend | TypeScript and Next.js | Current team stack direction |
+| Frontend | TypeScript and Next.js | Local Supplier UI showcase uses sample data; login/logout and email verification use User Service; Supplier integration pending |
 | Backend | Go for the services | Current team stack direction; framework and versions open |
 | Application hosting | AWS EC2 | Confirmed team decision |
 | Account access | Own email/password registration and school-email verification | Current product direction; external provider login not requested |

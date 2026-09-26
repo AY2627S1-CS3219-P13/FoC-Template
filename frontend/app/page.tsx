@@ -1,161 +1,280 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
-import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import AuthDialog from "./auth-dialog";
+import SupplierDialog from "./supplier-dialog";
+import { UserApiError, userApi, type User } from "@/lib/user-api";
+import {
+  categories,
+  duplicateActiveName,
+  locations,
+  sampleSuppliers,
+  type Category,
+  type Location,
+  type Supplier,
+} from "@/lib/suppliers";
 
-type User = { id: string; displayName: string; roles: string[] };
-type Supplier = { id: string; name: string; category: string; locationId: string; description: string };
-type Location = { id: string; name: string };
-
-class APIError extends Error {
-  constructor(public status: number, message: string) { super(message); }
-}
-
-async function api<T>(path: string, method = "GET", body?: unknown): Promise<T> {
-  const response = await fetch(path, {
-    method, credentials: "include", cache: "no-store",
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const data = response.status === 204 ? undefined : await response.json().catch(() => undefined);
-  if (!response.ok) throw new APIError(response.status, data?.error?.message ?? "The service is unavailable. Please retry.");
-  return data as T;
-}
-
-async function catalogue() {
-  const [suppliers, locations] = await Promise.all([
-    api<{ suppliers: Supplier[] }>("/api/v1/suppliers"),
-    api<{ locations: Location[] }>("/api/v1/locations"),
-  ]);
-  return { suppliers: suppliers.suppliers, locations: locations.locations };
-}
+type View = "browse" | "manage";
 
 export default function Home() {
-  const [user, setUser] = useState<User | null>(null);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [locations, setLocations] = useState<Location[]>([]);
-  const [busy, setBusy] = useState(true);
-  const [error, setError] = useState("");
+  const [suppliers, setSuppliers] = useState<Supplier[]>(sampleSuppliers);
+  const [view, setView] = useState<View>("browse");
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<Category | "All">("All");
+  const [location, setLocation] = useState<Location | "All">("All");
+  const [selectedId, setSelectedId] = useState<string | null>(sampleSuppliers[0]?.id ?? null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
   const [notice, setNotice] = useState("");
+  const [user, setUser] = useState<User | null>(null);
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authNotice, setAuthNotice] = useState("");
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
-    let mounted = true;
-    async function restore() {
-      try {
-        const { user } = await api<{ user: User }>("/api/v1/users/me");
-        const data = await catalogue();
-        if (mounted) { setUser(user); setSuppliers(data.suppliers); setLocations(data.locations); }
-      } catch (err) {
-        if (mounted && !(err instanceof APIError && err.status === 401)) setError("Could not connect. Refresh to try again.");
-      } finally { if (mounted) setBusy(false); }
-    }
-    void restore();
-    return () => { mounted = false; };
+    userApi.me()
+      .then(({ user }) => setUser(user))
+      .catch((error: unknown) => {
+        if (!(error instanceof UserApiError && error.status === 401)) {
+          setAuthNotice("Could not check your session. Check that the User Service is running.");
+        }
+      })
+      .finally(() => setCheckingSession(false));
   }, []);
 
-  function failed(err: unknown) {
-    if (err instanceof APIError && err.status === 401) { setUser(null); setSuppliers([]); setLocations([]); }
-    setError(err instanceof Error ? err.message : "The request failed. Please retry.");
-  }
-
-  async function login(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const values = new FormData(form);
-    setBusy(true); setError(""); setNotice("");
-    try {
-      const { user } = await api<{ user: User }>("/api/v1/auth/login", "POST", {
-        email: values.get("email"), password: values.get("password"),
-      });
-      form.reset();
-      const data = await catalogue();
-      setUser(user); setSuppliers(data.suppliers); setLocations(data.locations);
-    } catch (err) { failed(err); }
-    finally { setBusy(false); }
-  }
-
   async function logout() {
-    setBusy(true); setError(""); setNotice("");
+    setLoggingOut(true);
+    setAuthNotice("");
     try {
-      await api("/api/v1/auth/logout", "POST");
-      setUser(null); setSuppliers([]); setLocations([]);
-    } catch (err) { failed(err); }
-    finally { setBusy(false); }
+      await userApi.logout();
+      setUser(null);
+      setAuthNotice("You are logged out.");
+    } catch (error) {
+      setAuthNotice(error instanceof UserApiError ? error.message : "Could not reach the User Service. Please retry.");
+    } finally {
+      setLoggingOut(false);
+    }
   }
 
-  async function refresh() {
-    setBusy(true); setError("");
-    try {
-      const data = await catalogue();
-      setSuppliers(data.suppliers); setLocations(data.locations);
-    } catch (err) { failed(err); }
-    finally { setBusy(false); }
+  const visible = useMemo(() => {
+    const search = query.trim().toLocaleLowerCase();
+    return suppliers.filter((supplier) => {
+      if (view === "browse" && !supplier.active) return false;
+      if (category !== "All" && supplier.category !== category) return false;
+      if (location !== "All" && supplier.location !== location) return false;
+      return (
+        !search ||
+        `${supplier.name} ${supplier.description} ${supplier.location}`.toLocaleLowerCase().includes(search)
+      );
+    });
+  }, [suppliers, view, query, category, location]);
+
+  const selected = visible.find((supplier) => supplier.id === selectedId) ?? visible[0] ?? null;
+  const activeCount = suppliers.filter((supplier) => supplier.active).length;
+
+  function openCreate() {
+    setEditingId(null);
+    setFormOpen(true);
+    setNotice("");
   }
 
-  async function create(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const values = new FormData(form);
-    setBusy(true); setError(""); setNotice("");
-    try {
-      await api("/api/v1/suppliers", "POST", Object.fromEntries(values));
-      form.reset();
-      setNotice("Supplier added.");
-      const data = await catalogue();
-      setSuppliers(data.suppliers); setLocations(data.locations);
-    } catch (err) { failed(err); }
-    finally { setBusy(false); }
+  function openEdit(supplier: Supplier) {
+    setEditingId(supplier.id);
+    setFormOpen(true);
+    setNotice("");
   }
 
-  async function deactivate(id: string) {
-    setBusy(true); setError(""); setNotice("");
-    try {
-      await api(`/api/v1/suppliers/${id}`, "PATCH", { active: false });
-      setSuppliers(items => items.filter(item => item.id !== id));
-      setNotice("Supplier deactivated.");
-    } catch (err) { failed(err); }
-    finally { setBusy(false); }
+  function closeForm() {
+    setFormOpen(false);
+    setEditingId(null);
   }
 
-  const admin = user?.roles.includes("admin");
+  function saveSupplier(record: Supplier) {
+    if (editingId) {
+      setSuppliers((items) => items.map((item) => (item.id === record.id ? record : item)));
+      setNotice("Supplier updated in this demo session.");
+    } else {
+      setSuppliers((items) => [record, ...items]);
+      setNotice("Supplier added to this demo session.");
+    }
+    setSelectedId(record.id);
+  }
+
+  function toggleActive(supplier: Supplier) {
+    if (
+      !supplier.active &&
+      duplicateActiveName(suppliers, supplier.name, supplier.location, supplier.id)
+    ) {
+      setNotice("Rename this supplier before reactivating it; an active supplier uses that name and location.");
+      return;
+    }
+    setSuppliers((items) =>
+      items.map((item) => (item.id === supplier.id ? { ...item, active: !item.active } : item)),
+    );
+    setNotice(supplier.active ? "Supplier deactivated in this demo session." : "Supplier reactivated in this demo session.");
+  }
+
   return (
-    <main>
-      <header>
-        <Link className="brand" href="/">Friend on Campus<span>Campus errands, together.</span></Link>
-        {user && <div className="account"><span>{user.displayName}{admin ? " · Admin" : ""}</span><button disabled={busy} onClick={logout}>Log out</button></div>}
+    <div className="site-shell">
+      <header className="topbar">
+        <div className="brand" aria-label="Friend on Campus">
+          <span className="brand-mark">F</span>
+          <span>
+            <strong>Friend on Campus</strong>
+            <small>Supplier showcase</small>
+          </span>
+        </div>
+        <div className="account-actions">
+          {checkingSession ? <span className="account-label">Checking session…</span> : user ? (
+            <>
+              <span className="account-label" title={user.email}>{user.displayName} · {user.roles.includes("admin") ? "Admin" : "User"}</span>
+              <button type="button" className="secondary-button" disabled={loggingOut} onClick={logout}>{loggingOut ? "Logging out…" : "Log out"}</button>
+            </>
+          ) : <>
+            <button type="button" className="secondary-button" onClick={() => { setAuthNotice(""); setAuthMode("login"); setAuthOpen(true); }}>Log in</button>
+            <button type="button" className="primary-button" onClick={() => { setAuthNotice(""); setAuthMode("register"); setAuthOpen(true); }}>Sign up</button>
+          </>}
+        </div>
       </header>
-      <section className="intro"><p className="eyebrow">PICKUP LOCATIONS</p><h1>Your campus, a little closer.</h1><p>Find stores and facilities for your next campus errand.</p></section>
-      {error && <p role="alert" className="message error">{error}</p>}
-      {notice && <p role="status" className="message">{notice}</p>}
-      {!user ? (
-        <section className="panel login">
-          <h2>Log in to browse</h2><p>Use your verified Friend on Campus account.</p>
-          <form onSubmit={login}><fieldset disabled={busy}>
-            <label>School email<input name="email" type="email" autoComplete="username" required /></label>
-            <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>
-            <button className="primary" type="submit">{busy ? "Connecting…" : "Log in"}</button>
-          </fieldset></form>
+
+      <main>
+        <section className="hero">
+          <div>
+            <p className="eyebrow">Explore the campus</p>
+            <h1>Find the right stop for your next errand.</h1>
+            <p className="hero-copy">
+              Browse active pickup points, explore their details, and preview how campus suppliers will be managed.
+            </p>
+          </div>
+          <div className="hero-stats" aria-label="Catalogue summary">
+            <div><strong>{activeCount}</strong><span>Active suppliers</span></div>
+            <div><strong>{categories.length}</strong><span>Categories</span></div>
+            <div><strong>{locations.length}</strong><span>Campus areas</span></div>
+          </div>
         </section>
-      ) : (
-        <>
-          {admin && <section className="panel"><h2>Add a supplier</h2><form onSubmit={create}><fieldset disabled={busy} className="create-grid">
-            <label>Name<input name="name" maxLength={100} required /></label>
-            <label>Category<select name="category">{["food", "printing", "retail", "services", "other"].map(category => <option key={category}>{category}</option>)}</select></label>
-            <label>Location<select name="locationId" required>{locations.map(location => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label>
-            <label>Pickup details<input name="description" maxLength={500} placeholder="Optional floor or directions" /></label>
-            <button className="primary" type="submit">Add supplier</button>
-          </fieldset></form></section>}
-          <div className="list-title"><h2>Active suppliers <span>({suppliers.length})</span></h2><button onClick={refresh} disabled={busy}>{busy ? "Loading…" : "Refresh"}</button></div>
-          {suppliers.length === 0 && <p className="panel">No active suppliers are available yet.</p>}
-          <div className="cards">{suppliers.map(supplier => <article className="panel" key={supplier.id}>
-            <span className="category">{supplier.category}</span><h3>{supplier.name}</h3>
-            <p className="location">{locations.find(location => location.id === supplier.locationId)?.name ?? supplier.locationId}</p>
-            <p>{supplier.description}</p>
-            {admin && <button className="subtle" disabled={busy} onClick={() => deactivate(supplier.id)}>Deactivate</button>}
-          </article>)}</div>
-        </>
-      )}
-      <footer>Friend on Campus · NUS</footer>
-    </main>
+
+        <div className="demo-note" role="note">
+          <span className="note-icon" aria-hidden="true">i</span>
+          <p>
+            <strong>Showcase data.</strong> This catalogue runs in your browser. Changes reset on refresh and are not saved to the Supplier Service yet.
+          </p>
+        </div>
+        {authNotice && <p className="notice auth-notice" role="status">{authNotice}</p>}
+
+        <section className="workspace" aria-label="Supplier catalogue">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Supplier directory</p>
+              <h2>{view === "browse" ? "Browse suppliers" : "Manage suppliers"}</h2>
+            </div>
+            <div className="view-tabs" role="group" aria-label="Catalogue view">
+              <button type="button" className={view === "browse" ? "active" : ""} onClick={() => { setView("browse"); closeForm(); setNotice(""); }}>
+                Browse
+              </button>
+              <button type="button" className={view === "manage" ? "active" : ""} onClick={() => { setView("manage"); setNotice(""); }}>
+                Manage demo
+              </button>
+            </div>
+          </div>
+
+          <div className="controls">
+            <label className="search-field">
+              <span>Search</span>
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, description or location" />
+            </label>
+            <label>
+              <span>Category</span>
+              <select value={category} onChange={(event) => setCategory(event.target.value as Category | "All")}>
+                <option value="All">All categories</option>
+                {categories.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>Location</span>
+              <select value={location} onChange={(event) => setLocation(event.target.value as Location | "All")}>
+                <option value="All">All locations</option>
+                {locations.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </label>
+            {view === "manage" && <button type="button" className="primary-button add-button" onClick={openCreate}>+ Add supplier</button>}
+          </div>
+
+          {notice && <p className="notice" role="status">{notice}</p>}
+
+          <div className="content-grid">
+            <div className="supplier-list">
+              <div className="list-heading">
+                <span>{visible.length} {visible.length === 1 ? "result" : "results"}</span>
+                <span>{view === "browse" ? "Active only" : "All statuses"}</span>
+              </div>
+              {visible.length === 0 ? (
+                <div className="empty-state">
+                  <strong>No suppliers found</strong>
+                  <p>Try a different search or filter.</p>
+                  <button type="button" className="text-button" onClick={() => { setQuery(""); setCategory("All"); setLocation("All"); }}>Clear filters</button>
+                </div>
+              ) : visible.map((supplier) => (
+                <button
+                  type="button"
+                  key={supplier.id}
+                  className={`supplier-card ${selected?.id === supplier.id ? "selected" : ""}`}
+                  onClick={() => setSelectedId(supplier.id)}
+                  aria-pressed={selected?.id === supplier.id}
+                >
+                  <span className="supplier-icon" aria-hidden="true">{supplier.name.slice(0, 1).toUpperCase()}</span>
+                  <span className="supplier-card-body">
+                    <span className="supplier-card-title">{supplier.name}</span>
+                    <span className="supplier-card-meta">{supplier.category} · {supplier.location}</span>
+                    {view === "manage" && <span className={`mini-status ${supplier.active ? "is-active" : "is-inactive"}`}>{supplier.active ? "Active" : "Inactive"}</span>}
+                  </span>
+                  <span className="card-arrow" aria-hidden="true">→</span>
+                </button>
+              ))}
+            </div>
+
+            <aside className="detail-panel" aria-label="Supplier details">
+              {selected ? (
+                <>
+                  <div className="detail-head">
+                    <span className="detail-icon" aria-hidden="true">{selected.name.slice(0, 1).toUpperCase()}</span>
+                    <span className={`status-pill ${selected.active ? "is-active" : "is-inactive"}`}>{selected.active ? "Active" : "Inactive"}</span>
+                  </div>
+                  <p className="eyebrow">Supplier details</p>
+                  <h3>{selected.name}</h3>
+                  <p className="detail-description">{selected.description || "[ not provided ]"}</p>
+                  <dl className="detail-facts">
+                    <div><dt>Category</dt><dd>{selected.category}</dd></div>
+                    <div><dt>Location</dt><dd>{selected.location}</dd></div>
+                    <div><dt>Opening hours</dt><dd>{selected.openingHours || "[ not provided ]"}</dd></div>
+                    {view === "manage" && <>
+                      <div><dt>Supplier ID</dt><dd>{selected.id}</dd></div>
+                      <div><dt>Created at</dt><dd>{selected.createdAt.slice(0, 16).replace("T", " ")} UTC</dd></div>
+                    </>}
+                  </dl>
+                  {view === "manage" && (
+                    <div className="detail-actions">
+                      <button type="button" className="secondary-button" onClick={() => openEdit(selected)}>Edit details</button>
+                      <button type="button" className="text-button" onClick={() => toggleActive(selected)}>
+                        {selected.active ? "Deactivate" : "Reactivate"}
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="detail-empty">Select a supplier to view its details.</div>
+              )}
+            </aside>
+          </div>
+        </section>
+      </main>
+
+      <footer className="footer">Friend on Campus · Supplier UI preview</footer>
+
+      {authOpen && <AuthDialog initialMode={authMode} onClose={() => setAuthOpen(false)} onLogin={(nextUser) => { setUser(nextUser); setAuthOpen(false); setAuthNotice(`Logged in as ${nextUser.displayName}.`); }} />}
+
+      {formOpen && view === "manage" && <SupplierDialog suppliers={suppliers} supplier={editingId ? suppliers.find((item) => item.id === editingId) : undefined} onSave={saveSupplier} onClose={closeForm} />}
+    </div>
   );
 }

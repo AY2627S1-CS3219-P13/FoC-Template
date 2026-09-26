@@ -1,6 +1,6 @@
 # Supplier API (minimal skeleton)
 
-Public base: `http://localhost:3000` through the shared gateway. Direct development base: `http://localhost:8082` (or `SUPPLIER_HTTP_PORT`). JSON bodies; UUID supplier IDs; RFC3339 timestamps. Browser requests use `credentials: "include"`. Mutations require the exact configured `Origin` and `Content-Type: application/json`; local Origin is `http://localhost:3000`.
+Public base: `http://localhost:3000` through the shared gateway. Direct development base: `http://localhost:8083` (or `SUPPLIER_HTTP_PORT`; Credit uses 8082). JSON bodies; UUID supplier IDs; RFC3339 timestamps. Browser requests use `credentials: "include"`. Mutations require the exact configured `Origin` and `Content-Type: application/json`; local Origin is `http://localhost:3000`.
 
 | Method and path | Body | Success | Permission |
 | --- | --- | --- | --- |

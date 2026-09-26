@@ -1,5 +1,14 @@
 name: foc
 
+# Credit Service keeps its own compose file; its secrets come from
+# credit-service/.env (sh credit-service/scripts/init-env.sh), and
+# USER_INTERNAL_TOKEN from this directory's .env.
+include:
+  - path: credit-service/compose.yaml
+    env_file:
+      - .env
+      - credit-service/.env
+
 services:
   user-db:
     image: postgres:18-bookworm
@@ -86,7 +95,7 @@ services:
       USER_APP_ORIGIN: ${USER_APP_ORIGIN:-http://localhost:3000}
       USER_COOKIE_SECURE: ${USER_COOKIE_SECURE:-false}
     ports:
-      - "127.0.0.1:${SUPPLIER_HTTP_PORT:-8082}:8080"
+      - "127.0.0.1:${SUPPLIER_HTTP_PORT:-8083}:8080"
     depends_on:
       supplier-db:
         condition: service_healthy
@@ -98,7 +107,10 @@ services:
     cap_drop: [ALL]
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_USER_API_URL: ${NEXT_PUBLIC_USER_API_URL:-}
     read_only: true
     tmpfs: [/tmp]
     security_opt:

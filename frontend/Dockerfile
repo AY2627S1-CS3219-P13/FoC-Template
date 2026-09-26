@@ -1,6 +1,7 @@
 FROM node:22-bookworm-slim AS development
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+ARG NEXT_PUBLIC_USER_API_URL=""
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .

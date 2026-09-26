@@ -9,6 +9,7 @@ Use Docker with Compose. On Windows, run these commands in WSL if Docker is inst
 ```sh
 cd /mnt/c/Users/cms07/CS3219/FoC-Template # adjust for your checkout
 sh user-service/scripts/init-env.sh
+sh credit-service/scripts/init-env.sh
 docker compose up --build -d gateway
 ```
 
@@ -31,15 +32,15 @@ flowchart LR
 | --- | --- |
 | `http://localhost:3000` | Shared frontend and public APIs |
 | `http://localhost:8025` | Local Mailpit verification inbox |
-| `http://localhost:8082/readyz` | Direct Supplier readiness check |
+| `http://localhost:8083/readyz` | Direct Supplier readiness check |
 | `http://user-service:8081` | Private authentication API inside Compose |
 | `supplier-db:5432` | Supplier database; no published host port |
 
-Set `USER_HTTP_PORT` or `SUPPLIER_HTTP_PORT` in `.env` if direct API ports 8080/8082 are occupied. This does not change the gateway URL or internal service ports. Supplier and User have separate database users, passwords and named volumes. Containers can be stopped with `docker compose stop`; volumes preserve data. Avoid `down -v` unless you intend to erase local data.
+Set `USER_HTTP_PORT` or `SUPPLIER_HTTP_PORT` in `.env` if direct API ports 8080/8083 are occupied. Credit uses 8082, so existing Supplier checkouts must change their old `SUPPLIER_HTTP_PORT=8082` setting to 8083. This does not change the gateway URL or internal service ports. Supplier and User have separate database users, passwords and named volumes. Containers can be stopped with `docker compose stop`; volumes preserve data. Avoid `down -v` unless you intend to erase local data.
 
-## Accounts and minimal UI
+## Accounts and current UI
 
-The UI supports login/logout, active supplier browsing, and admin create/deactivate. Use an account registered and verified through the existing [User API](../user-service/API.md). There is no new identity system or registration screen. To create an account for the UI, follow User's API registration/verification flow (including the returned registration token and code from Mailpit), then log in at port 3000.
+The shared navy/orange UI now includes signup, email verification, login and logout against the existing [User API](../user-service/API.md). Read local verification codes in Mailpit at port 8025. Its Supplier screens currently show explicitly labelled browser-only demo data; the earlier minimal live Supplier page has been replaced by the shared UI as an integration checkpoint. Supplier API functionality and database records remain available independently. Completing the backend contract and connecting this UI are the next [D2 steps](../docs/d2-supplier-progress.md).
 
 To make your verified account an admin:
 
@@ -47,7 +48,7 @@ To make your verified account an admin:
 docker compose exec user-service user-service promote-admin your-email@u.nus.edu
 ```
 
-Log in again after promotion. The UI's admin controls are only a convenience; Supplier enforces permissions independently on every request.
+Log in again after promotion. Supplier enforces permissions independently on every API request. The UI's current Manage demo is not permission-controlled and must not be used as evidence of backend authorization.
 
 ## Implemented boundaries
 
@@ -77,6 +78,6 @@ ESLint 9 is pinned because the React/import plugins bundled with the selected Ne
 
 ## Explicitly deferred
 
-Supplier profile editing beyond active status, filtering/search/pagination (list currently returns at most 100 active records), opening-hours/image/coordinate fields, image serving, a registration UI, Order integration, Redis caching, RabbitMQ events and load testing remain future work. The seed CSV retains the additional source metadata for that work. No claim is made that the full FR2 or D2 scope is complete.
+Supplier profile editing beyond active status, filtering/search/pagination (list currently returns at most 100 active records), opening-hours/image/coordinate fields, connecting the shared Supplier UI to live data, image serving, Order integration, Redis caching, RabbitMQ events and load testing remain future work. The seed CSV retains the additional source metadata for that work. No claim is made that the full FR2 or D2 scope is complete.
 
 This Compose setup binds public ports to loopback for local use. EC2 deployment still needs HTTPS ingress, secure cookies, deployment secrets, a real email provider, backup policy and appropriate network access. Services can communicate by Compose DNS on one host. The gateway re-resolves those names when containers are replaced. User's existing peer-IP rate limit sees gateway traffic as one source; a production trusted-proxy/rate-limit policy remains open.

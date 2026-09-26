@@ -1,0 +1,68 @@
+name: foc-credit
+
+services:
+  credit-db:
+    image: postgres:18-bookworm
+    environment:
+      POSTGRES_USER: foc_credit
+      POSTGRES_DB: foc_credit
+      POSTGRES_PASSWORD: ${CREDIT_POSTGRES_PASSWORD:?Run sh credit-service/scripts/init-env.sh}
+    volumes:
+      - credit-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foc_credit -d foc_credit"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  credit-service:
+    build: .
+    environment:
+      CREDIT_DATABASE_URL: postgres://foc_credit:${CREDIT_POSTGRES_PASSWORD}@credit-db:5432/foc_credit?sslmode=disable
+      # FR4.1.1 leaves this as X; 100 is the brief's figure, not yet confirmed by the team.
+      CREDIT_INITIAL_CREDITS: "100"
+      CREDIT_APP_ORIGIN: http://localhost:3000
+      CREDIT_SESSION_COOKIE: foc_session
+      CREDIT_USER_SERVICE_URL: http://user-service:8081
+      CREDIT_INTERNAL_TOKEN: ${CREDIT_INTERNAL_TOKEN:?Run sh credit-service/scripts/init-env.sh}
+      # Run from the root compose, User Service's own token is used; standalone, the one in credit-service/.env.
+      CREDIT_USER_INTERNAL_TOKEN: ${USER_INTERNAL_TOKEN:-${CREDIT_USER_INTERNAL_TOKEN:?Run sh credit-service/scripts/init-env.sh}}
+    ports:
+      - "127.0.0.1:8082:8080"
+    depends_on:
+      credit-db:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  credit-test-db:
+    image: postgres:18-bookworm
+    profiles: [test]
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: credit_service_test
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d credit_service_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  credit-tests:
+    profiles: [test]
+    build:
+      context: .
+      target: development
+    environment:
+      CREDIT_TEST_DATABASE_URL: postgres://test:test@credit-test-db:5432/credit_service_test?sslmode=disable
+    depends_on:
+      credit-test-db:
+        condition: service_healthy
+    command: ["sh", "scripts/check.sh"]
+
+volumes:
+  credit-data:
