@@ -26,6 +26,8 @@ withdrawn, or exchanged for money, and only circulate within the platform.
 
 User Service is available for local development. See [setup and design](user-service/README.md) and the [API guide for teammates](user-service/API.md).
 
+Credit Service is also available for local development. See its [setup and design](credit-service/README.md) and the [API reference](credit-service/API.md), which documents every credit endpoint.
+
 The [frontend showcase](frontend/README.md) is a separate Next.js app with real User Service login/logout and a local Supplier catalogue demo. The catalogue uses sample data while Supplier Service is being developed.
 
 This repository follows a **one-service-per-folder** structure: each

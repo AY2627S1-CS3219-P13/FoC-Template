@@ -4,10 +4,11 @@ A small TypeScript/Next.js frontend for trying the Supplier catalogue while the 
 
 ## Run it
 
-From the repository root, with Docker Desktop running, create `.env` once if it is missing:
+From the repository root, with Docker Desktop running, create the local `.env` files once if they are missing:
 
 ```sh
 sh user-service/scripts/init-env.sh
+sh credit-service/scripts/init-env.sh
 ```
 
 Then start the frontend and its local dependencies:
