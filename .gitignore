@@ -2,6 +2,9 @@
 dist/
 build/
 out/
+node_modules/
+.next/
+*.tsbuildinfo
 
 # Environment / secrets
 .env

@@ -26,12 +26,15 @@ withdrawn, or exchanged for money, and only circulate within the platform.
 
 User Service is available for local development. See [setup and design](user-service/README.md) and the [API guide for teammates](user-service/API.md).
 
+The [frontend showcase](frontend/README.md) is a separate Next.js app with real User Service login/logout and a local Supplier catalogue demo. The catalogue uses sample data while Supplier Service is being developed.
+
 This repository follows a **one-service-per-folder** structure: each
 microservice (`user-service/`, `supplier-service/`, `order-service/`,
 `credit-service/`) lives in its own top-level folder.
 
 ```text
 .
+├── frontend/
 ├── user-service/
 ├── supplier-service/
 ├── order-service/
