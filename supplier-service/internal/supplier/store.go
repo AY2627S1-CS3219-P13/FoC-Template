@@ -52,13 +52,15 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 }
 
 type Supplier struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Category    string    `json:"category"`
-	LocationID  string    `json:"locationId"`
-	Description string    `json:"description"`
-	Active      bool      `json:"active"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Category     string    `json:"category"`
+	LocationID   string    `json:"locationId"`
+	Description  string    `json:"description"`
+	OpeningHours string    `json:"openingHours"`
+	Active       bool      `json:"active"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 type Location struct {
@@ -66,12 +68,12 @@ type Location struct {
 	Name string `json:"name"`
 }
 
-const supplierColumns = "id,name,category,location_id,description,active,created_at"
+const supplierColumns = "id,name,category,location_id,description,opening_hours,active,created_at,updated_at"
 
 type scanner interface{ Scan(...any) error }
 
 func scanSupplier(row scanner) (Supplier, error) {
 	var s Supplier
-	err := row.Scan(&s.ID, &s.Name, &s.Category, &s.LocationID, &s.Description, &s.Active, &s.CreatedAt)
+	err := row.Scan(&s.ID, &s.Name, &s.Category, &s.LocationID, &s.Description, &s.OpeningHours, &s.Active, &s.CreatedAt, &s.UpdatedAt)
 	return s, err
 }

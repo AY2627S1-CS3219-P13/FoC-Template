@@ -85,7 +85,8 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/suppliers", a.endpoint(a.protected(false, a.list)))
 	m.HandleFunc("GET /api/v1/suppliers/{id}", a.endpoint(a.protected(false, a.get)))
 	m.HandleFunc("POST /api/v1/suppliers", a.endpoint(a.protected(true, a.create)))
-	m.HandleFunc("PATCH /api/v1/suppliers/{id}", a.endpoint(a.protected(true, a.setActive)))
+	m.HandleFunc("PATCH /api/v1/suppliers/{id}", a.endpoint(a.protected(true, a.update)))
+	m.HandleFunc("DELETE /api/v1/suppliers/{id}", a.endpoint(a.protected(true, a.remove)))
 	m.HandleFunc("GET /api/v1/locations", a.endpoint(a.protected(false, a.locations)))
 	return a.middleware(m)
 }
@@ -100,7 +101,7 @@ func (a *App) middleware(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 		}
 		if (origin != "" && origin != a.cfg.Origin) || (r.Method != "GET" && r.Method != "HEAD" && origin != a.cfg.Origin) {
 			a.endpoint(func(http.ResponseWriter, *http.Request) error {

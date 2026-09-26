@@ -100,7 +100,7 @@ func status(t *testing.T, w *httptest.ResponseRecorder, want int) {
 
 func TestSupplierLifecycle(t *testing.T) {
 	a := testApp(t)
-	w := request(t, a, "GET", "/api/v1/suppliers", "user", nil)
+	w := request(t, a, "GET", "/api/v1/suppliers?pageSize=100", "user", nil)
 	status(t, w, 200)
 	var list struct {
 		Suppliers []Supplier `json:"suppliers"`
@@ -125,11 +125,11 @@ func TestSupplierLifecycle(t *testing.T) {
 	status(t, request(t, a, "POST", "/api/v1/suppliers", "admin", body), 409)
 	status(t, request(t, a, "PATCH", "/api/v1/suppliers/"+id, "user", map[string]bool{"active": false}), 403)
 	status(t, request(t, a, "PATCH", "/api/v1/suppliers/"+id, "admin", map[string]bool{"active": false}), 200)
-	status(t, request(t, a, "GET", "/api/v1/suppliers/"+id, "user", nil), 404)
+	status(t, request(t, a, "GET", "/api/v1/suppliers/"+id, "user", nil), 200)
 	if err := Migrate(context.Background(), a.db); err != nil {
 		t.Fatal(err)
 	}
-	status(t, request(t, a, "GET", "/api/v1/suppliers/"+id, "user", nil), 404)
+	status(t, request(t, a, "GET", "/api/v1/suppliers/"+id, "user", nil), 200)
 	status(t, request(t, a, "POST", "/api/v1/suppliers", "admin", body), 201)
 	status(t, request(t, a, "PATCH", "/api/v1/suppliers/"+id, "admin", map[string]bool{"active": true}), 409)
 }

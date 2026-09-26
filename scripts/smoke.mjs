@@ -67,7 +67,8 @@ if (process.argv[2] === "setup") {
   }, cookie, 201)).json();
   await call("/api/v1/suppliers/" + created.supplier.id, "GET", undefined, cookie);
   await call("/api/v1/suppliers/" + created.supplier.id, "PATCH", { active: false }, cookie);
-  await call("/api/v1/suppliers/" + created.supplier.id, "GET", undefined, cookie, 404);
+  const inactive = await (await call("/api/v1/suppliers/" + created.supplier.id, "GET", undefined, cookie)).json();
+  assert.equal(inactive.supplier.active, false);
   await call("/internal/v1/sessions/validate", "POST", { sessionToken: "invalid" }, undefined, 404);
   const noOrigin = await fetch(base + "/api/v1/suppliers", { method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: "{}" });
   assert.equal(noOrigin.status, 403, "Missing Origin must be rejected");

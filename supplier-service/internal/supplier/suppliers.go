@@ -13,26 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-func (a *App) list(w http.ResponseWriter, r *http.Request) error {
-	rows, err := a.db.Query(r.Context(), "SELECT "+supplierColumns+" FROM suppliers WHERE active ORDER BY lower(name),id LIMIT 100")
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	items := []Supplier{}
-	for rows.Next() {
-		s, err := scanSupplier(rows)
-		if err != nil {
-			return err
-		}
-		items = append(items, s)
-	}
-	if err = rows.Err(); err != nil {
-		return err
-	}
-	writeJSON(w, 200, map[string]any{"suppliers": items})
-	return nil
-}
+var categories = []string{"food", "printing", "retail", "services", "other"}
 
 func supplierID(r *http.Request) (string, error) {
 	id := r.PathValue("id")
@@ -48,9 +29,9 @@ func (a *App) get(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	s, err := scanSupplier(a.db.QueryRow(r.Context(), "SELECT "+supplierColumns+" FROM suppliers WHERE id=$1 AND active", id))
+	s, err := scanSupplier(a.db.QueryRow(r.Context(), "SELECT "+supplierColumns+" FROM suppliers WHERE id=$1 AND deleted_at IS NULL", id))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return problem(404, "supplier_not_found", "No active supplier matches that ID.")
+		return supplierNotFound()
 	}
 	if err != nil {
 		return err
@@ -59,39 +40,129 @@ func (a *App) get(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func (a *App) create(w http.ResponseWriter, r *http.Request) error {
-	var body struct {
-		Name        string `json:"name"`
-		Category    string `json:"category"`
-		LocationID  string `json:"locationId"`
-		Description string `json:"description"`
+// Null is treated as omitted; an empty PATCH is rejected.
+type supplierWrite struct {
+	Name         *string `json:"name"`
+	Category     *string `json:"category"`
+	LocationID   *string `json:"locationId"`
+	Description  *string `json:"description"`
+	OpeningHours *string `json:"openingHours"`
+	Active       *bool   `json:"active"`
+}
+
+func (b *supplierWrite) validate(create bool) error {
+	if create && (b.Name == nil || b.Category == nil || b.LocationID == nil) {
+		return problem(400, "invalid_supplier", "Name, category and location are required.")
 	}
+	if b.Name == nil && b.Category == nil && b.LocationID == nil && b.Description == nil && b.OpeningHours == nil && b.Active == nil {
+		return problem(400, "invalid_supplier", "Provide at least one editable supplier field.")
+	}
+	for _, field := range []struct {
+		value     *string
+		min, max  int
+		multiline bool
+	}{
+		{b.Name, 1, 100, false}, {b.LocationID, 1, 100, false},
+		{b.Description, 0, 500, true}, {b.OpeningHours, 0, 200, true},
+	} {
+		if field.value == nil {
+			continue
+		}
+		*field.value = strings.TrimSpace(strings.ReplaceAll(*field.value, "\r\n", "\n"))
+		if !validText(*field.value, field.min, field.max, field.multiline) {
+			return problem(400, "invalid_supplier", "Use a name of 1–100 characters, description up to 500 and opening hours up to 200. Choose a campus location.")
+		}
+	}
+	if b.Category != nil && !slices.Contains(categories, *b.Category) {
+		return problem(400, "invalid_category", "Choose food, printing, retail, services or other.")
+	}
+	return nil
+}
+
+func (a *App) create(w http.ResponseWriter, r *http.Request) error {
+	var body supplierWrite
 	if err := readJSON(w, r, &body); err != nil {
 		return err
 	}
-	body.Name = strings.TrimSpace(body.Name)
-	body.Description = strings.TrimSpace(body.Description)
-	if !validText(body.Name, 1, 100) || !validText(body.Description, 0, 500) || !slices.Contains([]string{"food", "printing", "retail", "services", "other"}, body.Category) {
-		return problem(400, "invalid_supplier", "Use a name of 1–100 characters, an allowed category and a description of at most 500 characters.")
+	if err := body.validate(true); err != nil {
+		return err
 	}
-	s, err := scanSupplier(a.db.QueryRow(r.Context(), "INSERT INTO suppliers(name,category,location_id,description) VALUES($1,$2,$3,$4) RETURNING "+supplierColumns, body.Name, body.Category, body.LocationID, body.Description))
+	s, err := scanSupplier(a.db.QueryRow(r.Context(), `INSERT INTO suppliers(name,category,location_id,description,opening_hours,active)
+        VALUES($1,$2,$3,COALESCE($4,''),COALESCE($5,''),COALESCE($6,true)) RETURNING `+supplierColumns,
+		body.Name, body.Category, body.LocationID, body.Description, body.OpeningHours, body.Active))
 	if err != nil {
 		return storeError(err)
 	}
-	identity := r.Context().Value(identityKey{}).(Identity)
-	a.log.Info("supplier created", "supplierId", s.ID, "actorId", identity.UserID)
+	a.audit(r, "supplier created", s.ID)
 	w.Header().Set("Location", "/api/v1/suppliers/"+s.ID)
 	writeJSON(w, 201, map[string]any{"supplier": s})
 	return nil
 }
 
-func validText(value string, min, max int) bool {
+func (a *App) update(w http.ResponseWriter, r *http.Request) error {
+	id, err := supplierID(r)
+	if err != nil {
+		return err
+	}
+	var body supplierWrite
+	if err = readJSON(w, r, &body); err != nil {
+		return err
+	}
+	if err = body.validate(false); err != nil {
+		return err
+	}
+	// Apply the patch atomically; PostgreSQL enforces concurrent uniqueness.
+	s, err := scanSupplier(a.db.QueryRow(r.Context(), `UPDATE suppliers SET
+        name=COALESCE($2,name),category=COALESCE($3,category),location_id=COALESCE($4,location_id),
+        description=COALESCE($5,description),opening_hours=COALESCE($6,opening_hours),
+        active=COALESCE($7,active),updated_at=now()
+        WHERE id=$1 AND deleted_at IS NULL RETURNING `+supplierColumns,
+		id, body.Name, body.Category, body.LocationID, body.Description, body.OpeningHours, body.Active))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return supplierNotFound()
+	}
+	if err != nil {
+		return storeError(err)
+	}
+	a.audit(r, "supplier updated", s.ID)
+	writeJSON(w, 200, map[string]any{"supplier": s})
+	return nil
+}
+
+func (a *App) remove(w http.ResponseWriter, r *http.Request) error {
+	id, err := supplierID(r)
+	if err != nil {
+		return err
+	}
+	result, err := a.db.Exec(r.Context(), `UPDATE suppliers SET deleted_at=now(),active=false,updated_at=now()
+        WHERE id=$1 AND deleted_at IS NULL`, id)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return supplierNotFound()
+	}
+	a.audit(r, "supplier deleted", id)
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func supplierNotFound() error {
+	return problem(404, "supplier_not_found", "No supplier matches that ID.")
+}
+
+func (a *App) audit(r *http.Request, message, id string) {
+	identity := r.Context().Value(identityKey{}).(Identity)
+	a.log.Info(message, "supplierId", id, "actorId", identity.UserID)
+}
+
+func validText(value string, min, max int, multiline bool) bool {
 	n := utf8.RuneCountInString(value)
 	if !utf8.ValidString(value) || n < min || n > max {
 		return false
 	}
 	for _, c := range value {
-		if unicode.IsControl(c) {
+		if unicode.IsControl(c) && !(multiline && c == '\n') {
 			return false
 		}
 	}
@@ -109,33 +180,6 @@ func storeError(err error) error {
 		}
 	}
 	return err
-}
-
-func (a *App) setActive(w http.ResponseWriter, r *http.Request) error {
-	id, err := supplierID(r)
-	if err != nil {
-		return err
-	}
-	var body struct {
-		Active *bool `json:"active"`
-	}
-	if err = readJSON(w, r, &body); err != nil {
-		return err
-	}
-	if body.Active == nil {
-		return problem(400, "invalid_status", "Provide active as true or false.")
-	}
-	s, err := scanSupplier(a.db.QueryRow(r.Context(), "UPDATE suppliers SET active=$2 WHERE id=$1 RETURNING "+supplierColumns, id, *body.Active))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return problem(404, "supplier_not_found", "No supplier matches that ID.")
-	}
-	if err != nil {
-		return storeError(err)
-	}
-	identity := r.Context().Value(identityKey{}).(Identity)
-	a.log.Info("supplier status changed", "supplierId", s.ID, "active", s.Active, "actorId", identity.UserID)
-	writeJSON(w, 200, map[string]any{"supplier": s})
-	return nil
 }
 
 func (a *App) locations(w http.ResponseWriter, r *http.Request) error {

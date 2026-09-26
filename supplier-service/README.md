@@ -1,6 +1,6 @@
-# Supplier Service skeleton
+# Supplier Service
 
-Go `net/http` + `pgx` + PostgreSQL, integrated with the existing User Service's server-side sessions. This is a runnable foundation with minimal supplier features, not the full FR2/D2 implementation.
+Go `net/http` + `pgx` + PostgreSQL, integrated with the existing User Service's server-side sessions. The D2 backend supports CRUD, controlled metadata and server-side catalogue queries. See the [implementation checkpoints](../docs/d2-supplier-progress.md) for UI progress.
 
 ## Run the shared application
 
@@ -53,7 +53,8 @@ Log in again after promotion. Supplier enforces permissions independently on eve
 ## Implemented boundaries
 
 - Own Go process, configuration, graceful shutdown, JSON logs, liveness and database readiness endpoints.
-- Authenticated active supplier list/detail and campus location list; admin create and active-status update.
+- Authenticated supplier list/detail and campus locations; admin create, field/status editing and soft deletion. Inactive records remain readable; deleted records are hidden and cannot be modified.
+- Server-side search, category/location/status filtering, allowlisted sorting and bounded pagination with consistent totals. Opening hours and update timestamps are included; existing migrations and seed data are preserved.
 - Every protected request validates the existing cookie through User's internal API using the shared backend credential, with a two-second timeout. Invalid sessions return 401. Bad backend credentials, malformed responses, timeouts and User outages return 503. There is no positive authentication cache.
 - Exact Origin checks for mutations, JSON-only bodies, request-size limits and rejection of unknown fields, matching User's browser integration.
 - Database constraints enforce allowed categories, controlled locations and case-insensitive active-name uniqueness at a location, including concurrent writes.
@@ -78,6 +79,6 @@ ESLint 9 is pinned because the React/import plugins bundled with the selected Ne
 
 ## Explicitly deferred
 
-Supplier profile editing beyond active status, filtering/search/pagination (list currently returns at most 100 active records), opening-hours/image/coordinate fields, connecting the shared Supplier UI to live data, image serving, Order integration, Redis caching, RabbitMQ events and load testing remain future work. The seed CSV retains the additional source metadata for that work. No claim is made that the full FR2 or D2 scope is complete.
+Connecting the shared Supplier UI to live data, image/coordinate fields and image serving, Order integration, Redis caching, RabbitMQ events and load testing remain future work. The seed CSV retains the additional source metadata. Backend CRUD and queries do not by themselves complete the D2 UI requirement.
 
 This Compose setup binds public ports to loopback for local use. EC2 deployment still needs HTTPS ingress, secure cookies, deployment secrets, a real email provider, backup policy and appropriate network access. Services can communicate by Compose DNS on one host. The gateway re-resolves those names when containers are replaced. User's existing peer-IP rate limit sees gateway traffic as one source; a production trusted-proxy/rate-limit policy remains open.

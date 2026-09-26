@@ -1,20 +1,58 @@
-# Supplier API (minimal skeleton)
+# Supplier API
 
-Public base: `http://localhost:3000` through the shared gateway. Direct development base: `http://localhost:8083` (or `SUPPLIER_HTTP_PORT`; Credit uses 8082). JSON bodies; UUID supplier IDs; RFC3339 timestamps. Browser requests use `credentials: "include"`. Mutations require the exact configured `Origin` and `Content-Type: application/json`; local Origin is `http://localhost:3000`.
+Public base: `http://localhost:3000` through the gateway. Direct development base:
+`http://localhost:8083` (or `SUPPLIER_HTTP_PORT`). Supplier is independently usable
+through HTTP without Next.js. User Service and Supplier PostgreSQL must be running.
 
-| Method and path | Body | Success | Permission |
-| --- | --- | --- | --- |
-| `GET /api/v1/suppliers` | None | 200 `{ "suppliers": [...] }` | Valid session |
-| `GET /api/v1/suppliers/{id}` | None | 200 `{ "supplier": {...} }` | Valid session |
-| `GET /api/v1/locations` | None | 200 `{ "locations": [{"id":"com2","name":"COM2"}, ...] }` | Valid session |
-| `POST /api/v1/suppliers` | `name`, `category`, `locationId`; optional `description` | 201 `{ "supplier": {...} }`, Location header | Admin |
-| `PATCH /api/v1/suppliers/{id}` | `active`: boolean | 200 `{ "supplier": {...} }` | Admin |
-| `GET /healthz` | None | 200 if HTTP process is live | None, direct service |
-| `GET /readyz` | None | 200 when Supplier database is reachable; otherwise 503 | None, direct service |
+All catalogue endpoints require the existing User session cookie. Browser requests
+use `credentials: "include"`. POST, PATCH and DELETE require the exact configured
+`Origin` (`http://localhost:3000` locally). POST/PATCH bodies require
+`Content-Type: application/json`. IDs are UUIDs; timestamps are RFC3339.
 
-`/readyz` is local database readiness, not a guarantee that User is available. User failures are handled per protected request. Gateway `/healthz` checks only the gateway.
+| Method/path | Success | Permission |
+| --- | --- | --- |
+| `GET /api/v1/suppliers` | 200 paginated catalogue below | User or admin |
+| `GET /api/v1/suppliers/{id}` | 200 `{ "supplier": {...} }`, including inactive | User or admin |
+| `GET /api/v1/locations` | 200 `{ "locations": [{"id":"com2","name":"COM2"}, ...] }` | User or admin |
+| `POST /api/v1/suppliers` | 201 `{ "supplier": {...} }` and Location header | Admin |
+| `PATCH /api/v1/suppliers/{id}` | 200 `{ "supplier": {...} }` | Admin |
+| `DELETE /api/v1/suppliers/{id}` | 204, no body | Admin |
+| `GET /healthz` | 200, process live | None; direct port |
+| `GET /readyz` | 200 if database reachable, otherwise 503 | None; direct port |
 
-Supplier response:
+## Querying the catalogue
+
+All filtering, sorting and pagination happen in PostgreSQL. Filters combine with AND.
+
+| Query | Values/default |
+| --- | --- |
+| `q` | Case-insensitive literal substring across name, description, opening hours and location name; trimmed, at most 100 characters |
+| `category` | `food`, `printing`, `retail`, `services`, `other`; omitted/empty means all |
+| `locationId` | ID from locations endpoint; omitted/empty means all |
+| `status` | `active` (default), `inactive`, `all` |
+| `sort` | `name` (default), `category`, `location`, `createdAt` |
+| `direction` | `asc` (default), `desc` |
+| `page` | 1-based, default 1, maximum 100000 |
+| `pageSize` | Default 20; 1–100 |
+
+Example: `GET /api/v1/suppliers?category=food&locationId=com2&status=all&sort=name&direction=asc&page=1&pageSize=10`.
+
+```json
+{"suppliers":[],"page":1,"pageSize":10,"total":0,"totalPages":0}
+```
+
+`total` counts all matching, non-deleted records. An out-of-range page returns an
+empty list with the correct total. Count and page share a database snapshot.
+Sorts use ID as a deterministic tie-breaker. Offset pages can shift between
+requests when other admins change data; refresh to see the latest catalogue.
+Invalid, unknown or repeated query parameters return 400. Search `%` and `_` are
+literal characters, not SQL wildcards. Sort SQL is allowlisted; values are parameters.
+
+## Create and edit
+
+POST requires `name`, `category` and `locationId`. Optional: `description`,
+`openingHours`, `active` (default true). PATCH accepts any non-empty subset of these
+six fields. Omitted or null fields are unchanged; empty strings clear optional text.
 
 ```json
 {
@@ -24,31 +62,51 @@ Supplier response:
     "category": "food",
     "locationId": "com2",
     "description": "Floor 1; next to the entrance",
+    "openingHours": "Mon-Fri 09:00-17:00",
     "active": true,
-    "createdAt": "2026-09-26T10:00:00Z"
+    "createdAt": "2026-09-27T01:00:00Z",
+    "updatedAt": "2026-09-27T01:00:00Z"
   }
 }
 ```
 
-Names are trimmed, 1–100 characters. Descriptions are trimmed, 0–500 characters; control characters are rejected. Categories are `food`, `printing`, `retail`, `services`, `other`. Use a location ID from the locations endpoint. IDs, timestamps and initial active status are server assigned. Unknown JSON fields are rejected.
+Names are trimmed, 1–100 characters. Description is optional, up to 500 characters;
+opening hours up to 200. Multiline optional text is supported. Other control
+characters are rejected. Location must exist in the controlled campus list.
+Unknown or protected fields (`id`, timestamps, roles, deletion metadata) are rejected.
+IDs and timestamps are generated by PostgreSQL. PATCH is atomic; omitted fields
+are preserved. Concurrent edits of the same field use the last committed value.
 
-The list returns at most 100 active records ordered by case-insensitive name then ID. Search, filtering and pagination are not implemented. Detail reads hide inactive records (404). Status updates can reactivate a known ID unless its active name/location would conflict (409). There is no hard deletion or inactive-record listing yet.
+Active names must be unique case-insensitively at the same location. This applies
+on create, rename, location change and reactivation. The same name at a different
+location or on inactive records is allowed. A conflict returns 409 and changes nothing.
 
-Errors match User Service:
+## Inactive versus deleted
 
-```json
-{"error":{"code":"admin_required","message":"An administrator is required."}}
-```
+- `PATCH {"active":false}` retains a visible, readable record. Use status=all/inactive
+  to list it. It can be edited and reactivated. Future Order integrations must check
+  `active` before accepting a new pickup; a successful detail lookup alone is insufficient.
+- DELETE sets `deleted_at`, `active=false` and `updated_at`. The row remains for future
+  historical references, but is excluded from every public list/detail/edit operation.
+  There is no public undelete operation. Repeated deletion returns 404. Deletion is
+  distinct from temporary deactivation and does not erase any database volume.
 
-| Status | Cases |
+## Errors and dependencies
+
+Errors follow User Service: `{"error":{"code":"admin_required","message":"An administrator is required."}}`.
+
+| Status | Meaning |
 | --- | --- |
-| 400 | Invalid fields, location, UUID, JSON or missing boolean active status |
+| 400 | Invalid body/query/UUID/location, unknown fields, empty PATCH |
 | 401 | Missing, expired or revoked session |
-| 403 | Valid non-admin attempting a write; absent/untrusted mutation Origin |
-| 404 | Supplier missing/inactive; unknown route |
-| 409 | Another active supplier has the same case-insensitive name at that building |
-| 415 | Mutation body is not JSON |
-| 500 | Unexpected internal error, with no raw database error in the response/log |
-| 503 | User validation unavailable/misconfigured or database readiness failure |
+| 403 | Non-admin write or absent/untrusted mutation Origin |
+| 404 | Missing/deleted supplier or unknown route |
+| 409 | Active name/location conflict (`supplier_name_taken`) |
+| 415 | POST/PATCH body is not JSON |
+| 500 | Unexpected error; database details are not disclosed |
+| 503 | User validation unavailable/misconfigured, or database readiness failure |
 
-Unknown methods/routes use standard Go 404/405 responses. Every protected call validates the session through User port 8081. Supplier has no independent sessions, user tables, internal user directory or event API. Never log cookies or the internal service credential.
+Every protected call validates its cookie through User's private port 8081, then
+checks permissions. No cached authorization, duplicate user/session tables, broker
+or browser-visible internal credentials. `/readyz` checks only the Supplier database;
+auth outages fail closed per request. Gateway `/healthz` checks only the gateway.
