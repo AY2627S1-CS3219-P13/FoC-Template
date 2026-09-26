@@ -26,6 +26,8 @@ withdrawn, or exchanged for money, and only circulate within the platform.
 
 User Service is available for local development. See [setup and design](user-service/README.md) and the [API guide for teammates](user-service/API.md).
 
+Credit Service is also available for local development. See its [setup and design](credit-service/README.md) and the [API reference](credit-service/API.md), which documents every credit endpoint.
+
 This repository follows a **one-service-per-folder** structure: each
 microservice (`user-service/`, `supplier-service/`, `order-service/`,
 `credit-service/`) lives in its own top-level folder.
