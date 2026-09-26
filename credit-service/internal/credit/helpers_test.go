@@ -22,9 +22,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// These tests are written ahead of the implementation: they define the
-// behaviour Credit Service must reach, and fail until the stubs are filled in.
-
 const (
 	testOrigin        = "http://localhost:3000"
 	testInternalToken = "test-internal-token-0123456789abcdef"
@@ -101,7 +98,32 @@ func newTestEnv(t *testing.T) *testEnv {
 	sessions := &fakeSessions{callers: map[string]Caller{}}
 	cfgApp := Config{InitialCredits: initialCredits, Origin: testOrigin, InternalToken: testInternalToken, SessionCookie: testCookie}
 	app := New(db, cfgApp, sessions, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	return &testEnv{app: app, sessions: sessions, public: app.PublicHandler(), internal: app.InternalHandler()}
+	e := &testEnv{app: app, sessions: sessions, public: app.PublicHandler(), internal: app.InternalHandler()}
+	// Runs before the database closes: every test must leave history and balances in agreement.
+	t.Cleanup(func() { e.checkReconciled(t) })
+	return e
+}
+
+// checkReconciled fails the test if any wallet differs from the sum of its
+// ledger entries, or from the balances recorded on its newest entry.
+func (e *testEnv) checkReconciled(t *testing.T) {
+	t.Helper()
+	rows, err := e.app.db.Query(context.Background(), `SELECT w.user_id::text FROM wallets w
+		LEFT JOIN (SELECT user_id, sum(available_delta) AS a, sum(reserved_delta) AS r FROM transactions GROUP BY user_id) s ON s.user_id = w.user_id
+		LEFT JOIN LATERAL (SELECT available_after, reserved_after FROM transactions t WHERE t.user_id = w.user_id ORDER BY id DESC LIMIT 1) l ON true
+		WHERE coalesce(s.a, 0) <> w.available OR coalesce(s.r, 0) <> w.reserved
+		   OR coalesce(l.available_after, 0) <> w.available OR coalesce(l.reserved_after, 0) <> w.reserved`)
+	if err != nil {
+		t.Errorf("reconciling ledger: %v", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var userID string
+		if err = rows.Scan(&userID); err == nil {
+			t.Errorf("wallet %s does not match its ledger", userID)
+		}
+	}
 }
 
 func randomHex(t *testing.T, n int) string {
@@ -129,35 +151,57 @@ func (e *testEnv) exec(t *testing.T, sql string, args ...any) {
 	}
 }
 
+// seedMove changes a wallet and appends the matching ledger entry, marked
+// 'seed' so ledger() leaves it out, as apply would.
+func (e *testEnv) seedMove(t *testing.T, userID, orderID string, kind Kind, amount int64) {
+	t.Helper()
+	effect := effects[kind]
+	e.exec(t, `WITH w AS (UPDATE wallets SET available=available+$4::bigint, reserved=reserved+$5::bigint
+			WHERE user_id=$1::uuid RETURNING available, reserved)
+		INSERT INTO transactions(user_id, kind, amount, order_id, available_delta, reserved_delta, available_after, reserved_after, note)
+		SELECT $1::uuid, $2::text, $3::bigint, NULLIF($6::text, ''), $4::bigint, $5::bigint, w.available, w.reserved, 'seed' FROM w`,
+		userID, string(kind), amount, effect.available*amount, effect.reserved*amount, orderID)
+}
+
 // seedWallet creates a wallet holding available credits and nothing reserved.
 func (e *testEnv) seedWallet(t *testing.T, userID string, available int64) {
 	t.Helper()
-	e.exec(t, "INSERT INTO wallets(user_id, available) VALUES($1, $2)", userID, available)
+	e.exec(t, "INSERT INTO wallets(user_id, available) VALUES($1, 0)", userID)
+	if available > 0 {
+		e.seedMove(t, userID, "", KindAllocation, available)
+	}
 }
 
 // seedEscrow holds amount of userID's credits for orderID, as Reserve would.
 func (e *testEnv) seedEscrow(t *testing.T, userID, orderID string, amount int64) {
 	t.Helper()
-	e.exec(t, "UPDATE wallets SET available=available-$2, reserved=reserved+$2 WHERE user_id=$1", userID, amount)
 	e.exec(t, "INSERT INTO reservations(order_id, user_id, amount) VALUES($1, $2, $3)", orderID, userID, amount)
+	e.seedMove(t, userID, orderID, KindReserve, amount)
+}
+
+func (e *testEnv) escrowOf(t *testing.T, orderID string) (userID string, amount int64) {
+	t.Helper()
+	if err := e.app.db.QueryRow(context.Background(), "SELECT user_id::text, amount FROM reservations WHERE order_id=$1", orderID).Scan(&userID, &amount); err != nil {
+		t.Fatal(err)
+	}
+	return userID, amount
 }
 
 // seedReleased settles an escrow back to its requester, as Release would.
 func (e *testEnv) seedReleased(t *testing.T, orderID string) {
 	t.Helper()
-	e.exec(t, `UPDATE wallets w SET available=w.available+r.amount, reserved=w.reserved-r.amount
-		FROM reservations r WHERE r.order_id=$1 AND w.user_id=r.user_id`, orderID)
+	userID, amount := e.escrowOf(t, orderID)
 	e.exec(t, "UPDATE reservations SET status='released', settled_at=now() WHERE order_id=$1", orderID)
+	e.seedMove(t, userID, orderID, KindRelease, amount)
 }
 
 // seedPaidOut settles an escrow to courierID, as Transfer would.
 func (e *testEnv) seedPaidOut(t *testing.T, orderID, courierID string) {
 	t.Helper()
-	e.exec(t, `UPDATE wallets w SET reserved=w.reserved-r.amount
-		FROM reservations r WHERE r.order_id=$1 AND w.user_id=r.user_id`, orderID)
-	e.exec(t, `UPDATE wallets w SET available=w.available+r.amount
-		FROM reservations r WHERE r.order_id=$1 AND w.user_id=$2`, orderID, courierID)
+	userID, amount := e.escrowOf(t, orderID)
 	e.exec(t, "UPDATE reservations SET status='transferred', courier_id=$2, settled_at=now() WHERE order_id=$1", orderID, courierID)
+	e.seedMove(t, userID, orderID, KindSpend, amount)
+	e.seedMove(t, courierID, orderID, KindReceive, amount)
 }
 
 // signIn registers a session with the fake User Service and returns its cookie.
@@ -211,9 +255,10 @@ func (e *testEnv) escrowExists(t *testing.T, orderID string) bool {
 }
 
 // ledger lists a user's history entries, oldest first, as "kind amount".
+// Entries written by seed helpers are left out.
 func (e *testEnv) ledger(t *testing.T, userID string) []string {
 	t.Helper()
-	rows, err := e.app.db.Query(context.Background(), "SELECT kind, amount FROM transactions WHERE user_id=$1 ORDER BY id", userID)
+	rows, err := e.app.db.Query(context.Background(), "SELECT kind, amount FROM transactions WHERE user_id=$1 AND note IS DISTINCT FROM 'seed' ORDER BY id", userID)
 	if err != nil {
 		t.Fatal(err)
 	}

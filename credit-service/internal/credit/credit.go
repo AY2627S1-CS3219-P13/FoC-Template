@@ -12,8 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Every balance change runs in one transaction (inTx) that also writes its
-// ledger entries, so balances and history always agree (NFR3.3, FR4.2).
+// Each operation validates its input, takes its locks and updates escrows;
+// every balance change goes through ledgerTx.apply (ledger.go).
 //
 // Lock order, to prevent deadlocks: an escrow row before wallet rows, and two
 // wallets in ascending user ID order (lockWallets).
@@ -27,18 +27,6 @@ var (
 	ErrReservationSettled  = errors.New("escrow already released or paid out")
 	ErrCourierIsRequester  = errors.New("a requester cannot be paid for their own errand")
 	ErrConflict            = errors.New("request conflicts with an earlier request for the same key")
-)
-
-// Kind labels each ledger entry so users can see why their balance changed (FR4.2.1).
-type Kind string
-
-const (
-	KindAllocation Kind = "allocation"
-	KindReserve    Kind = "reserve"
-	KindRelease    Kind = "release"
-	KindSpend      Kind = "spend"
-	KindReceive    Kind = "receive"
-	KindAdminDebit Kind = "admin_debit"
 )
 
 const (
@@ -92,24 +80,17 @@ func (a *App) AllocateInitial(ctx context.Context, userID string) (Wallet, error
 	if !ok {
 		return Wallet{}, ErrInvalidInput
 	}
-	created := false
-	w, err := inTx(ctx, a.db, func(tx pgx.Tx) (Wallet, error) {
+	return inTx(ctx, a, func(tx *ledgerTx) (Wallet, error) {
 		// A concurrent insert for the same user waits here, then does nothing.
-		tag, err := tx.Exec(ctx, "INSERT INTO wallets(user_id, available) VALUES($1, $2) ON CONFLICT (user_id) DO NOTHING", userID, a.cfg.InitialCredits)
+		tag, err := tx.Exec(ctx, "INSERT INTO wallets(user_id, available) VALUES($1, 0) ON CONFLICT (user_id) DO NOTHING", userID)
 		if err != nil {
 			return Wallet{}, err
 		}
-		if created = tag.RowsAffected() == 1; created {
-			if err = recordEntry(ctx, tx, entry{userID: userID, kind: KindAllocation, amount: a.cfg.InitialCredits}); err != nil {
-				return Wallet{}, err
-			}
+		if tag.RowsAffected() == 0 {
+			return lockWallet(ctx, tx, userID)
 		}
-		return lockWallet(ctx, tx, userID)
+		return tx.apply(ctx, entry{userID: userID, kind: KindAllocation, amount: a.cfg.InitialCredits})
 	})
-	if err == nil && created {
-		a.log.Info("initial credits allocated", "userId", userID, "amount", a.cfg.InitialCredits)
-	}
-	return w, err
 }
 
 // Reserve freezes amount for an errand: it moves from the requester's
@@ -124,7 +105,7 @@ func (a *App) Reserve(ctx context.Context, userID, orderID string, amount int64)
 	if !ok || !validKey(orderID) {
 		return Wallet{}, ErrInvalidInput
 	}
-	w, err := inTx(ctx, a.db, func(tx pgx.Tx) (Wallet, error) {
+	return inTx(ctx, a, func(tx *ledgerTx) (Wallet, error) {
 		// Lock the wallet first: a concurrent retry of this order then waits
 		// here and sees the committed escrow below.
 		w, err := lockWallet(ctx, tx, userID)
@@ -143,12 +124,6 @@ func (a *App) Reserve(ctx context.Context, userID, orderID string, amount int64)
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return Wallet{}, err
 		}
-		if w.Available < amount {
-			return Wallet{}, ErrInsufficientCredits
-		}
-		if _, err = tx.Exec(ctx, "UPDATE wallets SET available=available-$2, reserved=reserved+$2, updated_at=now() WHERE user_id=$1", userID, amount); err != nil {
-			return Wallet{}, err
-		}
 		_, err = tx.Exec(ctx, "INSERT INTO reservations(order_id, user_id, amount) VALUES($1, $2, $3)", orderID, userID, amount)
 		if uniqueViolation(err) {
 			// Another user's request for this order committed first.
@@ -157,17 +132,8 @@ func (a *App) Reserve(ctx context.Context, userID, orderID string, amount int64)
 		if err != nil {
 			return Wallet{}, err
 		}
-		if err = recordEntry(ctx, tx, entry{userID: userID, kind: KindReserve, amount: amount, orderID: orderID}); err != nil {
-			return Wallet{}, err
-		}
-		w.Available -= amount
-		w.Reserved += amount
-		return w, nil
+		return tx.apply(ctx, entry{userID: userID, kind: KindReserve, amount: amount, orderID: orderID})
 	})
-	if err == nil {
-		a.log.Info("credits reserved", "userId", userID, "orderId", orderID, "amount", amount)
-	}
-	return w, err
 }
 
 // Release unfreezes an errand's credits: they return from reserved to the
@@ -177,7 +143,7 @@ func (a *App) Release(ctx context.Context, orderID string) (Wallet, error) {
 	if !validKey(orderID) {
 		return Wallet{}, ErrInvalidInput
 	}
-	w, err := inTx(ctx, a.db, func(tx pgx.Tx) (Wallet, error) {
+	return inTx(ctx, a, func(tx *ledgerTx) (Wallet, error) {
 		r, err := lockReservation(ctx, tx, orderID)
 		if err != nil {
 			return Wallet{}, err
@@ -188,28 +154,12 @@ func (a *App) Release(ctx context.Context, orderID string) (Wallet, error) {
 		case statusTransferred:
 			return Wallet{}, ErrReservationSettled
 		}
-		w, err := lockWallet(ctx, tx, r.userID)
-		if err != nil {
-			return Wallet{}, err
-		}
-		if _, err = tx.Exec(ctx, "UPDATE wallets SET reserved=reserved-$2, available=available+$2, updated_at=now() WHERE user_id=$1", r.userID, r.amount); err != nil {
-			return Wallet{}, err
-		}
 		if _, err = tx.Exec(ctx, "UPDATE reservations SET status=$2, settled_at=now() WHERE order_id=$1", orderID, statusReleased); err != nil {
 			return Wallet{}, err
 		}
-		if err = recordEntry(ctx, tx, entry{userID: r.userID, kind: KindRelease, amount: r.amount, orderID: orderID}); err != nil {
-			return Wallet{}, err
-		}
 		// TODO(FR3.6.1): penalty for cancelling after pickup; rules not agreed yet.
-		w.Available += r.amount
-		w.Reserved -= r.amount
-		return w, nil
+		return tx.apply(ctx, entry{userID: r.userID, kind: KindRelease, amount: r.amount, orderID: orderID})
 	})
-	if err == nil {
-		a.log.Info("escrow released", "orderId", orderID)
-	}
-	return w, err
 }
 
 // Transfer pays an errand's escrow from the requester to the courier after the
@@ -222,39 +172,30 @@ func (a *App) Transfer(ctx context.Context, orderID, courierID string) error {
 	if !ok || !validKey(orderID) {
 		return ErrInvalidInput
 	}
-	_, err := inTx(ctx, a.db, func(tx pgx.Tx) (struct{}, error) {
+	_, err := inTx(ctx, a, func(tx *ledgerTx) (Wallet, error) {
 		r, err := lockReservation(ctx, tx, orderID)
 		if err != nil {
-			return struct{}{}, err
+			return Wallet{}, err
 		}
 		switch {
 		case r.status == statusTransferred && r.courierID == courierID:
-			return struct{}{}, nil
+			return Wallet{}, nil
 		case r.status != statusHeld:
-			return struct{}{}, ErrReservationSettled
+			return Wallet{}, ErrReservationSettled
 		case r.userID == courierID:
-			return struct{}{}, ErrCourierIsRequester
+			return Wallet{}, ErrCourierIsRequester
 		}
 		if _, _, err = lockWallets(ctx, tx, r.userID, courierID); err != nil {
-			return struct{}{}, err
-		}
-		if _, err = tx.Exec(ctx, "UPDATE wallets SET reserved=reserved-$2, updated_at=now() WHERE user_id=$1", r.userID, r.amount); err != nil {
-			return struct{}{}, err
-		}
-		if _, err = tx.Exec(ctx, "UPDATE wallets SET available=available+$2, updated_at=now() WHERE user_id=$1", courierID, r.amount); err != nil {
-			return struct{}{}, err
+			return Wallet{}, err
 		}
 		if _, err = tx.Exec(ctx, "UPDATE reservations SET status=$2, courier_id=$3, settled_at=now() WHERE order_id=$1", orderID, statusTransferred, courierID); err != nil {
-			return struct{}{}, err
+			return Wallet{}, err
 		}
-		if err = recordEntry(ctx, tx, entry{userID: r.userID, kind: KindSpend, amount: r.amount, orderID: orderID}); err != nil {
-			return struct{}{}, err
+		if _, err = tx.apply(ctx, entry{userID: r.userID, kind: KindSpend, amount: r.amount, orderID: orderID}); err != nil {
+			return Wallet{}, err
 		}
-		return struct{}{}, recordEntry(ctx, tx, entry{userID: courierID, kind: KindReceive, amount: r.amount, orderID: orderID})
+		return tx.apply(ctx, entry{userID: courierID, kind: KindReceive, amount: r.amount, orderID: orderID})
 	})
-	if err == nil {
-		a.log.Info("escrow paid out", "orderId", orderID, "courierId", courierID)
-	}
 	return err
 }
 
@@ -275,7 +216,7 @@ func (a *App) AdminDebit(ctx context.Context, adminID, userID string, amount int
 		return Wallet{}, ErrInvalidInput
 	}
 	key := "admin_debit:" + requestID
-	w, err := inTx(ctx, a.db, func(tx pgx.Tx) (Wallet, error) {
+	return inTx(ctx, a, func(tx *ledgerTx) (Wallet, error) {
 		w, err := lockWallet(ctx, tx, userID)
 		if err != nil {
 			return Wallet{}, err
@@ -292,46 +233,13 @@ func (a *App) AdminDebit(ctx context.Context, adminID, userID string, amount int
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return Wallet{}, err
 		}
-		if w.Available < amount {
-			return Wallet{}, ErrInsufficientCredits
-		}
-		if _, err = tx.Exec(ctx, "UPDATE wallets SET available=available-$2, updated_at=now() WHERE user_id=$1", userID, amount); err != nil {
-			return Wallet{}, err
-		}
-		err = recordEntry(ctx, tx, entry{userID: userID, kind: KindAdminDebit, amount: amount, key: key, note: fmt.Sprintf("admin %s: %s", adminID, reason)})
+		w, err = tx.apply(ctx, entry{userID: userID, kind: KindAdminDebit, amount: amount, key: key, note: fmt.Sprintf("admin %s: %s", adminID, reason)})
 		if uniqueViolation(err) {
 			// The same request ID was used for another user's debit concurrently.
 			return Wallet{}, ErrConflict
 		}
-		if err != nil {
-			return Wallet{}, err
-		}
-		w.Available -= amount
-		return w, nil
+		return w, err
 	})
-	if err == nil {
-		a.log.Info("admin debited credits", "adminId", adminID, "userId", userID, "amount", amount)
-	}
-	return w, err
-}
-
-// inTx runs fn in one database transaction, so a balance change and its ledger
-// entries commit together or not at all (NFR3.3).
-func inTx[T any](ctx context.Context, db *pgxpool.Pool, fn func(pgx.Tx) (T, error)) (T, error) {
-	var zero T
-	tx, err := db.Begin(ctx)
-	if err != nil {
-		return zero, err
-	}
-	defer tx.Rollback(ctx)
-	result, err := fn(tx)
-	if err != nil {
-		return zero, err
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return zero, err
-	}
-	return result, nil
 }
 
 // lockWallet reads a wallet and locks its row until the transaction ends, so
@@ -390,25 +298,6 @@ func lockReservation(ctx context.Context, tx pgx.Tx, orderID string) (reservatio
 		return reservation{}, err
 	}
 	return r, nil
-}
-
-// entry is one ledger row. orderID, key and note are empty when not relevant.
-type entry struct {
-	userID  string
-	kind    Kind
-	amount  int64
-	orderID string
-	key     string
-	note    string
-}
-
-// recordEntry appends to the ledger (FR4.2). Call it in the same transaction as
-// the balance change it describes, so history always matches balances.
-func recordEntry(ctx context.Context, tx pgx.Tx, e entry) error {
-	_, err := tx.Exec(ctx, `INSERT INTO transactions(user_id, kind, amount, order_id, idempotency_key, note)
-		VALUES($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''))`,
-		e.userID, string(e.kind), e.amount, e.orderID, e.key, e.note)
-	return err
 }
 
 // normalizeUUID accepts the canonical 36-character UUID form and lowercases it,

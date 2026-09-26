@@ -1,6 +1,8 @@
 package credit
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -60,6 +62,7 @@ func TestInternalEndpointsRequireServiceToken(t *testing.T) {
 		body         any
 	}{
 		{"GET", "/internal/v1/wallets/" + u, nil},
+		{"GET", "/internal/v1/wallets/" + u + "/transactions", nil},
 		{"POST", "/internal/v1/wallets/" + newID(t) + "/initial-allocation", nil},
 		{"PUT", escrowPath(order), map[string]any{"userId": u, "amount": 10}},
 		{"POST", escrowPath(order) + "/release", nil},
@@ -576,5 +579,129 @@ func TestAdminDebitEndpoint(t *testing.T) {
 			t.Fatalf("expected five 200s and five 409s: %v", codes)
 		}
 		e.wantStored(t, u, 0, 0)
+	})
+}
+
+type historyPage struct {
+	Transactions []Transaction `json:"transactions"`
+	NextBefore   *int64        `json:"nextBefore"`
+}
+
+func wantHistoryPage(t *testing.T, w *httptest.ResponseRecorder, entries int, more bool) historyPage {
+	t.Helper()
+	wantStatus(t, w, http.StatusOK)
+	var page historyPage
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatalf("response is not a history page: %s", w.Body.String())
+	}
+	if len(page.Transactions) != entries || (page.NextBefore != nil) != more {
+		t.Fatalf("%d entries and nextBefore %v, expected %d entries and more=%v", len(page.Transactions), page.NextBefore, entries, more)
+	}
+	return page
+}
+
+func TestHistoryEndpoints(t *testing.T) {
+	const mine = "/api/v1/wallets/me/transactions"
+
+	t.Run("own history pages newest first, 30 by default", func(t *testing.T) {
+		e := newTestEnv(t)
+		u := newID(t)
+		withEntries(t, e, u, 34)
+		cookie := e.signIn(t, u, false)
+		first := wantHistoryPage(t, e.api(t, "GET", mine, nil, cookie), 30, true)
+		next := fmt.Sprintf("%s?before=%d", mine, *first.NextBefore)
+		rest := wantHistoryPage(t, e.api(t, "GET", next, nil, cookie), 5, false)
+		if rest.Transactions[0].ID >= first.Transactions[29].ID {
+			t.Fatal("second page overlaps the first")
+		}
+		if last := rest.Transactions[4]; last.Kind != KindAllocation || last.AvailableAfter != initialCredits {
+			t.Fatalf("oldest entry %+v, expected the allocation", last)
+		}
+	})
+
+	t.Run("limit parameter", func(t *testing.T) {
+		e := newTestEnv(t)
+		u := newID(t)
+		withEntries(t, e, u, 9)
+		wantHistoryPage(t, e.api(t, "GET", mine+"?limit=5", nil, e.signIn(t, u, false)), 5, true)
+		wantHistoryPage(t, e.api(t, "GET", mine+"?limit=100", nil, e.signIn(t, u, false)), 10, false)
+	})
+
+	t.Run("entry fields", func(t *testing.T) {
+		e := newTestEnv(t)
+		requester, courier, order := newID(t), newID(t), newID(t)
+		e.seedWallet(t, requester, 100)
+		e.seedWallet(t, courier, 100)
+		e.seedEscrow(t, requester, order, 30)
+		mustOK(t, e.app.Transfer(context.Background(), order, courier))
+		w := e.api(t, "GET", mine+"?limit=1", nil, e.signIn(t, requester, false))
+		wantStatus(t, w, http.StatusOK)
+		var raw struct {
+			Transactions []map[string]any `json:"transactions"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil || len(raw.Transactions) != 1 {
+			t.Fatalf("unexpected body: %s", w.Body.String())
+		}
+		got := raw.Transactions[0]
+		want := map[string]any{"kind": "spend", "amount": 30.0, "availableDelta": 0.0, "reservedDelta": -30.0,
+			"availableAfter": 70.0, "reservedAfter": 0.0, "orderId": order, "counterpartyId": courier}
+		for k, v := range want {
+			if got[k] != v {
+				t.Fatalf("%s is %v, expected %v: %s", k, got[k], v, w.Body.String())
+			}
+		}
+		if _, ok := got["id"]; !ok {
+			t.Fatal("missing id")
+		}
+		if _, ok := got["createdAt"]; !ok {
+			t.Fatal("missing createdAt")
+		}
+	})
+
+	t.Run("empty history is an empty list", func(t *testing.T) {
+		e := newTestEnv(t)
+		u := newID(t)
+		e.seedWallet(t, u, 0)
+		w := e.api(t, "GET", mine, nil, e.signIn(t, u, false))
+		wantHistoryPage(t, w, 0, false)
+		if !strings.Contains(w.Body.String(), `"transactions":[]`) {
+			t.Fatalf("expected an empty JSON array: %s", w.Body.String())
+		}
+	})
+
+	t.Run("invalid limit or cursor", func(t *testing.T) {
+		e := newTestEnv(t)
+		u := newID(t)
+		withEntries(t, e, u, 0)
+		cookie := e.signIn(t, u, false)
+		for _, q := range []string{"limit=0", "limit=101", "limit=-1", "limit=abc", "before=0", "before=-5", "before=x"} {
+			wantError(t, e.api(t, "GET", mine+"?"+q, nil, cookie), http.StatusBadRequest, "invalid_input")
+		}
+	})
+
+	t.Run("signed in without a wallet", func(t *testing.T) {
+		e := newTestEnv(t)
+		wantError(t, e.api(t, "GET", mine, nil, e.signIn(t, newID(t), false)), http.StatusNotFound, "wallet_not_found")
+	})
+
+	t.Run("requires a session", func(t *testing.T) {
+		e := newTestEnv(t)
+		wantError(t, e.api(t, "GET", mine, nil, nil), http.StatusUnauthorized, "invalid_session")
+	})
+
+	t.Run("no public route to another user's history", func(t *testing.T) {
+		e := newTestEnv(t)
+		other := newID(t)
+		withEntries(t, e, other, 1)
+		wantStatus(t, e.api(t, "GET", "/api/v1/wallets/"+other+"/transactions", nil, e.signIn(t, newID(t), false)), http.StatusNotFound)
+	})
+
+	t.Run("internal by user ID", func(t *testing.T) {
+		e := newTestEnv(t)
+		u := newID(t)
+		withEntries(t, e, u, 2)
+		wantHistoryPage(t, e.service(t, "GET", "/internal/v1/wallets/"+u+"/transactions", nil), 3, false)
+		wantError(t, e.service(t, "GET", "/internal/v1/wallets/not-a-uuid/transactions", nil), http.StatusBadRequest, "invalid_input")
+		wantError(t, e.service(t, "GET", "/internal/v1/wallets/"+newID(t)+"/transactions", nil), http.StatusNotFound, "wallet_not_found")
 	})
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -53,11 +54,9 @@ func (a *App) PublicHandler() http.Handler {
 		writeJSON(w, 200, map[string]string{"status": "ready"})
 		return nil
 	}))
-	// Balance of the signed-in user, like User Service's /api/v1/users/me.
 	m.HandleFunc("GET /api/v1/wallets/me", a.endpoint(a.myWallet))
-	// AdminDebit; admin role required. Each debit is a new record under the wallet.
+	m.HandleFunc("GET /api/v1/wallets/me/transactions", a.endpoint(a.myHistory))
 	m.HandleFunc("POST /api/v1/admin/wallets/{userId}/debits", a.endpoint(a.adminDebit))
-	// TODO(FR4.2.1): GET /api/v1/wallets/me/transactions?limit=30 once History exists.
 	return a.middleware(m, true)
 }
 
@@ -65,17 +64,12 @@ func (a *App) PublicHandler() http.Handler {
 // shared service token. Never route it through the public proxy.
 func (a *App) InternalHandler() http.Handler {
 	m := http.NewServeMux()
-	// Balance; Order Service can show it before creating an errand.
 	m.HandleFunc("GET /internal/v1/wallets/{userId}", a.endpoint(a.wallet))
-	// AllocateInitial; called by User Service after verification (integration deferred there).
+	m.HandleFunc("GET /internal/v1/wallets/{userId}/transactions", a.endpoint(a.history))
 	m.HandleFunc("POST /internal/v1/wallets/{userId}/initial-allocation", a.endpoint(a.allocate))
-	// Reserve; called synchronously by Order Service when creating an errand. An
-	// escrow holds the requester's credits for one order until release or payout.
 	// PUT because the caller chooses the ID (the order ID) and repeating it is safe.
 	m.HandleFunc("PUT /internal/v1/escrows/{orderId}", a.endpoint(a.reserve))
-	// Release; errand cancelled or expired. May later be driven by events instead (FR5).
 	m.HandleFunc("POST /internal/v1/escrows/{orderId}/release", a.endpoint(a.release))
-	// Transfer; requester confirmed delivery. May later be driven by events instead (FR5).
 	m.HandleFunc("POST /internal/v1/escrows/{orderId}/payout", a.endpoint(a.transfer))
 	return a.middleware(m, false)
 }
@@ -175,6 +169,46 @@ func (a *App) adminDebit(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	writeJSON(w, 200, wallet)
+	return nil
+}
+
+func (a *App) myHistory(w http.ResponseWriter, r *http.Request) error {
+	c, err := a.caller(r)
+	if err != nil {
+		return err
+	}
+	return a.writeHistory(w, r, c.UserID)
+}
+
+func (a *App) history(w http.ResponseWriter, r *http.Request) error {
+	return a.writeHistory(w, r, r.PathValue("userId"))
+}
+
+// writeHistory answers one page: ?limit=1-100 (default 30) and ?before=<id>
+// from the previous page's nextBefore. nextBefore is null on the last page.
+func (a *App) writeHistory(w http.ResponseWriter, r *http.Request, userID string) error {
+	limit, before := DefaultHistoryLimit, int64(0)
+	query := r.URL.Query()
+	var err error
+	if v := query.Get("limit"); v != "" {
+		if limit, err = strconv.Atoi(v); err != nil {
+			return ErrInvalidInput
+		}
+	}
+	if v := query.Get("before"); v != "" {
+		if before, err = strconv.ParseInt(v, 10, 64); err != nil || before < 1 {
+			return ErrInvalidInput
+		}
+	}
+	entries, err := a.History(r.Context(), userID, limit, before)
+	if err != nil {
+		return err
+	}
+	var next *int64
+	if len(entries) == limit {
+		next = &entries[len(entries)-1].ID
+	}
+	writeJSON(w, 200, map[string]any{"transactions": entries, "nextBefore": next})
 	return nil
 }
 
