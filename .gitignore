@@ -15,3 +15,9 @@ out/
 Thumbs.db
 
 .agent/CONTINUITY.md
+.agent/tmp/
+node_modules/
+.next/
+*.tsbuildinfo
+playwright-report/
+test-results/

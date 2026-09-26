@@ -25,14 +25,14 @@ sh user-service/scripts/init-env.sh
 docker compose up --build -d user-service
 ```
 
-The setup script creates a git-ignored `.env` with random local secrets. It never overwrites an existing file. If you already have an older `.env`, add the variables from `.env.example` yourself.
+The setup script creates a git-ignored `.env` with random local secrets. It preserves existing values and appends Supplier database credentials if missing. For other settings missing from an older `.env`, use `.env.example` as a reference.
 
 - Public API: `http://localhost:8080`
 - Local verification inbox: `http://localhost:8025`
 - Ready check: `http://localhost:8080/readyz`
 - Internal API, from another Compose service: `http://user-service:8081`
 
-PostgreSQL data is stored in a named volume and survives container restarts. Database and internal API ports are not published to your computer. Mailpit captures email locally; nothing is sent to a real mailbox. The Next.js frontend is not included in this service implementation.
+PostgreSQL data is stored in a named volume and survives container restarts. Database and internal API ports are not published to your computer. Mailpit captures email locally; nothing is sent to a real mailbox. A minimal shared Next.js frontend and gateway are now available through the [Supplier setup](../supplier-service/README.md); `docker compose up --build -d gateway` serves the UI and both public APIs at `http://localhost:3000`. The direct User API defaults to port 8080; change `USER_HTTP_PORT` in `.env` if that host port is occupied.
 
 Set `USER_APP_ORIGIN` to the frontend's exact origin. The default is `http://localhost:3000`; frontend requests need `credentials: "include"`. Every public POST, PUT or PATCH needs the matching `Origin` header, including command-line requests. This, JSON-only request bodies and SameSite cookies protect browser mutations against CSRF.
 

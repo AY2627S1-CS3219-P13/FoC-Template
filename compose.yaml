@@ -24,7 +24,7 @@ services:
     build: ./user-service
     env_file: .env
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${USER_HTTP_PORT:-8080}:8080"
     # Port 8081 is accessible only inside the container network.
     depends_on:
       user-db:
@@ -63,5 +63,109 @@ services:
         condition: service_healthy
     command: ["sh", "scripts/check.sh"]
 
+  supplier-db:
+    image: postgres:18-bookworm
+    environment:
+      POSTGRES_USER: foc_supplier
+      POSTGRES_DB: foc_supplier
+      POSTGRES_PASSWORD: ${SUPPLIER_POSTGRES_PASSWORD:?Run sh user-service/scripts/init-env.sh}
+    volumes:
+      - supplier-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foc_supplier -d foc_supplier"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  supplier-service:
+    build: ./supplier-service
+    environment:
+      SUPPLIER_DATABASE_URL: postgres://foc_supplier:${SUPPLIER_POSTGRES_PASSWORD}@supplier-db:5432/foc_supplier?sslmode=disable
+      USER_SERVICE_INTERNAL_URL: http://user-service:8081
+      USER_INTERNAL_TOKEN: ${USER_INTERNAL_TOKEN:?Run sh user-service/scripts/init-env.sh}
+      USER_APP_ORIGIN: ${USER_APP_ORIGIN:-http://localhost:3000}
+      USER_COOKIE_SECURE: ${USER_COOKIE_SECURE:-false}
+    ports:
+      - "127.0.0.1:${SUPPLIER_HTTP_PORT:-8082}:8080"
+    depends_on:
+      supplier-db:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  frontend:
+    build: ./frontend
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  gateway:
+    build: ./gateway
+    ports:
+      - "127.0.0.1:3000:8080"
+    depends_on:
+      frontend:
+        condition: service_started
+      supplier-service:
+        condition: service_started
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  supplier-test-db:
+    image: postgres:18-bookworm
+    profiles: [test]
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: supplier_service_test
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d supplier_service_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  supplier-tests:
+    profiles: [test]
+    build:
+      context: ./supplier-service
+      target: development
+    environment:
+      SUPPLIER_TEST_DATABASE_URL: postgres://test:test@supplier-test-db:5432/supplier_service_test?sslmode=disable
+    depends_on:
+      supplier-test-db:
+        condition: service_healthy
+    command: ["sh", "scripts/check.sh"]
+
+  frontend-checks:
+    profiles: [test]
+    build:
+      context: ./frontend
+      target: development
+    command: ["npm", "run", "check"]
+
+  smoke:
+    profiles: [test]
+    image: node:22-bookworm-slim
+    working_dir: /checks
+    volumes:
+      - ./scripts:/checks:ro
+    environment:
+      SMOKE_BASE_URL: http://gateway:8080
+      SMOKE_ORIGIN: ${USER_APP_ORIGIN:-http://localhost:3000}
+      MAILPIT_URL: http://mailpit:8025
+    entrypoint: ["node", "smoke.mjs"]
+
 volumes:
   user-data:
+  supplier-data:

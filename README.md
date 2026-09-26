@@ -26,6 +26,15 @@ withdrawn, or exchanged for money, and only circulate within the platform.
 
 User Service is available for local development. See [setup and design](user-service/README.md) and the [API guide for teammates](user-service/API.md).
 
+The [Supplier skeleton](supplier-service/README.md) adds its own Go/PostgreSQL service, session validation through User Service, a minimal Next.js frontend and a shared Nginx gateway. To run both services and the UI:
+
+```sh
+sh user-service/scripts/init-env.sh
+docker compose up --build -d gateway
+```
+
+Open `http://localhost:3000`. See [Supplier API](supplier-service/API.md) for the minimal contract and [verification instructions](supplier-service/README.md#verification) for container checks and the live integration smoke test. Supplier filtering, full editing, Redis, RabbitMQ workflows and cloud deployment are not yet implemented.
+
 This repository follows a **one-service-per-folder** structure: each
 microservice (`user-service/`, `supplier-service/`, `order-service/`,
 `credit-service/`) lives in its own top-level folder.
@@ -36,6 +45,8 @@ microservice (`user-service/`, `supplier-service/`, `order-service/`,
 ├── supplier-service/
 ├── order-service/
 ├── credit-service/
+├── frontend/
+├── gateway/
 ├── <n2h-service>/
 └── README.md
 ```

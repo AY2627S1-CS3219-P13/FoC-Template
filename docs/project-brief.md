@@ -25,6 +25,8 @@ Payment for purchased items, supplier menus/catalogues/inventory/checkout and li
 
 ## Technology choices
 
+Update, 26 September 2026: the team confirmed TypeScript/Next.js, Go, server-side sessions, PostgreSQL, RabbitMQ, and EC2 with Docker Compose for Supplier work. The Supplier skeleton now implements its own Go/PostgreSQL service, existing User authentication integration, a minimal shared frontend and local reverse proxy. RabbitMQ remains unimplemented; Supplier's current HTTP workflow has no broker or Redis dependency. Cloud ingress and database hosting remain open.
+
 | Area | Current direction | Status |
 | --- | --- | --- |
 | Frontend | TypeScript and Next.js | Current team stack direction |
@@ -32,11 +34,11 @@ Payment for purchased items, supplier menus/catalogues/inventory/checkout and li
 | Application hosting | AWS EC2 | Confirmed team decision |
 | Account access | Own email/password registration and school-email verification | Current product direction; external provider login not requested |
 | Authentication mechanism | PostgreSQL-backed sessions; internal session validation endpoint | Adopted for User Service |
-| Database | PostgreSQL for User Service | Adopted for User Service; other services open |
+| Database | PostgreSQL | Adopted for User and Supplier; other service schemas remain open |
 | Database hosting | Database on EC2 versus managed RDS | Not finalised |
-| Messaging | RabbitMQ discussed as a candidate | Not finalised |
+| Messaging | RabbitMQ | Confirmed team direction; not yet implemented |
 | Event reliability | Outbox discussed as an option | **Not finalised; not a requirement to implement** |
-| Container tooling | Docker and Docker Compose | Local User Service setup implemented; full-team deployment open |
+| Container tooling | Docker and Docker Compose | Local User/Supplier, frontend and gateway implemented; full-team cloud deployment open |
 | Email delivery | Local Mailpit capture; SMTP adapter with STARTTLS for deployment | Production provider not selected; SES remains an option |
 
 The frontend provides the user experience; the four backend services cover the required business areas. User Service's current design is documented in its service folder. Other previously discussed designs remain proposals unless explicitly adopted.
@@ -123,7 +125,7 @@ These are selected backlog items, not completed features. Ownership and appropri
 ## Decisions still needed
 
 - Confirm User Service's documented defaults with teammates, especially accepted school domains and session/rate-limit policies. First-admin provisioning uses an operator command for a verified account; Supplier can use this in S1.
-- Database hosting, other services' database choices, message broker, production email provider and full-team container deployment. **Outbox remains undecided; Credit integration is deferred**, including recovery and eventual onboarding of accounts verified before integration exists.
+- Database hosting, remaining service schemas, RabbitMQ topology/reliability, production email provider and full-team container deployment. **Outbox remains undecided; Credit integration is deferred**, including recovery and eventual onboarding of accounts verified before integration exists.
 - Cancellation eligibility, expiry duration and post-pickup penalty rules. Reconcile FR3.6.1's penalty with FR4.1.6's release rule, and clarify the release-on-completion wording in FR4.1.7.
 - Physical quantity limits, supported pickup-location choices, and the meaning of S1 assignment notification versus S2 general notifications.
 - Behaviour of rating-based simultaneous acceptance, and ownership of frontend, integration, deployment and nice-to-have work.
