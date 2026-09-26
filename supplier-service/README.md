@@ -48,7 +48,7 @@ To make your verified account an admin:
 docker compose exec user-service user-service promote-admin your-email@u.nus.edu
 ```
 
-Log in again after promotion. Supplier enforces permissions independently on every API request. UI role controls are implemented in the next checkpoint; the backend already denies non-admin writes.
+Log in again after promotion. Supplier enforces permissions independently on every API request. The UI shows management controls only to admins; ordinary users can browse, search, filter, sort and inspect active/inactive records. Expired or revoked sessions clear the catalogue and forms.
 
 ## Implemented boundaries
 

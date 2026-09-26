@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import AuthDialog from "./auth-dialog";
 import Catalogue from "./catalogue";
@@ -11,25 +11,50 @@ export default function Home() {
   const [authMode, setAuthMode] = useState<"login" | "register" | null>(null);
   const [notice, setNotice] = useState("");
   const [loggingOut, setLoggingOut] = useState(false);
+  const generation = useRef(0);
+  const endingSession = useRef(false);
 
-  useEffect(() => {
-    let active = true;
-    userApi.me().then(({ user }) => { if (active) setUser(user); }).catch((error: unknown) => {
-      if (active && !(error instanceof UserApiError && error.status === 401)) setNotice("Could not check your session. Please try logging in.");
-    }).finally(() => { if (active) setChecking(false); });
-    return () => { active = false; };
+  const invalidateReads = useCallback(() => { generation.current++; }, []);
+  const refreshSession = useCallback(() => {
+    if (endingSession.current) return Promise.resolve();
+    const requestGeneration = ++generation.current;
+    return userApi.me().then(({ user }) => {
+      if (requestGeneration === generation.current) setUser(user);
+    }).catch((error: unknown) => {
+      if (requestGeneration !== generation.current) return;
+      if (error instanceof UserApiError && error.status === 401) setUser(null);
+      else setNotice("Could not check your session. Please try logging in again.");
+    }).finally(() => {
+      if (requestGeneration === generation.current) setChecking(false);
+    });
   }, []);
 
+  useEffect(() => {
+    const check = () => { if (document.visibilityState === "visible") void refreshSession(); };
+    void refreshSession();
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      invalidateReads();
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [refreshSession, invalidateReads]);
+
   const expired = useCallback(() => {
+    generation.current++;
     setUser(null);
+    setChecking(false);
     setNotice("Your session has ended. Log in again to continue.");
   }, []);
 
   async function logout() {
+    endingSession.current = true;
+    generation.current++;
     setLoggingOut(true);
     try { await userApi.logout(); setUser(null); setNotice("You are logged out."); }
     catch { setNotice("Could not log out. Please retry."); }
-    finally { setLoggingOut(false); }
+    finally { endingSession.current = false; setLoggingOut(false); }
   }
 
   return <div className="site-shell">
@@ -52,10 +77,10 @@ export default function Home() {
       </section>
       {notice && <p className="notice account-notice" role="status">{notice}</p>}
       {checking ? <p className="empty-state" role="status">Checking your session…</p> : user ?
-        <Catalogue key={user.id} onSessionExpired={expired} /> :
+        <Catalogue key={user.id} canManage={user.roles.includes("admin")} onSessionExpired={expired} onPermissionsChanged={refreshSession} /> :
         <section className="empty-state welcome-panel"><p className="eyebrow">Made for our campus</p><h2>Explore the supplier directory</h2><p>Log in with your verified school account to browse campus suppliers.</p><button className="primary-button" onClick={() => setAuthMode("login")}>Log in to browse</button></section>}
     </main>
     <footer className="footer">Friend on Campus · NUS</footer>
-    {authMode && <AuthDialog initialMode={authMode} onClose={() => setAuthMode(null)} onLogin={(user) => { setUser(user); setAuthMode(null); setNotice(""); }} />}
+    {authMode && <AuthDialog initialMode={authMode} onClose={() => setAuthMode(null)} onLogin={(user) => { generation.current++; setUser(user); setChecking(false); setAuthMode(null); setNotice(""); }} />}
   </div>;
 }

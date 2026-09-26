@@ -7,7 +7,9 @@ import Modal from "./modal";
 
 type Resource = { key: string; page: SupplierPage | null; locations: CampusLocation[]; error: string };
 
-export default function Catalogue({ onSessionExpired }: { onSessionExpired: () => void }) {
+export default function Catalogue({ canManage, onSessionExpired, onPermissionsChanged }: {
+  canManage: boolean; onSessionExpired: () => void; onPermissionsChanged: () => Promise<void>;
+}) {
   const [query, setQuery] = useState<CatalogueQuery>(initialQuery);
   const [search, setSearch] = useState("");
   const [revision, setRevision] = useState(0);
@@ -25,7 +27,8 @@ export default function Catalogue({ onSessionExpired }: { onSessionExpired: () =
   const selected = page?.suppliers.find(s => s.id === selectedId) ?? page?.suppliers[0];
   const onFailure = useCallback((error: unknown) => {
     if (error instanceof SupplierApiError && error.status === 401) onSessionExpired();
-  }, [onSessionExpired]);
+    if (error instanceof SupplierApiError && error.status === 403 && error.code === "admin_required") void onPermissionsChanged();
+  }, [onSessionExpired, onPermissionsChanged]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -69,7 +72,7 @@ export default function Catalogue({ onSessionExpired }: { onSessionExpired: () =
   }
 
   return <section className="workspace live-catalogue" aria-label="Supplier catalogue">
-    <div className="section-heading"><div><p className="eyebrow">Supplier directory</p><h2>Explore campus suppliers</h2></div><div className="toolbar-actions"><button className="secondary-button" onClick={refresh} disabled={!current || busy}>Refresh</button><button className="primary-button add-button" disabled={!locations.length || busy} onClick={() => setEditing(null)}>Add supplier</button></div></div>
+    <div className="section-heading"><div><p className="eyebrow">Supplier directory</p><h2>Explore campus suppliers</h2></div><div className="toolbar-actions"><button className="secondary-button" onClick={refresh} disabled={!current || busy}>Refresh</button>{canManage && <button className="primary-button add-button" disabled={!locations.length || busy} onClick={() => setEditing(null)}>Add supplier</button>}</div></div>
     <form className="catalogue-controls" onSubmit={submitSearch}>
       <label className="search-field"><span>Search suppliers</span><div className="search-control"><input type="search" maxLength={100} placeholder="Name, description or campus location" value={search} onChange={e => setSearch(e.target.value)} /><button className="primary-button" type="submit">Search</button></div></label>
       <label><span>Category</span><select value={query.category} onChange={e => filter({ category: e.target.value })}><option value="">All categories</option>{categories.map(c => <option key={c} value={c}>{categoryLabel(c)}</option>)}</select></label>
@@ -88,17 +91,17 @@ export default function Catalogue({ onSessionExpired }: { onSessionExpired: () =
         <div className="supplier-list" aria-label="Supplier results">{page.suppliers.map(s => <button key={s.id} className={`supplier-card ${selected?.id === s.id ? "selected" : ""} ${s.active ? "" : "inactive-card"}`} aria-pressed={selected?.id === s.id} onClick={() => { setSelectedId(s.id); setActionError(""); }}>
           <span className="supplier-icon" aria-hidden="true">{s.name[0]}</span><span className="supplier-card-body"><strong className="supplier-card-title">{s.name}</strong><span className="supplier-card-meta">{categoryLabel(s.category)} · {locations.find(l => l.id === s.locationId)?.name ?? s.locationId}</span><span className={`mini-status ${s.active ? "is-active" : "is-inactive"}`}>{s.active ? "Active" : "Inactive"}</span></span><span className="card-arrow" aria-hidden="true">→</span>
         </button>)}</div>
-        {selected && <SupplierDetails key={`${selected.id}:${revision}`} id={selected.id} locations={locations} busy={busy} onFailure={onFailure} onEdit={setEditing} onToggle={toggle} onDelete={supplier => { setActionError(""); setDeleting(supplier); }} />}
+        {selected && <SupplierDetails key={`${selected.id}:${revision}`} id={selected.id} locations={locations} canManage={canManage} busy={busy} onFailure={onFailure} onEdit={setEditing} onToggle={toggle} onDelete={supplier => { setActionError(""); setDeleting(supplier); }} />}
       </div>}
       <nav className="pagination" aria-label="Supplier pages"><button className="secondary-button" disabled={page.page <= 1} onClick={() => setQuery(q => ({ ...q, page: q.page - 1 }))}>Previous</button><span>Page {page.totalPages === 0 ? 0 : page.page} of {page.totalPages}</span><button className="secondary-button" disabled={page.page >= page.totalPages} onClick={() => setQuery(q => ({ ...q, page: q.page + 1 }))}>Next</button></nav>
     </>}
-    {editing !== undefined && <SupplierDialog supplier={editing} locations={resource?.locations ?? []} onSave={save} onClose={() => setEditing(undefined)} />}
-    {deleting && <Modal titleId="delete-title" className="confirm-dialog" busy={busy} onClose={() => setDeleting(null)}><p className="eyebrow">Remove from directory</p><h2 id="delete-title">Delete {deleting.name}?</h2><p>This supplier will disappear from the catalogue. You cannot undo this here. To hide it from new pickup choices temporarily, deactivate it instead.</p>{actionError && <p className="form-error" role="alert">{actionError}</p>}<div className="detail-actions"><button autoFocus className="secondary-button" disabled={busy} onClick={() => setDeleting(null)}>Cancel</button><button className="danger-button" disabled={busy} onClick={remove}>{busy ? "Deleting…" : "Delete supplier"}</button></div></Modal>}
+    {canManage && editing !== undefined && <SupplierDialog supplier={editing} locations={resource?.locations ?? []} onSave={save} onClose={() => setEditing(undefined)} />}
+    {canManage && deleting && <Modal titleId="delete-title" className="confirm-dialog" busy={busy} onClose={() => setDeleting(null)}><p className="eyebrow">Remove from directory</p><h2 id="delete-title">Delete {deleting.name}?</h2><p>This supplier will disappear from the catalogue. You cannot undo this here. To hide it from new pickup choices temporarily, deactivate it instead.</p>{actionError && <p className="form-error" role="alert">{actionError}</p>}<div className="detail-actions"><button autoFocus className="secondary-button" disabled={busy} onClick={() => setDeleting(null)}>Cancel</button><button className="danger-button" disabled={busy} onClick={remove}>{busy ? "Deleting…" : "Delete supplier"}</button></div></Modal>}
   </section>;
 }
 
-function SupplierDetails({ id, locations, busy, onFailure, onEdit, onToggle, onDelete }: {
-  id: string; locations: CampusLocation[]; busy: boolean; onFailure: (error: unknown) => void;
+function SupplierDetails({ id, locations, canManage, busy, onFailure, onEdit, onToggle, onDelete }: {
+  id: string; locations: CampusLocation[]; canManage: boolean; busy: boolean; onFailure: (error: unknown) => void;
   onEdit: (supplier: Supplier) => void; onToggle: (supplier: Supplier) => void; onDelete: (supplier: Supplier) => void;
 }) {
   const [supplier, setSupplier] = useState<Supplier | null>(null);
@@ -117,7 +120,7 @@ function SupplierDetails({ id, locations, busy, onFailure, onEdit, onToggle, onD
       <p className="eyebrow">Supplier details</p><h3>{supplier.name}</h3><p className="detail-description">{supplier.description || "Description not provided"}</p>
       {!supplier.active && <p className="inactive-note">This supplier is inactive and unavailable for new pickups.</p>}
       <dl className="live-details"><div><dt>Category</dt><dd>{categoryLabel(supplier.category)}</dd></div><div><dt>Location</dt><dd>{locations.find(l => l.id === supplier.locationId)?.name ?? supplier.locationId}</dd></div><div><dt>Opening hours</dt><dd>{supplier.openingHours || "Not provided"}</dd></div><div><dt>Supplier ID</dt><dd>{supplier.id}</dd></div><div><dt>Added</dt><dd>{displayTime(supplier.createdAt)}</dd></div><div><dt>Updated</dt><dd>{displayTime(supplier.updatedAt)}</dd></div></dl>
-      <div className="detail-actions"><button className="secondary-button" disabled={busy} onClick={() => onEdit(supplier)}>Edit supplier</button><button className="secondary-button" disabled={busy} onClick={() => onToggle(supplier)}>{supplier.active ? "Deactivate" : "Reactivate"}</button><button className="danger-button" disabled={busy} onClick={() => onDelete(supplier)}>Delete supplier</button></div>
+      {canManage && <div className="detail-actions"><button className="secondary-button" disabled={busy} onClick={() => onEdit(supplier)}>Edit supplier</button><button className="secondary-button" disabled={busy} onClick={() => onToggle(supplier)}>{supplier.active ? "Deactivate" : "Reactivate"}</button><button className="danger-button" disabled={busy} onClick={() => onDelete(supplier)}>Delete supplier</button></div>}
     </>}
   </aside>;
 }

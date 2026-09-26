@@ -33,8 +33,11 @@ production build; the runtime uses Next standalone output. No host npm install i
 - Loading, empty, network-error and retry states are included. Obsolete reads are
   cancelled so a slower response cannot replace a newer search.
 
-At the step-3 checkpoint, management controls are present for signed-in users;
-the backend already rejects non-admin writes. Step 4 applies role-specific UI controls.
+Only users whose User Service response includes `admin` see create/edit/status/delete
+controls. Ordinary users retain all browsing tools. The backend independently
+authorizes every request. An expired/revoked session clears the catalogue and forms;
+returning to the tab rechecks the session. In-flight session reads cannot restore a
+previous account after logout or a new login. No role toggle or localStorage identity exists.
 
 The session is an HttpOnly cookie managed by the browser, sent with
 `credentials: "include"`. Only the temporary signup token lives in sessionStorage.

@@ -9,7 +9,7 @@ Service authorization and a responsive UI using live Supplier data.
 | 1. Integrate main | Reuse the account UI and navy/orange design, preserve Supplier and include Credit's configuration | Complete; verified 2026-09-27 |
 | 2. Complete Supplier API | Field editing, explicit deletion semantics, opening hours, inactive records, search/filter/sort/pagination | Complete; backend checks passed |
 | 3. Connect Supplier UI | Replace sample state with API reads and writes; show server validation and generated metadata | Complete; lint, types and build passed |
-| 4. Apply UI permissions | Ordinary-user browsing and admin management; backend remains the authority | Pending |
+| 4. Apply UI permissions | Ordinary-user browsing and admin management; backend remains the authority | Complete; lint, types and build passed |
 | 5. Finish and demonstrate | Desktop/mobile checks, API-only and end-to-end evidence, schema/role/design explanations | Pending |
 
 ## Step 1: one shared application
@@ -87,6 +87,15 @@ calls DELETE and refreshes the page. Empty, loading and retry states are present
 All sample supplier data and browser-generated IDs/timestamps have been removed.
 Frontend lint, TypeScript and production build passed; final browser evidence is
 collected after the role controls are applied in step 4.
+
+## Step 4: match controls to real permissions
+
+The User Service response determines whether management controls are shown. Normal
+users retain every browsing tool; only admins see add/edit/status/delete controls.
+The backend remains authoritative and returns 403 for forbidden writes. A 401
+clears the catalogue and open forms. Session checks on tab focus observe changes;
+generation counters prevent old session responses from restoring a logged-out or
+different account. Frontend lint, TypeScript and production build passed.
 
 ## Later checkpoints
 
