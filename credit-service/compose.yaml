@@ -1,0 +1,62 @@
+name: foc-credit
+
+services:
+  credit-db:
+    build: ./db
+    environment:
+      POSTGRES_PASSWORD: ${CREDIT_POSTGRES_PASSWORD:?Run sh credit-service/scripts/init-env.sh}
+    volumes:
+      - credit-data:/var/lib/postgresql
+    # Listens on 5432 inside the Compose network only; not published to the host.
+
+  credit-service:
+    build: .
+    environment:
+      CREDIT_DATABASE_URL: postgres://foc_credit:${CREDIT_POSTGRES_PASSWORD}@credit-db:5432/foc_credit?sslmode=disable
+      # FR4.1.1 leaves this as X; 100 is the brief's figure, not yet confirmed by the team.
+      CREDIT_INITIAL_CREDITS: "100"
+      CREDIT_APP_ORIGIN: http://localhost:3000
+      CREDIT_SESSION_COOKIE: foc_session
+      CREDIT_USER_SERVICE_URL: http://user-service:8081
+      CREDIT_INTERNAL_TOKEN: ${CREDIT_INTERNAL_TOKEN:?Run sh credit-service/scripts/init-env.sh}
+      # Must equal USER_INTERNAL_TOKEN in the root .env for session validation to work.
+      CREDIT_USER_INTERNAL_TOKEN: ${CREDIT_USER_INTERNAL_TOKEN:?Run sh credit-service/scripts/init-env.sh}
+    ports:
+      - "127.0.0.1:8082:8080"
+    depends_on:
+      credit-db:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  credit-test-db:
+    image: postgres:18-bookworm
+    profiles: [test]
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: credit_service_test
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d credit_service_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  credit-tests:
+    profiles: [test]
+    build:
+      context: .
+      target: development
+    environment:
+      CREDIT_TEST_DATABASE_URL: postgres://test:test@credit-test-db:5432/credit_service_test?sslmode=disable
+    depends_on:
+      credit-test-db:
+        condition: service_healthy
+    command: ["sh", "scripts/check.sh"]
+
+volumes:
+  credit-data:
