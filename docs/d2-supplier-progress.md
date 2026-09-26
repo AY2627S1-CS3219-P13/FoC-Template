@@ -8,7 +8,7 @@ Service authorization and a responsive UI using live Supplier data.
 | --- | --- | --- |
 | 1. Integrate main | Reuse the account UI and navy/orange design, preserve Supplier and include Credit's configuration | Complete; verified 2026-09-27 |
 | 2. Complete Supplier API | Field editing, explicit deletion semantics, opening hours, inactive records, search/filter/sort/pagination | Complete; backend checks passed |
-| 3. Connect Supplier UI | Replace sample state with API reads and writes; show server validation and generated metadata | Pending |
+| 3. Connect Supplier UI | Replace sample state with API reads and writes; show server validation and generated metadata | Complete; lint, types and build passed |
 | 4. Apply UI permissions | Ordinary-user browsing and admin management; backend remains the authority | Pending |
 | 5. Finish and demonstrate | Desktop/mobile checks, API-only and end-to-end evidence, schema/role/design explanations | Pending |
 
@@ -76,6 +76,17 @@ pagination. Count and rows share a repeatable-read snapshot. Duplicate active na
 at a location are enforced by the database. Integration tests cover query boundaries,
 pagination, denied writes, atomic duplicate rejection, retained deletion and read/edit
 behavior after deletion. Formatting, vet, race tests and compilation passed.
+
+## Step 3: persist the shared UI
+
+The catalogue now loads records, controlled locations, details and totals through
+Supplier APIs. Search/filter/order/page changes request new server results; obsolete
+reads are cancelled. Create/edit forms retain invalid drafts and show backend
+errors; successful saves display database-generated metadata. Confirmed deletion
+calls DELETE and refreshes the page. Empty, loading and retry states are present.
+All sample supplier data and browser-generated IDs/timestamps have been removed.
+Frontend lint, TypeScript and production build passed; final browser evidence is
+collected after the role controls are applied in step 4.
 
 ## Later checkpoints
 

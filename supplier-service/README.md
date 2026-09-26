@@ -40,7 +40,7 @@ Set `USER_HTTP_PORT` or `SUPPLIER_HTTP_PORT` in `.env` if direct API ports 8080/
 
 ## Accounts and current UI
 
-The shared navy/orange UI now includes signup, email verification, login and logout against the existing [User API](../user-service/API.md). Read local verification codes in Mailpit at port 8025. Its Supplier screens currently show explicitly labelled browser-only demo data; the earlier minimal live Supplier page has been replaced by the shared UI as an integration checkpoint. Supplier API functionality and database records remain available independently. Completing the backend contract and connecting this UI are the next [D2 steps](../docs/d2-supplier-progress.md).
+The shared navy/orange UI includes signup, email verification, login and logout against the existing [User API](../user-service/API.md). Read local verification codes in Mailpit at port 8025. Supplier screens now use live API queries and persisted CRUD operations, with loading/error/empty states and database-assigned metadata. The API remains independently usable. See the [D2 steps](../docs/d2-supplier-progress.md) for permission and final verification progress.
 
 To make your verified account an admin:
 
@@ -48,7 +48,7 @@ To make your verified account an admin:
 docker compose exec user-service user-service promote-admin your-email@u.nus.edu
 ```
 
-Log in again after promotion. Supplier enforces permissions independently on every API request. The UI's current Manage demo is not permission-controlled and must not be used as evidence of backend authorization.
+Log in again after promotion. Supplier enforces permissions independently on every API request. UI role controls are implemented in the next checkpoint; the backend already denies non-admin writes.
 
 ## Implemented boundaries
 
@@ -79,6 +79,6 @@ ESLint 9 is pinned because the React/import plugins bundled with the selected Ne
 
 ## Explicitly deferred
 
-Connecting the shared Supplier UI to live data, image/coordinate fields and image serving, Order integration, Redis caching, RabbitMQ events and load testing remain future work. The seed CSV retains the additional source metadata. Backend CRUD and queries do not by themselves complete the D2 UI requirement.
+Image/coordinate fields and image serving, Order integration, Redis caching, RabbitMQ events and load testing remain future work. The seed CSV retains the additional source metadata. D2 verification is tracked in the checkpoint document.
 
 This Compose setup binds public ports to loopback for local use. EC2 deployment still needs HTTPS ingress, secure cookies, deployment secrets, a real email provider, backup policy and appropriate network access. Services can communicate by Compose DNS on one host. The gateway re-resolves those names when containers are replaced. User's existing peer-IP rate limit sees gateway traffic as one source; a production trusted-proxy/rate-limit policy remains open.
