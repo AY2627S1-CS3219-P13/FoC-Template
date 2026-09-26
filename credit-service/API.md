@@ -1,49 +1,13 @@
-# Credit Service API
+# Credit Service API reference
 
-Wallets, escrows and credit history for Friend on Campus (backlog `FR4`, `NFR3`). Conventions follow [User Service's API](../user-service/API.md): JSON bodies, the same error shape, and UUIDs for user IDs.
+Request and response details for every Credit Service endpoint. For the endpoint list, authentication and the Order Service flow, see the [README](README.md#api). Conventions follow [User Service's API](../user-service/API.md): JSON bodies and the same error shape.
 
+- Public endpoints need User Service's session cookie; POST requests also need `Content-Type: application/json` and the frontend's exact `Origin`.
+- Internal endpoints need `Authorization: Bearer <CREDIT_INTERNAL_TOKEN>`; requests with a body need `Content-Type: application/json`.
 - **Amounts** are whole numbers of credits, greater than zero.
 - **User IDs** are User Service UUIDs in the canonical 36-character form. Any letter case is accepted; responses use lowercase.
 - **Order IDs** are chosen by Order Service: 1–128 characters, no leading or trailing spaces.
 - **Request IDs** (admin debits) follow the same rules as order IDs. Use a fresh UUID per debit.
-
-## Overview
-
-### Public API — port 8080
-
-For the frontend. Published locally at `http://localhost:8082`.
-
-| Method and path | Function | Request body | Success | Authentication |
-| --- | --- | --- | --- | --- |
-| [`GET /api/v1/wallets/me`](#get-apiv1walletsme) | `Balance` | No body | 200, `Wallet` | Session cookie |
-| [`POST /api/v1/admin/wallets/{userId}/debits`](#post-apiv1adminwalletsuseriddebits) | `AdminDebit` | `amount`, `reason`, `requestId` | 200, updated `Wallet` | Admin session cookie |
-| `GET /healthz` | — | No body | 200 if the HTTP server is running | None |
-| `GET /readyz` | — | No body | 200 if the database is reachable; otherwise 503 `not_ready` | None |
-
-Planned: `GET /api/v1/wallets/me/transactions?limit=30` for transaction history (`FR4.2.1`).
-
-### API for other services — port 8081
-
-Reachable only from containers on the same Compose network, as `http://credit-service:8081`. Never route it through the public proxy.
-
-| Method and path | Function | Caller | Request body | Success |
-| --- | --- | --- | --- | --- |
-| [`GET /internal/v1/wallets/{userId}`](#get-internalv1walletsuserid) | `Balance` | Order | No body | 200, `Wallet` |
-| [`POST /internal/v1/wallets/{userId}/initial-allocation`](#post-internalv1walletsuseridinitial-allocation) | `AllocateInitial` | User | No body | 200, `Wallet` |
-| [`PUT /internal/v1/escrows/{orderId}`](#put-internalv1escrowsorderid) | `Reserve` | Order | `userId`, `amount` | 200, requester's `Wallet` |
-| [`POST /internal/v1/escrows/{orderId}/release`](#post-internalv1escrowsorderidrelease) | `Release` | Order | No body | 200, requester's `Wallet` |
-| [`POST /internal/v1/escrows/{orderId}/payout`](#post-internalv1escrowsorderidpayout) | `Transfer` | Order | `courierId` | 204 |
-
-An **escrow** holds a requester's credits for one order, from errand creation until they are released back or paid out to the courier. Each order has at most one escrow, identified by its order ID. Credits only move through an escrow: no endpoint moves credits directly between users (`FR4.1.8`).
-
-## Authentication
-
-**Public API.** The browser sends User Service's session cookie (`foc_session` locally, `__Host-foc_session` with secure cookies); use `credentials: "include"`. Credit Service validates it on every request through User Service's internal session endpoint. The acting user always comes from the session, never from the request.
-
-- POST requests need `Content-Type: application/json` and the frontend's exact `Origin` (`http://localhost:3000` locally). Any request with a different `Origin` is rejected with 403 `origin_rejected`.
-- If User Service is unreachable, requests fail closed with 503 `auth_unavailable`.
-
-**Internal API.** Every request needs `Authorization: Bearer <CREDIT_INTERNAL_TOKEN>`, from server-side configuration; never expose it to the frontend. Requests with a body need `Content-Type: application/json`. A missing or wrong token returns 401 `invalid_service_credentials`.
 
 ## Retries
 
@@ -73,6 +37,44 @@ Every endpoint except payout returns a wallet:
 
 `available` can be spent on new errands. `reserved` is held in escrow for the user's open errands (`FR4.1.2`). Neither is ever negative.
 
+## History
+
+Every balance change is recorded as one history entry, in the same database transaction as the change (`FR4.2`). History is append-only: entries are never edited or deleted. A wallet always equals the sum of its entries' deltas, and the balances on its newest entry.
+
+```json
+{
+  "transactions": [
+    {
+      "id": 42,
+      "kind": "spend",
+      "amount": 20,
+      "availableDelta": 0,
+      "reservedDelta": -20,
+      "availableAfter": 80,
+      "reservedAfter": 0,
+      "orderId": "order-8f3a",
+      "counterpartyId": "0b6f5c2d-3e4a-4b5c-8d6e-7f8091a2b3c4",
+      "createdAt": "2026-09-26T05:30:14.059Z"
+    }
+  ],
+  "nextBefore": 42
+}
+```
+
+| `kind` | Meaning | `availableDelta` | `reservedDelta` |
+| --- | --- | --- | --- |
+| `allocation` | Initial credits after verification | +amount | 0 |
+| `reserve` | Held for a new errand | −amount | +amount |
+| `release` | Errand cancelled or expired | +amount | −amount |
+| `spend` | Paid to the courier | 0 | −amount |
+| `receive` | Earned as the courier | +amount | 0 |
+| `admin_debit` | Removed by an admin | −amount | 0 |
+
+- `amount` is always positive; the deltas carry the sign. `availableAfter` and `reservedAfter` are the balances right after this entry.
+- `orderId` is present for errand entries. `counterpartyId` is the courier on a `spend` and the requester on a `receive` (`FR4.2.1`).
+- Entries are newest first. `?limit` is 1–100 (default 30). To get the next page, pass `?before=<nextBefore>`; `nextBefore` is `null` on the last page. A full page can be followed by an empty one.
+- A wallet with no entries returns `"transactions": []`.
+
 ## Public endpoints
 
 ### `GET /api/v1/wallets/me`
@@ -93,6 +95,24 @@ Returns 200 with the `Wallet`.
 | 503 | `auth_unavailable` | User Service is unreachable |
 
 There is no public route to another user's wallet.
+
+### `GET /api/v1/wallets/me/transactions`
+
+The signed-in user's [history](#history), newest first.
+
+```http
+GET http://localhost:8082/api/v1/wallets/me/transactions?limit=30
+Cookie: foc_session=<session token>
+```
+
+Returns 200 with a history page.
+
+| Status | Code | When |
+| --- | --- | --- |
+| 400 | `invalid_input` | `limit` outside 1–100, or `before` not a positive whole number |
+| 401 | `invalid_session` | No cookie, or the session is expired or revoked |
+| 404 | `wallet_not_found` | The user has no wallet |
+| 503 | `auth_unavailable` | User Service is unreachable |
 
 ### `POST /api/v1/admin/wallets/{userId}/debits`
 
@@ -147,6 +167,15 @@ Returns 200 with the `Wallet`.
 | Status | Code | When |
 | --- | --- | --- |
 | 400 | `invalid_input` | Malformed `userId` |
+| 404 | `wallet_not_found` | The user has no wallet |
+
+### `GET /internal/v1/wallets/{userId}/transactions`
+
+Any user's [history](#history), with the same `limit` and `before` parameters and page format as the public endpoint.
+
+| Status | Code | When |
+| --- | --- | --- |
+| 400 | `invalid_input` | Malformed `userId`, `limit` outside 1–100, or an invalid `before` |
 | 404 | `wallet_not_found` | The user has no wallet |
 
 ### `POST /internal/v1/wallets/{userId}/initial-allocation`
@@ -225,14 +254,6 @@ Returns 204 with no body.
 | 404 | `wallet_not_found` | The courier has no wallet; nothing changes |
 | 409 | `escrow_settled` | The escrow was released, or paid out to a different courier |
 | 409 | `courier_is_requester` | `courierId` is the requester (`FR3.3.1`) |
-
-## Order Service flow
-
-1. **Create errand:** `PUT /internal/v1/escrows/{orderId}`. On 409 `insufficient_credits`, reject the errand (`FR3.1.4`).
-2. **Cancelled or expired:** `POST …/{orderId}/release`.
-3. **Requester confirmed delivery:** `POST …/{orderId}/payout` with the assigned courier.
-
-Retry steps 2 and 3 until they succeed; repeats are harmless. They may later be driven by events (`FR5`) instead of HTTP calls; the broker is not decided yet.
 
 ## Errors
 

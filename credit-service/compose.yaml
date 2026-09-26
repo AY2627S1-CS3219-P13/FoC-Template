@@ -2,12 +2,18 @@ name: foc-credit
 
 services:
   credit-db:
-    build: ./db
+    image: postgres:18-bookworm
     environment:
+      POSTGRES_USER: foc_credit
+      POSTGRES_DB: foc_credit
       POSTGRES_PASSWORD: ${CREDIT_POSTGRES_PASSWORD:?Run sh credit-service/scripts/init-env.sh}
     volumes:
       - credit-data:/var/lib/postgresql
-    # Listens on 5432 inside the Compose network only; not published to the host.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foc_credit -d foc_credit"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
 
   credit-service:
     build: .

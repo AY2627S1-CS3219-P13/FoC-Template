@@ -1,36 +1,71 @@
 # Credit Service
 
-Wallets, reservations, transfers and transaction history for Friend on Campus (backlog `FR4`, `NFR3`).
+Wallets, escrows and credit history for Friend on Campus (backlog `FR4`, `NFR3`), written in Go with PostgreSQL. This page is the overview; [API.md](API.md) is the endpoint-by-endpoint reference.
 
-**Status:** all six operations and their endpoints are implemented. Transaction history (`FR4.2.1`) and the User/Order Service integrations are not yet built.
+**Status:** all credit operations and their endpoints are implemented. User Service does not call the initial allocation yet, and Order Service does not exist yet.
 
-## Operations
+## API
 
-All live in `internal/credit/credit.go`. Each runs in one database transaction with row locks, so a balance change and its ledger entry commit together (`NFR3.3`).
+### Public — port 8080
 
-| Operation | Purpose | Idempotency key | Endpoint |
-| --- | --- | --- | --- |
-| `Balance` | Available and reserved credits (`FR4.1.2`) | read-only | `GET /api/v1/wallets/me`, `GET /internal/v1/wallets/{userId}` |
-| `AllocateInitial` | Starting credits after verification (`FR4.1.1`) | user ID | `POST /internal/v1/wallets/{userId}/initial-allocation` |
-| `Reserve` | Freeze credits when an errand is created (`FR4.1.3`) | order ID | `PUT /internal/v1/escrows/{orderId}` |
-| `Release` | Unfreeze on cancellation/expiry (`FR4.1.5`) | order ID | `POST /internal/v1/escrows/{orderId}/release` |
-| `Transfer` | Pay the courier on completion, atomically (`FR4.1.4`) | order ID | `POST /internal/v1/escrows/{orderId}/payout` |
-| `AdminDebit` | Remove available credits (admin) | request ID | `POST /api/v1/admin/wallets/{userId}/debits` |
+For the frontend, published locally at `http://localhost:8082`. Authenticated by User Service's session cookie.
 
-`/api/…` routes are public (port 8080, session cookie); `/internal/…` routes are for other services (port 8081). Request bodies, responses and error codes are in [API.md](API.md).
+| Endpoint | Purpose |
+| --- | --- |
+| [`GET /api/v1/wallets/me`](API.md#get-apiv1walletsme) | Available and reserved credits (`FR4.1.2`) |
+| [`GET /api/v1/wallets/me/transactions`](API.md#get-apiv1walletsmetransactions) | Credit history, newest first (`FR4.2.1`) |
+| [`POST /api/v1/admin/wallets/{userId}/debits`](API.md#post-apiv1adminwalletsuseriddebits) | Admin removes available credits |
+| `GET /healthz`, `GET /readyz` | Server running; database reachable |
 
-`AdminDebit` is **not in the D1 backlog**: `FR4.1.7` lists the only permitted balance changes. Agree it with the team before implementing it.
+### Internal — port 8081
 
-Credits move through an escrow (the `reservations` table) tied to an errand, never directly between arbitrary users (`FR4.1.8`). Schema: `internal/credit/migrations/001_initial.sql` (wallets, reservations, append-only transactions ledger).
+For other services only, as `http://credit-service:8081` on the Compose network. Never route it through the public proxy.
 
-## Containers
-
-| Container | Built from | Port |
+| Endpoint | Caller | Purpose |
 | --- | --- | --- |
-| `credit-db` | `db/Dockerfile` (PostgreSQL 18) | 5432, Compose network only |
-| `credit-service` | `Dockerfile` (Go) | 8080 in the container, published as `127.0.0.1:8082` |
+| [`GET /internal/v1/wallets/{userId}`](API.md#get-internalv1walletsuserid) | Order | A user's balance |
+| [`GET /internal/v1/wallets/{userId}/transactions`](API.md#get-internalv1walletsuseridtransactions) | Any | A user's history |
+| [`POST /internal/v1/wallets/{userId}/initial-allocation`](API.md#post-internalv1walletsuseridinitial-allocation) | User | Initial credits, exactly once (`FR4.1.1`) |
+| [`PUT /internal/v1/escrows/{orderId}`](API.md#put-internalv1escrowsorderid) | Order | Reserve credits for a new errand (`FR4.1.3`) |
+| [`POST /internal/v1/escrows/{orderId}/release`](API.md#post-internalv1escrowsorderidrelease) | Order | Return them on cancellation or expiry (`FR4.1.5`) |
+| [`POST /internal/v1/escrows/{orderId}/payout`](API.md#post-internalv1escrowsorderidpayout) | Order | Pay the courier on completion (`FR4.1.4`) |
 
-The service reaches the database at `credit-db:5432` through `CREDIT_DATABASE_URL`. Data is kept in the `credit-data` volume.
+An **escrow** holds a requester's credits for one order, from errand creation until they are released back or paid out. Credits only move through an escrow, never directly between users (`FR4.1.8`). Every write is [safe to retry](API.md#retries).
+
+### Authentication
+
+- **Public:** the browser sends User Service's session cookie (`credentials: "include"`); Credit validates it through User Service on every request. The acting user always comes from the session. POST requests also need the frontend's exact `Origin`. If User Service is unreachable, requests fail closed with 503.
+- **Internal:** `Authorization: Bearer <CREDIT_INTERNAL_TOKEN>`, from server-side configuration. Never expose it to the frontend.
+
+### Order Service flow
+
+1. **Create errand:** `PUT /internal/v1/escrows/{orderId}` before saving the order. On 409 `insufficient_credits`, reject the errand (`FR3.1.4`).
+2. **Cancelled or expired:** `POST …/{orderId}/release`.
+3. **Requester confirmed delivery:** `POST …/{orderId}/payout` with the assigned courier.
+
+Retry steps 2 and 3 until they succeed. They may later be driven by events (`FR5`); the broker is not decided yet.
+
+## Design
+
+**History and logging.** The `transactions` table is the credit history, and it cannot disagree with balances or logs:
+
+- **One write path.** Every balance change goes through `ledgerTx.apply` (`ledger.go`), which updates the wallet and appends the history entry in the same transaction. Each kind has a fixed effect on the two balances (the `effects` table), and each entry stores the balances after it. Operations never write `wallets` or `transactions` themselves.
+- **Logged once, centrally.** `inTx` logs each change as a `credits moved` event after the transaction commits (`NFR6`); rolled-back work is never logged. Unexpected request errors are logged by the HTTP error handler.
+- **Enforced by the database.** Constraints forbid negative balances and entries that don't match their kind's effect. A trigger makes history append-only.
+- **Checked by every test.** After each test, every wallet must equal the sum of its entries and the balances on its newest entry.
+
+To add a new kind of balance change: add a `Kind` and its row in `effects`, extend the `transactions_kind_effect` constraint in a new migration, and call `tx.apply`.
+
+**Concurrency.** Each write locks the rows it changes, so concurrent requests cannot overspend or pay out twice (`NFR3.2`). Locks are taken in a fixed order (escrow, then wallets by user ID) to avoid deadlocks. A payout changes both wallets in one transaction, so both update or neither does (`NFR3.3`).
+
+| File | Responsibility |
+| --- | --- |
+| `cmd/server/main.go` | Startup, migrations, the two HTTP listeners |
+| `internal/credit/credit.go` | Balance, allocation, reserve, release, payout, admin debit |
+| `internal/credit/ledger.go` | The single write path, central logging, history reads |
+| `internal/credit/http.go` | Routes, authentication, request parsing, error codes |
+| `internal/credit/sessions.go` | Session validation through User Service |
+| `internal/credit/migrations/` | Wallets, escrows (`reservations`) and history (`transactions`) |
 
 ## Run locally
 
@@ -43,13 +78,9 @@ docker compose up --build -d            # User and Credit Service, their databas
 curl http://localhost:8082/readyz
 ```
 
-The root `compose.yaml` includes this folder's `compose.yaml`, so both services share one network. Credit validates sessions at `http://user-service:8081`, using the root `.env`'s `USER_INTERNAL_TOKEN`.
+The root `compose.yaml` includes this folder's `compose.yaml`. Credit Service publishes only port 8080, as `127.0.0.1:8082`; its internal port and its database (`credit-db`, data in the `credit-data` volume) stay on the Compose network. It validates sessions at `http://user-service:8081` with the root `.env`'s `USER_INTERNAL_TOKEN`. Other settings are in `compose.yaml`; secrets are in `credit-service/.env`.
 
-- Public API: `http://localhost:8082` (container port 8080).
-- Internal API: `http://credit-service:8081`, from containers on the same Compose network only. Callers send `Authorization: Bearer <CREDIT_INTERNAL_TOKEN>` from `credit-service/.env`.
-- Settings: `CREDIT_INITIAL_CREDITS`, `CREDIT_APP_ORIGIN`, `CREDIT_SESSION_COOKIE` and `CREDIT_USER_SERVICE_URL` are in `compose.yaml`; secrets are in `credit-service/.env`.
-
-To work on Credit Service alone, run `docker compose up --build -d` inside `credit-service/`. Without User Service, the public `/api` routes answer 503 `auth_unavailable`; the internal API works normally.
+To work on Credit Service alone, run `docker compose up --build -d` inside `credit-service/`. Without User Service, the public routes answer 503; the internal API works normally.
 
 ## Test
 
@@ -57,10 +88,9 @@ To work on Credit Service alone, run `docker compose up --build -d` inside `cred
 docker compose --profile test run --build --rm credit-tests   # from credit-service/
 ```
 
-Runs `gofmt`, `go vet`, race-enabled tests against a throwaway PostgreSQL, and a build (`scripts/check.sh`). Tests skip unless `CREDIT_TEST_DATABASE_URL` is set; the Compose profile sets it. Each test gets its own schema.
+Runs `gofmt`, `go vet`, race-enabled tests against a throwaway PostgreSQL, and a build (`scripts/check.sh`). Each test gets its own schema.
 
-The tests were written before the implementation, as the target behaviour:
-
-- `internal/credit/credit_test.go`: each operation called directly: happy path, boundaries, invalid input, retries with the same key, conflicts, and concurrency (no overspending, no double payout, no deadlock between opposite transfers).
-- `internal/credit/http_test.go`: the same cases through the endpoints, checking the status and error code from [API.md](API.md), plus service-token, session, admin-role and Origin checks.
-- `internal/credit/helpers_test.go`: per-test schema, a fake User Service (`fakeSessions`), and direct-SQL setup so each operation is tested independently of the others.
+- `credit_test.go`: each operation called directly: boundaries, invalid input, retries, conflicts and concurrency (no overspending, no double payout, no deadlock).
+- `http_test.go`: the same cases through the endpoints, checking the status and error codes in [API.md](API.md), plus authentication.
+- `ledger_test.go`: history contents, paging and the 100-concurrent-reads target (`NFR1.2`), plus the database guarantees.
+- `helpers_test.go`: per-test schema, a fake User Service, direct-SQL setup, and the balance-versus-history check run after every test.
