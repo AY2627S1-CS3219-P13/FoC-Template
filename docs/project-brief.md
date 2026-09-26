@@ -27,7 +27,7 @@ Payment for purchased items, supplier menus/catalogues/inventory/checkout and li
 
 | Area | Current direction | Status |
 | --- | --- | --- |
-| Frontend | TypeScript and Next.js | Current team stack direction |
+| Frontend | TypeScript and Next.js | Local Supplier UI showcase uses sample data; login/logout and email verification use User Service; Supplier integration pending |
 | Backend | Go for the services | Current team stack direction; framework and versions open |
 | Application hosting | AWS EC2 | Confirmed team decision |
 | Account access | Own email/password registration and school-email verification | Current product direction; external provider login not requested |

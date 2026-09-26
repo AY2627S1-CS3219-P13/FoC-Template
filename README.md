@@ -28,12 +28,15 @@ User Service is available for local development. See [setup and design](user-ser
 
 Credit Service is also available for local development. See its [setup and design](credit-service/README.md) and the [API reference](credit-service/API.md), which documents every credit endpoint.
 
+The [frontend showcase](frontend/README.md) is a separate Next.js app with real User Service login/logout and a local Supplier catalogue demo. The catalogue uses sample data while Supplier Service is being developed.
+
 This repository follows a **one-service-per-folder** structure: each
 microservice (`user-service/`, `supplier-service/`, `order-service/`,
 `credit-service/`) lives in its own top-level folder.
 
 ```text
 .
+├── frontend/
 ├── user-service/
 ├── supplier-service/
 ├── order-service/
