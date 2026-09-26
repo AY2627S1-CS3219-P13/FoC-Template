@@ -34,24 +34,27 @@ The service reaches the database at `credit-db:5432` through `CREDIT_DATABASE_UR
 
 ## Run locally
 
-From `credit-service/`, with Docker Desktop running:
+With Docker Desktop running, from the **repository root**:
 
 ```sh
-sh scripts/init-env.sh        # creates a git-ignored .env with random secrets; never overwrites
-docker compose up --build -d  # credit-db + credit-service
+sh user-service/scripts/init-env.sh     # root .env (User Service secrets); never overwrites
+sh credit-service/scripts/init-env.sh   # credit-service/.env (Credit secrets); never overwrites
+docker compose up --build -d            # User and Credit Service, their databases, Mailpit
 curl http://localhost:8082/readyz
 ```
 
-- Public API: `http://localhost:8082` (container port 8080).
-- Internal API: `http://credit-service:8081`, from containers on the same Compose network only. Callers send `Authorization: Bearer <CREDIT_INTERNAL_TOKEN>`.
-- Settings: `CREDIT_INITIAL_CREDITS`, `CREDIT_APP_ORIGIN`, `CREDIT_SESSION_COOKIE` and `CREDIT_USER_SERVICE_URL` are in `compose.yaml`; the secrets are in `.env`.
+The root `compose.yaml` includes this folder's `compose.yaml`, so both services share one network. Credit validates sessions at `http://user-service:8081`, using the root `.env`'s `USER_INTERNAL_TOKEN`.
 
-This Compose file runs Credit Service on its own network, so `user-service` is not reachable from it: public `/api` routes answer 503 `auth_unavailable` until both run in one Compose project (e.g. via `include:` from the root `compose.yaml`). `init-env.sh` copies `USER_INTERNAL_TOKEN` from the root `.env` when it exists; otherwise set `CREDIT_USER_INTERNAL_TOKEN` to match it later.
+- Public API: `http://localhost:8082` (container port 8080).
+- Internal API: `http://credit-service:8081`, from containers on the same Compose network only. Callers send `Authorization: Bearer <CREDIT_INTERNAL_TOKEN>` from `credit-service/.env`.
+- Settings: `CREDIT_INITIAL_CREDITS`, `CREDIT_APP_ORIGIN`, `CREDIT_SESSION_COOKIE` and `CREDIT_USER_SERVICE_URL` are in `compose.yaml`; secrets are in `credit-service/.env`.
+
+To work on Credit Service alone, run `docker compose up --build -d` inside `credit-service/`. Without User Service, the public `/api` routes answer 503 `auth_unavailable`; the internal API works normally.
 
 ## Test
 
 ```sh
-docker compose --profile test run --build --rm credit-tests
+docker compose --profile test run --build --rm credit-tests   # from credit-service/
 ```
 
 Runs `gofmt`, `go vet`, race-enabled tests against a throwaway PostgreSQL, and a build (`scripts/check.sh`). Tests skip unless `CREDIT_TEST_DATABASE_URL` is set; the Compose profile sets it. Each test gets its own schema.

@@ -19,8 +19,8 @@ services:
       CREDIT_SESSION_COOKIE: foc_session
       CREDIT_USER_SERVICE_URL: http://user-service:8081
       CREDIT_INTERNAL_TOKEN: ${CREDIT_INTERNAL_TOKEN:?Run sh credit-service/scripts/init-env.sh}
-      # Must equal USER_INTERNAL_TOKEN in the root .env for session validation to work.
-      CREDIT_USER_INTERNAL_TOKEN: ${CREDIT_USER_INTERNAL_TOKEN:?Run sh credit-service/scripts/init-env.sh}
+      # Run from the root compose, User Service's own token is used; standalone, the one in credit-service/.env.
+      CREDIT_USER_INTERNAL_TOKEN: ${USER_INTERNAL_TOKEN:-${CREDIT_USER_INTERNAL_TOKEN:?Run sh credit-service/scripts/init-env.sh}}
     ports:
       - "127.0.0.1:8082:8080"
     depends_on:

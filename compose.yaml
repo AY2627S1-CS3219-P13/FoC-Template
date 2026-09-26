@@ -1,5 +1,14 @@
 name: foc
 
+# Credit Service keeps its own compose file; its secrets come from
+# credit-service/.env (sh credit-service/scripts/init-env.sh), and
+# USER_INTERNAL_TOKEN from this directory's .env.
+include:
+  - path: credit-service/compose.yaml
+    env_file:
+      - .env
+      - credit-service/.env
+
 services:
   user-db:
     image: postgres:18-bookworm
