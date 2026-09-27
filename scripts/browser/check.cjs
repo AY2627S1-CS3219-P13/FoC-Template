@@ -88,11 +88,13 @@ async function screenshot(page, filename, width) {
     await dialog.getByRole('heading', { name: 'Email verified — account active' }).waitFor();
     await dialog.getByRole('button', { name: 'Close account form' }).click();
     await login(page, studentEmail, studentPassword);
+    assert.equal((await page.goto(base + '/admin')).status(), 404, 'Ordinary user must not receive the admin page');
+    await page.goto(base);
+    await page.locator('.supplier-card').first().waitFor();
     await page.reload();
     await page.locator('.supplier-card').first().waitFor();
     assert.equal(await page.getByRole('button', { name: 'Add supplier', exact: true }).count(), 0);
     assert.equal(await page.getByRole('button', { name: 'Edit supplier', exact: true }).count(), 0);
-    const ordinary = (await call(student, 'GET', '/api/v1/users/me')).user;
     const initial = await call(student, 'GET', '/api/v1/suppliers?pageSize=100');
     assert(initial.total >= 21);
     const known = initial.suppliers[0].id;
@@ -132,6 +134,17 @@ async function screenshot(page, filename, width) {
     pass('Live pagination, filters, sorting, empty state, injected outage/retry and 1440/390/320px browsing');
 
     await login(manage, adminEmail, adminPassword);
+    await manage.getByRole('link', { name: 'Admin page' }).click();
+    await manage.getByRole('heading', { name: 'Admin page' }).waitFor();
+    await manage.getByLabel('School email').fill(studentEmail);
+    await manage.getByRole('button', { name: 'Find user' }).click();
+    await manage.getByText(studentEmail, { exact: true }).waitFor();
+    await manage.getByLabel('Request preset').selectOption({ label: 'Suppliers' });
+    await manage.getByRole('button', { name: 'Run GET' }).click();
+    await manage.getByText('HTTP 200').waitFor();
+    await manage.getByRole('link', { name: 'Back to catalogue' }).click();
+    await manage.locator('.supplier-card').first().waitFor();
+    pass('Admin-only page, exact-email lookup and live supplier service check');
     const name = `D2 Cafe ${stamp}`;
     await manage.getByRole('button', { name: 'Add supplier', exact: true }).click();
     dialog = manage.getByRole('dialog');
@@ -194,7 +207,16 @@ async function screenshot(page, filename, width) {
     pass('Admin create/edit, duplicate rejection preserving draft, reload persistence, inactive/read/reactivate, confirmed deletion');
 
     const actor = (await call(admin, 'GET', '/api/v1/users/me')).user;
-    await call(admin, 'PUT', `/api/v1/admin/users/${ordinary.id}/role`, { role: 'admin' });
+    await manage.getByRole('link', { name: 'Admin page' }).click();
+    await manage.getByRole('heading', { name: 'Admin page' }).waitFor();
+    await manage.getByLabel('School email').fill(studentEmail);
+    await manage.getByRole('button', { name: 'Find user' }).click();
+    await manage.getByRole('button', { name: 'Promote to admin' }).waitFor();
+    manage.once('dialog', dialog => dialog.accept());
+    await manage.getByRole('button', { name: 'Promote to admin' }).click();
+    await manage.getByText('is now an admin.', { exact: false }).waitFor();
+    await manage.getByRole('link', { name: 'Back to catalogue' }).click();
+    await manage.locator('.supplier-card').first().waitFor();
     await call(student, 'GET', '/api/v1/suppliers', undefined, 401);
     await call(student, 'POST', '/api/v1/auth/login', { email: studentEmail, password: studentPassword });
     await call(student, 'PUT', `/api/v1/admin/users/${actor.id}/role`, { role: 'user' });

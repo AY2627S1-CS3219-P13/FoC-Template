@@ -111,6 +111,11 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_USER_API_URL: ${NEXT_PUBLIC_USER_API_URL:-}
+    environment:
+      USER_SERVICE_URL: http://user-service:8080
+    depends_on:
+      user-service:
+        condition: service_started
     read_only: true
     tmpfs: [/tmp]
     security_opt:

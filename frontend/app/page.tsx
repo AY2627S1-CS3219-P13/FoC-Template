@@ -63,6 +63,7 @@ export default function Home() {
       <div className="account-actions">
         {checking ? <span className="account-label">Checking session…</span> : user ? <>
           <span className="account-label" title={user.displayName}>{user.displayName} · {user.roles.includes("admin") ? "Admin" : "User"}</span>
+          {user.roles.includes("admin") && <Link className="secondary-button admin-nav-link" href="/admin">Admin page</Link>}
           <button className="secondary-button" disabled={loggingOut} onClick={logout}>{loggingOut ? "Logging out…" : "Log out"}</button>
         </> : <>
           <button className="secondary-button" onClick={() => setAuthMode("login")}>Log in</button>

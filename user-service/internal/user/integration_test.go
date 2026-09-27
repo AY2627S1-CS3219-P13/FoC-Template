@@ -271,6 +271,8 @@ func TestAdminPermissions(t *testing.T) {
 	verifyTest(t, a, m, "student@u.nus.edu")
 	student := loginTest(t, a, "student@u.nus.edu", testPassword)
 	admin := loginTest(t, a, "admin@u.nus.edu", testPassword)
+	status(t, request(t, a.PublicHandler(), "GET", "/api/v1/admin/users?email=student%40u.nus.edu", nil, nil, nil), 401)
+	status(t, request(t, a.PublicHandler(), "GET", "/api/v1/admin/users?email=student%40u.nus.edu", nil, student, nil), 403)
 	u, _, err := a.session(context.Background(), student.Value)
 	if err != nil {
 		t.Fatal(err)
@@ -280,6 +282,13 @@ func TestAdminPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	admin = loginTest(t, a, "admin@u.nus.edu", testPassword)
+	lookup := request(t, a.PublicHandler(), "GET", "/api/v1/admin/users?email=STUDENT%40U.NUS.EDU", nil, admin, nil)
+	status(t, lookup, 200)
+	if !strings.Contains(lookup.Body.String(), u.ID) || strings.Contains(lookup.Body.String(), "password_hash") {
+		t.Fatal("admin lookup must return the verified user's public profile")
+	}
+	status(t, request(t, a.PublicHandler(), "GET", "/api/v1/admin/users?email=missing%40u.nus.edu", nil, admin, nil), 404)
+	status(t, request(t, a.PublicHandler(), "GET", "/api/v1/admin/users?email=invalid", nil, admin, nil), 400)
 	status(t, request(t, a.PublicHandler(), "PUT", "/api/v1/admin/users/"+u.ID+"/role", map[string]string{"role": "admin"}, admin, nil), 200)
 	status(t, validateTest(t, a, student), 401)
 	student = loginTest(t, a, "student@u.nus.edu", testPassword)

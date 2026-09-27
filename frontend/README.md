@@ -33,6 +33,16 @@ production build; the runtime uses Next standalone output. No host npm install i
   from the catalogue; the backend retains the row for historical references.
 - Loading, empty, network-error and retry states are included. Obsolete reads are
   cancelled so a slower response cannot replace a newer search.
+- `/admin` is checked against the current User Service session during server rendering
+  and again in the browser. A non-admin receives no admin page. Admins can look up
+  one verified user by exact school email and promote them; the target's sessions
+  are revoked, so they must log in again. The first admin still needs the operator
+  bootstrap command described by User Service.
+- The admin page has preset, read-only GET checks for the gateway, current user,
+  suppliers and locations. It shows the actual status, duration and response body.
+  Gateway health checks only Nginx; supplier requests also exercise User Service
+  session validation and Supplier Service's database. Credit and Order are not
+  routed through this page yet. No arbitrary URLs or internal credentials are used.
 
 Only users whose User Service response includes `admin` see create/edit/status/delete
 controls. Ordinary users retain all browsing tools. The backend independently
@@ -49,6 +59,7 @@ matching origin/cookie settings. Internal service credentials never enter this a
 ## Files
 
 - `app/page.tsx`: shared header, account state, sign-in boundary.
+- `app/admin/`: server-gated admin page, promotion flow and GET request presets.
 - `app/catalogue.tsx`: live queries, detail reads, pagination and management actions.
 - `app/supplier-dialog.tsx`: persisted create/edit forms and save summary.
 - `app/modal.tsx`: native modal focus trapping, Escape behavior and focus restoration.

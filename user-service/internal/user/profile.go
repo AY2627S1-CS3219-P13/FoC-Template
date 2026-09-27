@@ -94,6 +94,46 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+func (a *App) findUserByEmail(w http.ResponseWriter, r *http.Request) error {
+	actor, err := a.currentUser(r)
+	if err != nil {
+		return err
+	}
+	if !hasRole(actor.Roles, "admin") {
+		return problem(403, "admin_required", "An administrator is required.")
+	}
+	if err = a.limit(r.Context(), "admin-lookup:"+actor.ID, 60, time.Minute); err != nil {
+		return err
+	}
+	email, err := a.email(r.URL.Query().Get("email"))
+	if err != nil {
+		return err
+	}
+	var found User
+	var admin bool
+	err = a.db.QueryRow(r.Context(), `SELECT id,email,display_name,is_admin,verified_at
+		FROM users WHERE email=$1 AND verified_at IS NOT NULL`, email).
+		Scan(&found.ID, &found.Email, &found.DisplayName, &admin, &found.VerifiedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return problem(404, "user_not_found", "No verified account matches that email.")
+	}
+	if err != nil {
+		return err
+	}
+	found.Roles = roles(admin)
+	writeJSON(w, 200, map[string]any{"user": found})
+	return nil
+}
+
+func hasRole(assigned []string, role string) bool {
+	for _, value := range assigned {
+		if value == role {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) changeRole(w http.ResponseWriter, r *http.Request) error {
 	u, err := a.currentUser(r)
 	if err != nil {

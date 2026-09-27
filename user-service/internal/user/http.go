@@ -109,6 +109,7 @@ func (a *App) PublicHandler() http.Handler {
 	m.HandleFunc("GET /api/v1/users/me", a.endpoint(a.me))
 	m.HandleFunc("PATCH /api/v1/users/me", a.endpoint(a.updateProfile))
 	m.HandleFunc("PUT /api/v1/users/me/password", a.endpoint(a.authLimited(a.changePassword)))
+	m.HandleFunc("GET /api/v1/admin/users", a.endpoint(a.findUserByEmail))
 	m.HandleFunc("PUT /api/v1/admin/users/{id}/role", a.endpoint(a.changeRole))
 	return a.middleware(m, true)
 }

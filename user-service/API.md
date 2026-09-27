@@ -17,6 +17,7 @@ For requests with a body, send `Content-Type: application/json`. All POST, PATCH
 | `GET /api/v1/users/me` | No body | 200, `user` | Session cookie |
 | `PATCH /api/v1/users/me` | `displayName` | 200, updated `user` | Session cookie |
 | `PUT /api/v1/users/me/password` | `currentPassword`, `newPassword` | 200, message; all sessions revoked | Session cookie and current password |
+| `GET /api/v1/admin/users?email=...` | Exact school email query | 200, matching verified `user`; 404 if absent | Admin session cookie |
 | `PUT /api/v1/admin/users/{id}/role` | `role`: `user` or `admin` | 200, `userId` and `roles`; target sessions revoked | Admin session cookie |
 | `GET /healthz` | No body | 200 if HTTP server is running | None |
 | `GET /readyz` | No body | 200 if database is reachable; otherwise 503 | None |
