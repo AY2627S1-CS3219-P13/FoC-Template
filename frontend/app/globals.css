@@ -11,6 +11,8 @@
 }
 
 * { box-sizing: border-box; }
+a.brand { text-decoration: none; color: inherit; }
+.brand-mark { flex-shrink: 0; }
 html { scroll-behavior: smooth; }
 body { margin: 0; background: var(--page); color: var(--ink); font-family: Arial, Helvetica, sans-serif; }
 button, input, select, textarea { font: inherit; }
@@ -175,6 +177,41 @@ h3 { margin-bottom: 9px; font-size: 22px; line-height: 1.2; letter-spacing: -.02
 .auth-success-card p { margin: 13px 0 0; color: #40566a; font-size: 14px; line-height: 1.6; }
 .auth-success-mark { display: grid; width: 36px; height: 36px; place-items: center; margin-bottom: 18px; border-radius: 50%; color: #fff; background: #00427d; font-size: 21px; font-weight: 700; }
 
+.catalogue-hero { min-height: 190px; margin-bottom: 36px; }
+.hero-tag { color: #ffd0ac; border: 1px solid #ffffff40; border-radius: 100px; padding: 10px 14px; font-size: 12px; white-space: nowrap; }
+.account-notice { margin-bottom: 28px; }
+.welcome-panel h2 { margin-bottom: 16px; }
+.welcome-panel .primary-button { margin-top: 20px; }
+.toolbar-actions { display: flex; gap: 10px; }
+.catalogue-controls { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 16px; margin-bottom: 24px; align-items: end; }
+.catalogue-controls .search-field { grid-column: span 2; }
+.search-control { display: flex; gap: 8px; }
+.search-control input { min-width: 0; }
+.reset-filters { justify-self: start; }
+.list-heading { gap: 12px; flex-wrap: wrap; line-height: 1.5; }
+.inactive-card { background: #f0f2f4; }
+.inactive-card .supplier-card-title { color: #627080; }
+.inactive-note { padding: 12px; border-radius: 8px; background: #fff3df; color: #765428; font-size: 12px; line-height: 1.5; }
+.live-details { margin: 24px 0; }
+.live-details > div { display: grid; grid-template-columns: 90px minmax(0,1fr); gap: 14px; border-top: 1px solid var(--line); padding: 13px 0; font-size: 12px; line-height: 1.5; }
+.live-details dt { color: var(--muted); }
+.live-details dd { margin: 0; text-align: right; overflow-wrap: anywhere; white-space: pre-wrap; }
+.detail-description { white-space: pre-wrap; overflow-wrap: anywhere; }
+.detail-actions { flex-wrap: wrap; gap: 10px; }
+.danger-button { min-height: 40px; padding: 9px 14px; border: 1px solid #b94343; border-radius: 9px; background: #fff; color: #9e2929; font-size: 12px; font-weight: 700; }
+.danger-button:hover { background: #fff1f1; }
+button:disabled { cursor: not-allowed; opacity: .6; }
+.pagination { display: flex; align-items: center; justify-content: center; gap: 22px; margin: 28px 0 0; font-size: 13px; color: var(--muted); }
+dialog.native-dialog { border: 0; margin: auto; max-height: calc(100dvh - 32px); color: var(--ink); padding: 0; }
+dialog.native-dialog::backdrop { background: #11283eaa; }
+dialog.native-dialog.auth-dialog { padding: 32px; }
+.confirm-dialog { max-width: 480px; padding: 28px !important; }
+.confirm-dialog h2 { margin-bottom: 18px; overflow-wrap: anywhere; }
+.confirm-dialog > p:not(.eyebrow) { font-size: 14px; line-height: 1.7; }
+.supplier-summary-card dd { white-space: pre-wrap; }
+.supplier-field small { display: block; margin-top: 8px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.supplier-record-form .form-error { margin-top: 20px; }
+
 @media (max-width: 900px) {
   .hero { align-items: start; flex-direction: column; }
   .controls { grid-template-columns: minmax(200px, 1fr) 1fr 1fr; }
@@ -184,6 +221,10 @@ h3 { margin-bottom: 9px; font-size: 22px; line-height: 1.2; letter-spacing: -.02
   .supplier-save-preview { border-top: 1px solid #cfd5db; border-left: 0; }
 }
 @media (max-width: 680px) {
+  .catalogue-controls { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .toolbar-actions { width: 100%; }
+  .toolbar-actions .add-button { width: auto; flex: 1; }
+  .hero-tag { white-space: normal; }
   .topbar { height: 68px; padding: 0 18px; }
   .brand strong { font-size: 12px; }
   .brand small { font-size: 10px; }
@@ -204,6 +245,11 @@ h3 { margin-bottom: 9px; font-size: 22px; line-height: 1.2; letter-spacing: -.02
   .detail-panel { min-height: 0; }
 }
 @media (max-width: 420px) {
+  .topbar { height: auto; min-height: 68px; flex-wrap: wrap; gap: 12px; padding: 14px; }
+  .brand { flex-shrink: 0; }
+  .account-actions { width: 100%; justify-content: flex-end; }
+  .account-label { flex: 1; max-width: none; }
+  dialog.native-dialog.auth-dialog { padding: 22px; }
   .hero-stats strong { font-size: 21px; }
   .supplier-fields { grid-template-columns: 1fr; gap: 20px; }
   .supplier-dialog-header, .supplier-record-form, .supplier-save-preview { padding: 22px; }

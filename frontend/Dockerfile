@@ -1,15 +1,19 @@
-FROM node:22-bookworm-slim AS build
+FROM node:22-bookworm-slim AS development
 WORKDIR /app
-ARG NEXT_PUBLIC_USER_API_URL=http://localhost:8080
+ENV NEXT_TELEMETRY_DISABLED=1
+ARG NEXT_PUBLIC_USER_API_URL=""
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-RUN npm run lint && npm run typecheck && npm run build
 
-FROM node:22-bookworm-slim
+FROM development AS build
+RUN npm run build
+
+FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
-ENV NODE_ENV=production
-COPY --chown=node:node --from=build /app ./
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000
+COPY --from=build --chown=node:node /app/.next/standalone ./
+COPY --from=build --chown=node:node /app/.next/static ./.next/static
 USER node
 EXPOSE 3000
-CMD ["npm", "run", "start"]
+CMD ["node", "server.js"]

@@ -1,0 +1,6 @@
+{
+  "name": "foc-browser-checks",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": { "playwright": "1.62.1" }
+}

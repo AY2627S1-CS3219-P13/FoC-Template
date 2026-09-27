@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "FoC Supplier Showcase",
-  description: "A local showcase for Friend on Campus suppliers.",
+  title: "Campus suppliers | Friend on Campus",
+  description: "Find food, printing and everyday essentials across NUS.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

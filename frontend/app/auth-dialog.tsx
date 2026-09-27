@@ -2,6 +2,7 @@
 
 import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { UserApiError, userApi, type User } from "@/lib/user-api";
+import Modal from "./modal";
 
 type Mode = "login" | "register" | "verify" | "success";
 type Field = "email" | "displayName" | "password";
@@ -182,8 +183,7 @@ export default function AuthDialog({ initialMode, onClose, onLogin }: { initialM
   }
 
   return (
-    <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-      <section className="dialog auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+    <Modal titleId="auth-title" className="auth-dialog" busy={busy} onClose={onClose}>
         <div className="dialog-heading">
           <div>
             <p className="auth-overline">{mode === "login" ? "Account access" : mode === "register" ? "Create account · Step 1 of 2" : mode === "verify" ? "Email verification · Step 2 of 2" : "Account ready"}</p>
@@ -274,7 +274,6 @@ export default function AuthDialog({ initialMode, onClose, onLogin }: { initialM
             {mode === "verify" && <div className="auth-verification-note">Your account stays unverified until the correct code is accepted. Sign-in becomes available after verification.</div>}
           </>
         )}
-      </section>
-    </div>
+    </Modal>
   );
 }

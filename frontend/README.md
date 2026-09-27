@@ -1,46 +1,65 @@
-# Supplier UI showcase
+# Friend on Campus frontend
 
-A small TypeScript/Next.js frontend for trying the Supplier catalogue while the Supplier Service API is in progress. Login, logout and email verification use the real User Service. The Supplier catalogue is a **local UI demo**: the records are fictional sample data in `lib/suppliers.ts`, and create/edit/deactivate changes exist only in the current browser tab. Refreshing resets them. The Manage demo view does not enforce admin permissions.
+TypeScript/Next.js with a navy/orange responsive design. Account flows use User
+Service. The supplier catalogue uses live Supplier APIs and PostgreSQL records;
+there are no mock suppliers or browser-generated record IDs/timestamps.
 
-## Run it
+## Run and check
 
-From the repository root, with Docker Desktop running, create the local `.env` files once if they are missing:
+From the repository root, using Docker Compose (WSL Ubuntu on this workstation):
 
 ```sh
 sh user-service/scripts/init-env.sh
 sh credit-service/scripts/init-env.sh
+docker compose up --build -d gateway
+docker compose --profile test run --build --rm frontend-checks
+sh scripts/browser-check.sh
 ```
 
-Then start the frontend and its local dependencies:
+Open `http://localhost:3000`. The gateway publishes the single browser address;
+Next.js stays inside the container network. Checks run ESLint, TypeScript and a
+production build; the runtime uses Next standalone output. No host npm install is needed.
 
-```sh
-docker compose up --build -d frontend
-```
+## Account and catalogue flows
 
-Open `http://localhost:3000`. Compose starts the frontend, User Service, PostgreSQL and Mailpit together. To see logs, run `docker compose logs -f frontend user-service`.
+- Signup, eight-digit school-email verification, resend, login, session restoration
+  and logout use User Service. Local codes are captured in Mailpit on port 8025.
+- Logged-in users browse live records and details. Search submits to the server;
+  category, campus location, status, sorting and page controls request filtered pages.
+- All-status browsing includes inactive records with an explicit unavailable notice.
+- Create/edit forms save through the API and show its generated metadata. Validation
+  errors preserve the draft. Duplicate checking is authoritative in PostgreSQL.
+- Deactivation is reversible. Deletion requires confirmation and removes the record
+  from the catalogue; the backend retains the row for historical references.
+- Loading, empty, network-error and retry states are included. Obsolete reads are
+  cancelled so a slower response cannot replace a newer search.
 
-Select **Sign up** to follow the wireframe's account flow: school email, display name and password; an 8-digit email code; then an account-active confirmation. The live User Service uses eight digits, although the wireframe shows six as a placeholder. For a new account, read the code in local Mailpit at `http://localhost:8025`. Select **Log in** after verification; the header shows the signed-in user and offers **Log out**. Refreshing the page checks the existing session with `GET /api/v1/users/me`.
+Only users whose User Service response includes `admin` see create/edit/status/delete
+controls. Ordinary users retain all browsing tools. The backend independently
+authorizes every request. An expired/revoked session clears the catalogue and forms;
+returning to the tab rechecks the session. In-flight session reads cannot restore a
+previous account after logout or a new login. No role toggle or localStorage identity exists.
 
-The wireframe also depicts joining credits and a ledger entry. Those are not shown as completed in the live UI because Credit Service integration is deferred. Likewise, registration returns a generic response for an email that already has an account, so the UI does not reveal whether that email exists.
+The session is an HttpOnly cookie managed by the browser, sent with
+`credentials: "include"`. Only the temporary signup token lives in sessionStorage.
+Relative API URLs go through the gateway. Leave `NEXT_PUBLIC_USER_API_URL` unset
+for the shared setup; a separate deployment may override it at build time with
+matching origin/cookie settings. Internal service credentials never enter this app.
 
-The User Service stores the session in an HttpOnly cookie. The frontend sends it with `credentials: "include"`; JavaScript never reads the cookie or receives a session token. The separate registration token is kept in this tab's `sessionStorage` only until email verification. The frontend's default API URL is `http://localhost:8080`; set `NEXT_PUBLIC_USER_API_URL` before `docker compose up --build` to use a different browser-facing API URL. The User Service's configured frontend origin and cookie settings must match the browser deployment.
+## Files
 
-The build runs ESLint, TypeScript checking, and `next build`. Node and npm run inside Docker; no host installation is required.
+- `app/page.tsx`: shared header, account state, sign-in boundary.
+- `app/catalogue.tsx`: live queries, detail reads, pagination and management actions.
+- `app/supplier-dialog.tsx`: persisted create/edit forms and save summary.
+- `app/modal.tsx`: native modal focus trapping, Escape behavior and focus restoration.
+- `app/auth-dialog.tsx`: existing account dialogs.
+- `lib/supplier-api.ts`: typed HTTP adapter, including error status/code.
+- `lib/suppliers.ts`: API types and fixed category choices; no sample records.
+- `app/globals.css`: shared desktop/mobile styles.
 
-## What you can show
+See [Supplier API](../supplier-service/API.md) and [D2 checkpoints](../docs/d2-supplier-progress.md).
 
-- Browse active suppliers, search by name/description/location, and filter by category or location.
-- Open a supplier to view its details.
-- Use **Manage demo** to add or edit suppliers with the wireframe's name, category, location, status, description and opening-hours fields. The form previews read-only ID/time details, defaults new records to active, and blocks duplicate active names at the same location. Successful saves show the locally generated ID and timestamp. Inactive suppliers disappear from Browse.
-
-When the Supplier Service contract is ready, replace the sample-data state in `app/page.tsx` with API calls, and enforce authentication and admin permission in the Supplier Service. The browser should send its User Service session cookie with `credentials: "include"`; the backend must validate it through User Service's internal API. The Manage demo remains a UI preview and is accessible without login; it is not evidence of backend RBAC. Do not use a client-side role toggle as an authorization control or put internal service credentials in this frontend.
-
-## Project files
-
-- `app/page.tsx`: catalogue and local management interactions
-- `app/auth-dialog.tsx`: login, signup and email-verification forms
-- `app/supplier-dialog.tsx`: wireframe-based Supplier create/edit form and save preview
-- `app/globals.css`: responsive demo styling
-- `lib/suppliers.ts`: sample supplier type and data
-- `lib/user-api.ts`: public User Service API client
-- `Dockerfile`: build and run Next.js in a Node container
+The [D2 demo guide](../docs/d2-supplier-demo.md) includes roles, schema, component and
+sequence diagrams, API-only verification and the live presentation flow. Browser
+checks run in a dedicated Playwright container with Linux/WSL host networking;
+screenshots/results are saved under ignored `.agent/tmp/d2-browser/`.

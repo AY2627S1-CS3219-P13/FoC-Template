@@ -1,4 +1,5 @@
-const userApiBase = process.env.NEXT_PUBLIC_USER_API_URL ?? "http://localhost:8080";
+// Relative URLs share the gateway origin and its browser-managed session cookie.
+const userApiBase = process.env.NEXT_PUBLIC_USER_API_URL ?? "";
 
 export type User = {
   id: string;
