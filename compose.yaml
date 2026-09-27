@@ -178,6 +178,19 @@ services:
       MAILPIT_URL: http://mailpit:8025
     entrypoint: ["node", "smoke.mjs"]
 
+  browser-checks:
+    profiles: [test]
+    build: ./scripts/browser
+    # Linux/WSL host networking keeps the real localhost browser origin intact.
+    network_mode: host
+    shm_size: 1gb
+    environment:
+      E2E_BASE_URL: http://localhost:3000
+      E2E_MAILPIT_URL: http://localhost:8025
+      E2E_ARTIFACT_DIR: /artifacts
+    volumes:
+      - ./.agent/tmp/d2-browser:/artifacts
+
 volumes:
   user-data:
   supplier-data:

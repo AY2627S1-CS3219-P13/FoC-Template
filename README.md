@@ -44,7 +44,7 @@ Open `http://localhost:3000`. The gateway owns port 3000 and forwards page reque
 
 Both environment setup scripts are required because root Compose includes Credit's configuration. To also start Credit, run `docker compose up --build -d credit-service`. Existing Supplier checkouts with `SUPPLIER_HTTP_PORT=8082` in `.env` should change it to `8083` to avoid Credit's port.
 
-See [Supplier API](supplier-service/API.md) for CRUD and catalogue queries, [verification instructions](supplier-service/README.md#verification) for container checks and the live integration smoke test, and the [D2 implementation steps](docs/d2-supplier-progress.md). Redis, RabbitMQ workflows and cloud deployment remain later work.
+See [Supplier API](supplier-service/API.md) for CRUD and catalogue queries, [verification instructions](supplier-service/README.md#verification) for container/API/browser checks, and the [D2 design and demo guide](docs/d2-supplier-demo.md). Changes are tracked in [separate implementation steps](docs/d2-supplier-progress.md). Redis, RabbitMQ workflows and cloud deployment remain later work.
 
 This repository follows a **one-service-per-folder** structure: each
 microservice (`user-service/`, `supplier-service/`, `order-service/`,

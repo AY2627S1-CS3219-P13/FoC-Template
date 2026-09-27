@@ -10,7 +10,7 @@ Service authorization and a responsive UI using live Supplier data.
 | 2. Complete Supplier API | Field editing, explicit deletion semantics, opening hours, inactive records, search/filter/sort/pagination | Complete; backend checks passed |
 | 3. Connect Supplier UI | Replace sample state with API reads and writes; show server validation and generated metadata | Complete; lint, types and build passed |
 | 4. Apply UI permissions | Ordinary-user browsing and admin management; backend remains the authority | Complete; lint, types and build passed |
-| 5. Finish and demonstrate | Desktop/mobile checks, API-only and end-to-end evidence, schema/role/design explanations | Pending |
+| 5. Finish and demonstrate | Desktop/mobile checks, API-only and end-to-end evidence, schema/role/design explanations | Complete; API and browser checks passed |
 
 ## Step 1: one shared application
 
@@ -42,11 +42,9 @@ Integration decisions:
 - Keep Credit's Compose include and its direct port 8082; use 8083 for Supplier's direct development port.
 - Keep the frontend standalone runtime image and the existing pinned dependency versions.
 
-**Checkpoint limitation:** account operations use the real User backend, but the
-Supplier screens still use labelled sample data. The former minimal live Supplier
-page is replaced by the shared UI. The Supplier APIs remain operational and
-independently testable. Steps 2-4 restore and expand the live Supplier UI on this
-shared design; this checkpoint is not a complete D2 submission.
+**Historical step 1 limitation (resolved in steps 2-4):** account operations used
+the real User backend, while the shared Supplier screens still used labelled sample
+data. Steps 2-4 replaced that sample state with live Supplier APIs and permissions.
 
 Setup and checks are in the [root README](../README.md),
 [frontend README](../frontend/README.md) and
@@ -61,8 +59,8 @@ Verification completed for this checkpoint:
 - Headless Chrome passes UI signup, eight-digit email verification, login, session restoration after reload and logout, all through same-origin gateway APIs. Supplier reads use the resulting session and fail after logout.
 - Desktop (1440px) and mobile (390px) catalogue screenshots and the mobile verification form were inspected; no horizontal overflow or browser runtime errors were found.
 
-These local checks create generated test accounts and an inactive test supplier.
-They do not validate the demo catalogue as a live Supplier UI; that remains a later checkpoint.
+Those step 1 checks created generated test accounts and an inactive test supplier.
+Step 5 below verifies the completed live Supplier UI.
 
 ## Step 2: complete the independent API
 
@@ -97,12 +95,40 @@ clears the catalogue and open forms. Session checks on tab focus observe changes
 generation counters prevent old session responses from restoring a logged-out or
 different account. Frontend lint, TypeScript and production build passed.
 
-## Later checkpoints
+## Step 5: verify and prepare the demonstration
 
-Keep the architecture unchanged while completing the features. PostgreSQL can
-serve the initial catalogue queries directly. Redis, RabbitMQ and cloud deployment
-remain separate work; they are not substitutes for the D2 live-data and access
-control demonstrations.
+The [D2 demonstration guide](d2-supplier-demo.md) includes component, sequence and
+schema diagrams, a role matrix, query/design decisions, reproducible commands and
+a suggested demonstration sequence. The browser harness runs in a dedicated
+Playwright container against the real User and Supplier services.
+
+Final verification completed on 2026-09-27:
+
+- Frontend lint, TypeScript and production build passed after the final UI changes.
+- Direct API checks passed with both frontend and gateway stopped: persisted CRUD,
+  combined catalogue queries, duplicate rejection, ordinary-user write denial,
+  session revocation and Origin checks. The UI services were restored afterward.
+- Browser checks passed real signup/email verification/login/session restoration,
+  live pagination/filter/sort, empty and retry states, persisted create/edit/delete,
+  duplicate errors retaining drafts, deactivation/reactivation and cancelled deletion.
+- Actual User role changes revoked sessions; Supplier UI cleared on revoked access
+  and logout. Ordinary users could browse but could not manage suppliers through
+  either UI or API. No browser runtime errors occurred.
+- Desktop 1440px and mobile 390px/320px checks passed without horizontal overflow;
+  screenshots were inspected. Native dialogs trap focus and restore it on close.
+
+Local evidence is under ignored `.agent/tmp/d2-browser/`; rerun
+`sh scripts/browser-check.sh` before presenting. Generated test accounts and retained
+soft-deleted suppliers remain in the local databases. Backend format, vet,
+race-enabled PostgreSQL integration tests and build passed in step 2; no backend
+source changed in subsequent UI/documentation steps.
+
+## Scope remaining outside this Supplier D2 implementation
+
+PostgreSQL serves the catalogue directly. Redis, RabbitMQ workflows, Order/Credit
+business integration, cloud deployment and concurrent-load NFR verification remain
+separate work. User Service's broader milestone obligations still need to be reviewed
+by its owner; this implementation does not establish the whole team's D2 completion.
 
 The supplied D2 instructions explicitly include deletion. Step 2 implements it as
 soft deletion, separately from deactivation, and documents this choice in the API.

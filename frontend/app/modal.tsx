@@ -8,8 +8,10 @@ export default function Modal({ children, titleId, className = "", busy = false,
   useEffect(() => {
     const dialog = ref.current;
     const previous = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     dialog?.showModal();
-    return () => { dialog?.close(); previous?.focus(); };
+    return () => { dialog?.close(); document.body.style.overflow = previousOverflow; previous?.focus(); };
   }, []);
   return <dialog ref={ref} className={`dialog native-dialog ${className}`} aria-labelledby={titleId}
     onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>

@@ -61,7 +61,7 @@ Log in again after promotion. Supplier enforces permissions independently on eve
 - Numbered migrations run in a transaction under an advisory lock. Seed migration imports all 21 records from the repository CSV once; restarts do not reinsert records or undo admin edits.
 - Seed normalization maps `Shopping` to `retail`, `Food/Coffee` to `food`, `Com 2`/`Com2` to `COM2`, and curly apostrophes in building names to straight apostrophes. Location means building in this skeleton; floor and pickup directions are stored in the description.
 
-See [API.md](API.md) for request/response contracts. `internal/supplier/auth.go` is the User integration; `http.go` owns routes and middleware; `suppliers.go` owns minimal operations; `store.go` applies migrations; `cmd/server/main.go` owns startup/shutdown.
+See [API.md](API.md) for request/response contracts. `internal/supplier/auth.go` is the User integration; `http.go` owns routes and middleware; `suppliers.go` owns CRUD; `catalogue.go` owns server queries; `store.go` applies migrations; `cmd/server/main.go` owns startup/shutdown.
 
 ## Verification
 
@@ -69,11 +69,15 @@ See [API.md](API.md) for request/response contracts. `internal/supplier/auth.go`
 docker compose --profile test run --build --rm supplier-tests
 docker compose --profile test run --build --rm frontend-checks
 sh scripts/smoke.sh
+SMOKE_API_ONLY=1 sh scripts/smoke.sh
+sh scripts/browser-check.sh
 ```
 
 Backend checks include `gofmt`, `go vet`, race-enabled tests against a dedicated temporary PostgreSQL database, and compilation. Tests cover User request contracts, no auth caching, upstream failures, role restrictions, Origin checks, input validation, duplicate concurrent writes and repeatable migrations. Frontend checks run ESLint, TypeScript and a production build.
 
-The smoke script uses the real gateway, User Service, Mailpit and Supplier Service. It verifies registration, email verification, ordinary-user browsing, denied writes, admin promotion/create/deactivate, logout revocation, CSRF checks and isolation of `/internal`. It creates one randomly named local account and supplier; the supplier ends inactive. It never prints passwords, codes or cookies. The account remains in local data and its random password is discarded at script exit; use your own verified account for manual browsing.
+The smoke script uses real User Service, Mailpit and Supplier Service. It verifies registration/verification, ordinary-user browsing and denied writes, admin CRUD, combined queries, duplicate rejection, inactive reads, logout revocation, Origin checks and private-route isolation. Its default mode uses the gateway. `SMOKE_API_ONLY=1` calls the Go services directly and works with Next.js/gateway stopped. It creates a local generated account and a soft-deleted supplier; passwords/codes/cookies are never printed.
+
+The browser script uses a dedicated Playwright container on Linux/WSL host networking. It tests real account flows, both roles, persisted CRUD and duplicate errors, filters/sorting/pages, mobile layouts, an injected outage/retry view and actual role revocation. Screenshots/results go to ignored `.agent/tmp/d2-browser/`. Generated accounts and soft-deleted rows remain in local data; use your own verified account for manual browsing. See the [D2 demo guide](../docs/d2-supplier-demo.md) for setup, schemas, diagrams and the presentation sequence.
 
 ESLint 9 is pinned because the React/import plugins bundled with the selected Next.js configuration do not yet support ESLint 10; npm currently marks ESLint 9 deprecated. It is a development dependency, excluded from the runtime image.
 

@@ -13,6 +13,7 @@ sh user-service/scripts/init-env.sh
 sh credit-service/scripts/init-env.sh
 docker compose up --build -d gateway
 docker compose --profile test run --build --rm frontend-checks
+sh scripts/browser-check.sh
 ```
 
 Open `http://localhost:3000`. The gateway publishes the single browser address;
@@ -57,3 +58,8 @@ matching origin/cookie settings. Internal service credentials never enter this a
 - `app/globals.css`: shared desktop/mobile styles.
 
 See [Supplier API](../supplier-service/API.md) and [D2 checkpoints](../docs/d2-supplier-progress.md).
+
+The [D2 demo guide](../docs/d2-supplier-demo.md) includes roles, schema, component and
+sequence diagrams, API-only verification and the live presentation flow. Browser
+checks run in a dedicated Playwright container with Linux/WSL host networking;
+screenshots/results are saved under ignored `.agent/tmp/d2-browser/`.

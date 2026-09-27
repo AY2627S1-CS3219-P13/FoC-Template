@@ -12,6 +12,7 @@
 
 * { box-sizing: border-box; }
 a.brand { text-decoration: none; color: inherit; }
+.brand-mark { flex-shrink: 0; }
 html { scroll-behavior: smooth; }
 body { margin: 0; background: var(--page); color: var(--ink); font-family: Arial, Helvetica, sans-serif; }
 button, input, select, textarea { font: inherit; }
@@ -203,6 +204,7 @@ button:disabled { cursor: not-allowed; opacity: .6; }
 .pagination { display: flex; align-items: center; justify-content: center; gap: 22px; margin: 28px 0 0; font-size: 13px; color: var(--muted); }
 dialog.native-dialog { border: 0; margin: auto; max-height: calc(100dvh - 32px); color: var(--ink); padding: 0; }
 dialog.native-dialog::backdrop { background: #11283eaa; }
+dialog.native-dialog.auth-dialog { padding: 32px; }
 .confirm-dialog { max-width: 480px; padding: 28px !important; }
 .confirm-dialog h2 { margin-bottom: 18px; overflow-wrap: anywhere; }
 .confirm-dialog > p:not(.eyebrow) { font-size: 14px; line-height: 1.7; }
@@ -243,6 +245,11 @@ dialog.native-dialog::backdrop { background: #11283eaa; }
   .detail-panel { min-height: 0; }
 }
 @media (max-width: 420px) {
+  .topbar { height: auto; min-height: 68px; flex-wrap: wrap; gap: 12px; padding: 14px; }
+  .brand { flex-shrink: 0; }
+  .account-actions { width: 100%; justify-content: flex-end; }
+  .account-label { flex: 1; max-width: none; }
+  dialog.native-dialog.auth-dialog { padding: 22px; }
   .hero-stats strong { font-size: 21px; }
   .supplier-fields { grid-template-columns: 1fr; gap: 20px; }
   .supplier-dialog-header, .supplier-record-form, .supplier-save-preview { padding: 22px; }

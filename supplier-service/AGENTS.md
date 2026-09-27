@@ -7,5 +7,6 @@
 - Check backend: `docker compose --profile test run --build --rm supplier-tests` (formatting, vet, race-enabled unit/integration tests, build).
 - Format in a container: `docker compose --profile test run --rm --no-deps -v ./supplier-service:/app supplier-tests gofmt -w cmd internal`.
 - Check frontend: `docker compose --profile test run --build --rm frontend-checks`.
-- Check live integration: `sh scripts/smoke.sh`. This creates a generated local admin account and an inactive supplier; it does not touch external services.
+- Check live integration: `sh scripts/smoke.sh`; direct backend-only mode: `SMOKE_API_ONLY=1 sh scripts/smoke.sh`. These create a local account and soft-deleted supplier.
+- Browser evidence: `sh scripts/browser-check.sh` uses Linux/WSL host networking and local random test accounts. Screenshots/results go to ignored `.agent/tmp/d2-browser/`. No external services are modified.
 - Redis and RabbitMQ are deliberately absent from this minimal Supplier flow. The shared Nginx gateway is local HTTP only; no AWS resources are provisioned.
