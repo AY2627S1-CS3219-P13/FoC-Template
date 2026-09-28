@@ -1,6 +1,7 @@
 #!/bin/sh
-# Creates one unique verified test account and one soft-deleted supplier in LOCAL app data.
-# The test account remains an admin for browser exploration; no shared default password.
+# Creates one unique verified test account and one supplier in LOCAL app data, then removes
+# them again. Set SMOKE_KEEP=1 to keep the admin account for browser exploration; no shared
+# default password. `sh scripts/cleanup-test-data.sh` removes fixtures left by earlier runs.
 set -eu
 cd "$(dirname "$0")/.."
 sh user-service/scripts/init-env.sh
@@ -20,4 +21,9 @@ export SMOKE_PASSWORD="$(openssl rand -hex 24)"
 docker compose --profile test run --rm --no-deps -e SMOKE_EMAIL -e SMOKE_PASSWORD -e SMOKE_BASE_URL -e SMOKE_SUPPLIER_URL -e SMOKE_API_ONLY smoke setup
 docker compose exec -T user-service user-service promote-admin "$SMOKE_EMAIL"
 docker compose --profile test run --rm --no-deps -e SMOKE_EMAIL -e SMOKE_PASSWORD -e SMOKE_BASE_URL -e SMOKE_SUPPLIER_URL -e SMOKE_API_ONLY smoke check
-echo 'Smoke test passed. A generated test account and soft-deleted supplier remain in local data.'
+if [ "${SMOKE_KEEP:-0}" = "1" ]; then
+  echo 'Smoke test passed. The generated admin account remains in local data.'
+else
+  sh scripts/cleanup-test-data.sh "$SMOKE_EMAIL"
+  echo 'Smoke test passed.'
+fi

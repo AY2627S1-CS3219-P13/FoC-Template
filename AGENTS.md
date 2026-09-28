@@ -36,6 +36,11 @@ docker compose --profile test run --build --rm frontend-checks  # eslint, tsc --
 sh scripts/smoke.sh                                             # live end-to-end through the gateway
 ```
 
+The smoke test generates a verified admin account and a supplier and removes them
+again when it passes. `SMOKE_KEEP=1 sh scripts/smoke.sh` keeps the account for
+browser exploration, and `sh scripts/cleanup-test-data.sh` removes the fixtures
+left by earlier runs of the smoke and browser checks.
+
 Formatting is enforced, not suggested. To reformat a Go service in a container:
 
 ```sh
