@@ -20,9 +20,9 @@ export class UserApiError extends Error {
   }
 }
 
-async function request<T>(path: string, body?: object): Promise<T> {
+async function request<T>(path: string, body?: object, method?: string): Promise<T> {
   const response = await fetch(`${userApiBase}${path}`, {
-    method: body === undefined ? "GET" : "POST",
+    method: method ?? (body === undefined ? "GET" : "POST"),
     credentials: "include",
     cache: "no-store",
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
@@ -42,6 +42,8 @@ async function request<T>(path: string, body?: object): Promise<T> {
 
 export const userApi = {
   me: () => request<{ user: User }>("/api/v1/users/me"),
+  findUserByEmail: (email: string) => request<{ user: User }>(`/api/v1/admin/users?${new URLSearchParams({ email })}`),
+  promoteUser: (id: string) => request<{ userId: string; roles: string[] }>(`/api/v1/admin/users/${encodeURIComponent(id)}/role`, { role: "admin" }, "PUT"),
   login: (email: string, password: string) =>
     request<{ user: User; expiresAt: string }>("/api/v1/auth/login", { email, password }),
   // Logout has no request body, but it must be a POST.
