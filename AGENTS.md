@@ -42,9 +42,8 @@ Formatting is enforced, not suggested. To reformat a Go service in a container:
 docker compose --profile test run --rm --no-deps -v ./user-service:/app user-tests gofmt -w cmd internal
 ```
 
-`.github/workflows/ci.yml` runs the User Service check on every push and pull
-request, using the same container command, so a green local run is a green CI
-run. Other services can add a job there when their owners want one.
+The same commands run in GitHub Actions (`.github/workflows/ci.yml`) on every
+push and pull request, so a green local run is a green CI run.
 
 ## Service boundaries
 
