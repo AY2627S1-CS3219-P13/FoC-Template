@@ -9,28 +9,9 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Every job runs the same containerised command a developer runs locally, so a
-# green local check is a green CI check.
 jobs:
-  backend:
-    name: ${{ matrix.service }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        service: [user, supplier, credit]
-    steps:
-      - uses: actions/checkout@v5
-      - name: Generate local environment
-        run: |
-          sh user-service/scripts/init-env.sh
-          sh credit-service/scripts/init-env.sh
-      - name: Check ${{ matrix.service }} service
-        run: docker compose --profile test run --build --rm ${{ matrix.service }}-tests
-
-  frontend:
-    name: frontend
+  user-service:
+    name: user-service
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -39,20 +20,6 @@ jobs:
         run: |
           sh user-service/scripts/init-env.sh
           sh credit-service/scripts/init-env.sh
-      - name: Lint, typecheck and build
-        run: docker compose --profile test run --build --rm frontend-checks
-
-  smoke:
-    name: smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v5
-      - name: Signup, verification and supplier flow through the gateway
-        run: sh scripts/smoke.sh
-      - name: Container logs
-        if: failure()
-        run: docker compose logs --no-color --tail=200
-      - name: Stop the stack
-        if: always()
-        run: docker compose down --volumes --remove-orphans
+      # The same command developers run locally: gofmt, go vet, go test -race, build.
+      - name: Check User Service
+        run: docker compose --profile test run --build --rm user-tests

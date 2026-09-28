@@ -42,9 +42,7 @@ docker compose up --build -d gateway
 
 Open `http://localhost:3000`. The gateway owns port 3000 and forwards page requests to Next.js and API requests to the appropriate backend. User's internal authentication endpoint remains private. Direct development ports are User 8080 (configurable), Credit 8082 and Supplier 8083 (configurable).
 
-Both environment setup scripts are required because root Compose includes Credit's configuration. The gateway starts Credit along with the other services and forwards `/api/v1/wallets/*` to it. Existing Supplier checkouts with `SUPPLIER_HTTP_PORT=8082` in `.env` should change it to `8083` to avoid Credit's port.
-
-Every push and pull request runs the same containerised checks in [GitHub Actions](.github/workflows/ci.yml): each Go service's `gofmt`/`go vet`/race-enabled tests/build, the frontend's lint/typecheck/build, and the end-to-end smoke test through the gateway. The commands are in [AGENTS.md](AGENTS.md#checks).
+Both environment setup scripts are required because root Compose includes Credit's configuration. To also start Credit, run `docker compose up --build -d credit-service`. Existing Supplier checkouts with `SUPPLIER_HTTP_PORT=8082` in `.env` should change it to `8083` to avoid Credit's port.
 
 See [Supplier API](supplier-service/API.md) for CRUD and catalogue queries, [verification instructions](supplier-service/README.md#verification) for container/API/browser checks, and the [D2 design and demo guide](docs/d2-supplier-demo.md). Changes are tracked in [separate implementation steps](docs/d2-supplier-progress.md). Redis, RabbitMQ workflows and cloud deployment remain later work.
 

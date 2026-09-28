@@ -17,10 +17,11 @@ sh credit-service/scripts/init-env.sh
 docker compose up --build -d gateway
 ```
 
-The gateway owns `http://localhost:3000` and starts the frontend, User, Supplier
-and Credit services. Direct development ports are User 8080, Credit 8082 and
-Supplier 8083; Mailpit is on 8025. Internal ports (8081) stay on the Compose
-network and are rejected by the gateway.
+The gateway owns `http://localhost:3000` and starts the frontend, User and
+Supplier services; add `docker compose up --build -d credit-service` for Credit.
+Direct development ports are User 8080, Credit 8082 and Supplier 8083; Mailpit is
+on 8025. Internal ports (8081) stay on the Compose network and are rejected by
+the gateway.
 
 ## Checks
 
@@ -41,8 +42,9 @@ Formatting is enforced, not suggested. To reformat a Go service in a container:
 docker compose --profile test run --rm --no-deps -v ./user-service:/app user-tests gofmt -w cmd internal
 ```
 
-The same commands run in GitHub Actions (`.github/workflows/ci.yml`), so a green
-local run is a green CI run.
+`.github/workflows/ci.yml` runs the User Service check on every push and pull
+request, using the same container command, so a green local run is a green CI
+run. Other services can add a job there when their owners want one.
 
 ## Service boundaries
 
