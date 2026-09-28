@@ -8,7 +8,7 @@ FROM development AS build
 RUN CGO_ENABLED=0 go build -trimpath -o /supplier-service ./cmd/server
 
 FROM debian:bookworm-slim AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /supplier-service /usr/local/bin/supplier-service
 USER 10001:10001

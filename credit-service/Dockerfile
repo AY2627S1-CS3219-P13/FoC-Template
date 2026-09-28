@@ -8,7 +8,7 @@ FROM development AS build
 RUN CGO_ENABLED=0 go build -trimpath -o /credit-service ./cmd/server
 
 FROM debian:bookworm-slim AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /credit-service /usr/local/bin/credit-service
 USER 10001:10001

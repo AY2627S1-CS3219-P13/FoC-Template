@@ -32,6 +32,12 @@ services:
     depends_on:
       credit-db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
     read_only: true
     security_opt:
       - no-new-privileges:true
