@@ -99,6 +99,7 @@ async function screenshot(page, filename, width) {
     assert(initial.total >= 21);
     const known = initial.suppliers[0].id;
     await call(student, 'POST', '/api/v1/suppliers', { name: 'Denied' }, 403);
+    await call(student, 'GET', '/api/v1/admin/users?page=1&pageSize=20', undefined, 403);
     await call(student, 'PATCH', `/api/v1/suppliers/${known}`, { active: false }, 403);
     await call(student, 'DELETE', `/api/v1/suppliers/${known}`, undefined, 403);
     pass('Signup/verification/login/restore; anonymous gate and ordinary-user API/UI permissions');
@@ -139,6 +140,11 @@ async function screenshot(page, filename, width) {
     await manage.getByLabel('School email').fill(studentEmail);
     await manage.getByRole('button', { name: 'Find user' }).click();
     await manage.getByText(studentEmail, { exact: true }).waitFor();
+    await manage.getByLabel('Request preset').selectOption({ label: 'User accounts' });
+    await manage.getByRole('button', { name: 'Run GET' }).click();
+    await manage.getByText('HTTP 200').waitFor();
+    assert((await manage.locator('.admin-response pre').textContent()).includes('"users"'));
+    assert(!(await manage.locator('.admin-response pre').textContent()).includes('password_hash'));
     await manage.getByLabel('Request preset').selectOption({ label: 'Suppliers' });
     await manage.getByRole('button', { name: 'Run GET' }).click();
     await manage.getByText('HTTP 200').waitFor();

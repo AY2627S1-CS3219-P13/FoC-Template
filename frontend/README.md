@@ -39,7 +39,9 @@ production build; the runtime uses Next standalone output. No host npm install i
   are revoked, so they must log in again. The first admin still needs the operator
   bootstrap command described by User Service.
 - The admin page has preset, read-only GET checks for the gateway, current user,
-  suppliers and locations. It shows the actual status, duration and response body.
+  suppliers and paginated User Service account summaries. It shows the actual
+  status, duration and response body. The account summary includes pending and
+  verified users, but never password hashes, session tokens or verification codes.
   Gateway health checks only Nginx; supplier requests also exercise User Service
   session validation and Supplier Service's database. Credit and Order are not
   routed through this page yet. No arbitrary URLs or internal credentials are used.

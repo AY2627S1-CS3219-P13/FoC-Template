@@ -230,6 +230,7 @@ dialog.native-dialog.auth-dialog { padding: 32px; }
 .admin-response { border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
 .admin-response > div { display: flex; justify-content: space-between; gap: 12px; padding: 11px 13px; background: #edf3f7; font-size: 12px; }
 .admin-response pre { max-height: 350px; overflow: auto; margin: 0; padding: 14px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.admin-pagination { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; font-size: 12px; }
 .admin-panel .admin-pending { margin: 22px 0 0; font-size: 12px; }
 
 @media (max-width: 900px) {

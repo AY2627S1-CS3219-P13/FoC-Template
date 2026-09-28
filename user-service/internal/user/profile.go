@@ -3,6 +3,7 @@ package user
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -94,7 +95,7 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func (a *App) findUserByEmail(w http.ResponseWriter, r *http.Request) error {
+func (a *App) adminUsers(w http.ResponseWriter, r *http.Request) error {
 	actor, err := a.currentUser(r)
 	if err != nil {
 		return err
@@ -102,9 +103,16 @@ func (a *App) findUserByEmail(w http.ResponseWriter, r *http.Request) error {
 	if !hasRole(actor.Roles, "admin") {
 		return problem(403, "admin_required", "An administrator is required.")
 	}
-	if err = a.limit(r.Context(), "admin-lookup:"+actor.ID, 60, time.Minute); err != nil {
+	if err = a.limit(r.Context(), "admin-users:"+actor.ID, 60, time.Minute); err != nil {
 		return err
 	}
+	if _, searching := r.URL.Query()["email"]; searching {
+		return a.findUserByEmail(w, r)
+	}
+	return a.listUsers(w, r)
+}
+
+func (a *App) findUserByEmail(w http.ResponseWriter, r *http.Request) error {
 	email, err := a.email(r.URL.Query().Get("email"))
 	if err != nil {
 		return err
@@ -122,6 +130,58 @@ func (a *App) findUserByEmail(w http.ResponseWriter, r *http.Request) error {
 	}
 	found.Roles = roles(admin)
 	writeJSON(w, 200, map[string]any{"user": found})
+	return nil
+}
+
+type adminUserSummary struct {
+	ID          string     `json:"id"`
+	Email       string     `json:"email"`
+	DisplayName string     `json:"displayName"`
+	Roles       []string   `json:"roles"`
+	VerifiedAt  *time.Time `json:"verifiedAt"`
+	CreatedAt   time.Time  `json:"createdAt"`
+}
+
+func (a *App) listUsers(w http.ResponseWriter, r *http.Request) error {
+	page, pageSize := 1, 20
+	if raw := r.URL.Query().Get("page"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 1000000 {
+			return problem(400, "invalid_page", "Page must be a positive number.")
+		}
+		page = parsed
+	}
+	if raw := r.URL.Query().Get("pageSize"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 100 {
+			return problem(400, "invalid_page_size", "Page size must be between 1 and 100.")
+		}
+		pageSize = parsed
+	}
+	var total int
+	if err := a.db.QueryRow(r.Context(), "SELECT count(*) FROM users").Scan(&total); err != nil {
+		return err
+	}
+	rows, err := a.db.Query(r.Context(), `SELECT id,email,display_name,is_admin,verified_at,created_at
+		FROM users ORDER BY created_at DESC,id DESC LIMIT $1 OFFSET $2`, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	users := make([]adminUserSummary, 0, pageSize)
+	for rows.Next() {
+		var item adminUserSummary
+		var admin bool
+		if err = rows.Scan(&item.ID, &item.Email, &item.DisplayName, &admin, &item.VerifiedAt, &item.CreatedAt); err != nil {
+			return err
+		}
+		item.Roles = roles(admin)
+		users = append(users, item)
+	}
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	writeJSON(w, 200, map[string]any{"users": users, "page": page, "pageSize": pageSize, "total": total, "totalPages": (total + pageSize - 1) / pageSize})
 	return nil
 }
 

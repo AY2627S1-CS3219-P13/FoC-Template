@@ -269,8 +269,11 @@ func TestAdminPermissions(t *testing.T) {
 	verifyTest(t, a, m, "admin@u.nus.edu")
 	registerTest(t, a, "student@u.nus.edu", "Student")
 	verifyTest(t, a, m, "student@u.nus.edu")
+	registerTest(t, a, "pending@u.nus.edu", "Pending")
 	student := loginTest(t, a, "student@u.nus.edu", testPassword)
 	admin := loginTest(t, a, "admin@u.nus.edu", testPassword)
+	status(t, request(t, a.PublicHandler(), "GET", "/api/v1/admin/users?page=1&pageSize=20", nil, nil, nil), 401)
+	status(t, request(t, a.PublicHandler(), "GET", "/api/v1/admin/users?page=1&pageSize=20", nil, student, nil), 403)
 	status(t, request(t, a.PublicHandler(), "GET", "/api/v1/admin/users?email=student%40u.nus.edu", nil, nil, nil), 401)
 	status(t, request(t, a.PublicHandler(), "GET", "/api/v1/admin/users?email=student%40u.nus.edu", nil, student, nil), 403)
 	u, _, err := a.session(context.Background(), student.Value)
@@ -282,6 +285,31 @@ func TestAdminPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	admin = loginTest(t, a, "admin@u.nus.edu", testPassword)
+	list := request(t, a.PublicHandler(), "GET", "/api/v1/admin/users?page=1&pageSize=20", nil, admin, nil)
+	status(t, list, 200)
+	var listed struct {
+		Users []struct {
+			Email      string     `json:"email"`
+			VerifiedAt *time.Time `json:"verifiedAt"`
+		} `json:"users"`
+		Total      int `json:"total"`
+		TotalPages int `json:"totalPages"`
+	}
+	if err = json.Unmarshal(list.Body.Bytes(), &listed); err != nil || listed.Total != 3 || listed.TotalPages != 1 || len(listed.Users) != 3 {
+		t.Fatal("admin list should include all account statuses")
+	}
+	var pendingSeen bool
+	for _, item := range listed.Users {
+		if item.Email == "pending@u.nus.edu" && item.VerifiedAt == nil {
+			pendingSeen = true
+		}
+	}
+	if !pendingSeen || strings.Contains(list.Body.String(), "password_hash") || strings.Contains(list.Body.String(), "passwordHash") {
+		t.Fatal("admin list leaked sensitive data or omitted pending account")
+	}
+	status(t, request(t, a.PublicHandler(), "GET", "/api/v1/admin/users?page=2&pageSize=1", nil, admin, nil), 200)
+	status(t, request(t, a.PublicHandler(), "GET", "/api/v1/admin/users?page=0", nil, admin, nil), 400)
+	status(t, request(t, a.PublicHandler(), "GET", "/api/v1/admin/users?pageSize=101", nil, admin, nil), 400)
 	lookup := request(t, a.PublicHandler(), "GET", "/api/v1/admin/users?email=STUDENT%40U.NUS.EDU", nil, admin, nil)
 	status(t, lookup, 200)
 	if !strings.Contains(lookup.Body.String(), u.ID) || strings.Contains(lookup.Body.String(), "password_hash") {

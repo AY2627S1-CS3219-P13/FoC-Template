@@ -18,11 +18,14 @@ For requests with a body, send `Content-Type: application/json`. All POST, PATCH
 | `PATCH /api/v1/users/me` | `displayName` | 200, updated `user` | Session cookie |
 | `PUT /api/v1/users/me/password` | `currentPassword`, `newPassword` | 200, message; all sessions revoked | Session cookie and current password |
 | `GET /api/v1/admin/users?email=...` | Exact school email query | 200, matching verified `user`; 404 if absent | Admin session cookie |
+| `GET /api/v1/admin/users?page=1&pageSize=20` | No body; page starts at 1, page size 1–100 | 200, `users`, `page`, `pageSize`, `total`, `totalPages` | Admin session cookie |
 | `PUT /api/v1/admin/users/{id}/role` | `role`: `user` or `admin` | 200, `userId` and `roles`; target sessions revoked | Admin session cookie |
 | `GET /healthz` | No body | 200 if HTTP server is running | None |
 | `GET /readyz` | No body | 200 if database is reachable; otherwise 503 | None |
 
 Unknown JSON fields are rejected. Registration never accepts roles. A verified account is required to log in. Repeated registration restarts a pending signup with a new password/code/token; verified accounts are never changed. Use resend to get a new code while keeping the same signup attempt. A generic 202 with a token is also returned for an already verified email, without changing that account.
+
+The admin list returns newest accounts first, including pending accounts with `verifiedAt: null`. Each entry includes only `id`, `email`, `displayName`, `roles`, `verifiedAt` and `createdAt`. It never includes password hashes, verification challenges or session data. The exact-email lookup still returns only verified accounts.
 
 Keep the returned `registrationToken` in the signup flow (for example, browser sessionStorage), pass it alongside the code, and remove it after verification. Losing it requires restarting registration. It binds the email code to the signup attempt that set the password. It grants no login access. On registration's email-delivery 503, the response still includes `registrationToken` so the user can retry delivery.
 

@@ -9,10 +9,10 @@ const checks = [
   { label: "Gateway", service: "Gateway", path: "/healthz" },
   { label: "Current user", service: "User Service", path: "/api/v1/users/me" },
   { label: "Suppliers", service: "Supplier Service", path: "/api/v1/suppliers?pageSize=5" },
-  { label: "Locations", service: "Supplier Service", path: "/api/v1/locations" },
+  { label: "User accounts", service: "User Service", path: "/api/v1/admin/users?pageSize=20" },
 ] as const;
 
-type CheckResult = { status: number; duration: number; body: string };
+type CheckResult = { status: number; duration: number; body: string; totalPages?: number };
 
 export default function AdminConsole({ admin }: { admin: User }) {
   const router = useRouter();
@@ -27,6 +27,9 @@ export default function AdminConsole({ admin }: { admin: User }) {
   const [checking, setChecking] = useState(false);
   const [checkResult, setCheckResult] = useState<CheckResult | null>(null);
   const [checkError, setCheckError] = useState("");
+  const [userPage, setUserPage] = useState(1);
+  const usersCheck = checks[selectedCheck].label === "User accounts";
+  const checkPath = usersCheck ? `${checks[selectedCheck].path}&page=${userPage}` : checks[selectedCheck].path;
 
   const recheckAccess = useCallback(async () => {
     try {
@@ -81,18 +84,25 @@ export default function AdminConsole({ admin }: { admin: User }) {
     }
   }
 
-  async function runCheck() {
+  async function runCheck(page = userPage) {
     const check = checks[selectedCheck];
+    const path = check.label === "User accounts" ? `${check.path}&page=${page}` : check.path;
     setChecking(true);
+    setUserPage(page);
     setCheckResult(null);
     setCheckError("");
     const started = performance.now();
     try {
-      const response = await fetch(check.path, { method: "GET", credentials: "include", cache: "no-store" });
+      const response = await fetch(path, { method: "GET", credentials: "include", cache: "no-store" });
       const raw = await response.text();
       let body = raw;
-      try { body = JSON.stringify(JSON.parse(raw), null, 2); } catch { /* Gateway health is plain text. */ }
-      setCheckResult({ status: response.status, duration: Math.round(performance.now() - started), body });
+      let totalPages: number | undefined;
+      try {
+        const data = JSON.parse(raw);
+        body = JSON.stringify(data, null, 2);
+        if (check.label === "User accounts" && response.ok) totalPages = data.totalPages;
+      } catch { /* Gateway health is plain text. */ }
+      setCheckResult({ status: response.status, duration: Math.round(performance.now() - started), body, totalPages });
     } catch {
       setCheckError("Could not reach the gateway. Check that the local services are running.");
     } finally {
@@ -128,12 +138,13 @@ export default function AdminConsole({ admin }: { admin: User }) {
           <h2 id="checks-title">Service checks</h2>
           <p>Run one preset GET request and inspect its real response. A gateway result alone does not prove every service is healthy.</p>
           <div className="admin-form">
-            <label htmlFor="service-check"><span>Request preset</span><select id="service-check" value={selectedCheck} disabled={checking} onChange={(event) => { setSelectedCheck(Number(event.target.value)); setCheckResult(null); setCheckError(""); }}>{checks.map((check, index) => <option key={check.path} value={index}>{check.label}</option>)}</select></label>
-            <button className="primary-button" disabled={checking} onClick={runCheck}>{checking ? "Running…" : "Run GET"}</button>
+            <label htmlFor="service-check"><span>Request preset</span><select id="service-check" value={selectedCheck} disabled={checking} onChange={(event) => { setSelectedCheck(Number(event.target.value)); setUserPage(1); setCheckResult(null); setCheckError(""); }}>{checks.map((check, index) => <option key={check.path} value={index}>{check.label}</option>)}</select></label>
+            <button className="primary-button" disabled={checking} onClick={() => void runCheck()}>{checking ? "Running…" : "Run GET"}</button>
           </div>
-          <p className="admin-check-path">{checks[selectedCheck].service} · GET {checks[selectedCheck].path}</p>
+          <p className="admin-check-path">{checks[selectedCheck].service} · GET {checkPath}</p>
           {checkError && <p className="form-error" role="alert">{checkError}</p>}
           {checkResult && <div className="admin-response" role="status"><div><strong>HTTP {checkResult.status}</strong><span>{checkResult.duration} ms</span></div><pre>{checkResult.body}</pre></div>}
+          {usersCheck && checkResult?.totalPages && checkResult.totalPages > 1 && <div className="admin-pagination"><button className="secondary-button" disabled={checking || userPage === 1} onClick={() => void runCheck(userPage - 1)}>Previous</button><span>Page {userPage} of {checkResult.totalPages}</span><button className="secondary-button" disabled={checking || userPage >= checkResult.totalPages} onClick={() => void runCheck(userPage + 1)}>Next</button></div>}
           <p className="admin-pending">Credit and Order checks can be added when those services have gateway routes. A failed application request does not always mean a service is down.</p>
         </section>
       </div>
