@@ -5,6 +5,7 @@ import (
 	"embed"
 	"errors"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -92,8 +93,12 @@ func (a *App) session(ctx context.Context, token string) (User, time.Time, error
 	return u, expires, err
 }
 
-// PromoteAdmin is an operator-only command, never a registration option.
-func PromoteAdmin(ctx context.Context, db *pgxpool.Pool, email string) error {
+// PromoteAdmin is a break-glass, operator-only command, never a registration option.
+func PromoteAdmin(ctx context.Context, db *pgxpool.Pool, email, operator, reason string) error {
+	operator, reason = strings.TrimSpace(operator), strings.TrimSpace(reason)
+	if len(operator) < 3 || len(operator) > 100 || len(reason) < 3 || len(reason) > 200 || strings.ContainsAny(operator+reason, "\r\n") {
+		return errors.New("operator label and reason must be 3-100 and 3-200 characters without newlines")
+	}
 	tx, err := db.Begin(ctx)
 	if err != nil {
 		return err
@@ -103,14 +108,27 @@ func PromoteAdmin(ctx context.Context, db *pgxpool.Pool, email string) error {
 		return err
 	}
 	var id string
-	err = tx.QueryRow(ctx, "UPDATE users SET is_admin=true WHERE email=$1 AND verified_at IS NOT NULL RETURNING id", email).Scan(&id)
+	var alreadyAdmin bool
+	err = tx.QueryRow(ctx, "SELECT id,is_admin FROM users WHERE email=$1 AND verified_at IS NOT NULL FOR UPDATE", email).Scan(&id, &alreadyAdmin)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return errors.New("no verified account matches that email")
 	}
 	if err != nil {
 		return err
 	}
+	if alreadyAdmin {
+		return errors.New("account is already an admin")
+	}
+	if _, err = tx.Exec(ctx, "UPDATE users SET is_admin=true WHERE id=$1", id); err != nil {
+		return err
+	}
 	if _, err = tx.Exec(ctx, "DELETE FROM sessions WHERE user_id=$1", id); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, "UPDATE admin_bootstrap SET consumed_at=COALESCE(consumed_at,now()) WHERE singleton=true"); err != nil {
+		return err
+	}
+	if err = recordRoleEvent(ctx, tx, "operator", nil, operator, id, email, "user", "admin", reason); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

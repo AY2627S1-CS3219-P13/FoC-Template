@@ -19,7 +19,7 @@ fi
 export SMOKE_EMAIL="smoke-$(date +%s)-$(openssl rand -hex 4)@u.nus.edu"
 export SMOKE_PASSWORD="$(openssl rand -hex 24)"
 docker compose --profile test run --rm --no-deps -e SMOKE_EMAIL -e SMOKE_PASSWORD -e SMOKE_BASE_URL -e SMOKE_SUPPLIER_URL -e SMOKE_API_ONLY smoke setup
-docker compose exec -T user-service user-service promote-admin "$SMOKE_EMAIL"
+docker compose exec -T user-service user-service promote-admin "$SMOKE_EMAIL" automated-smoke "local smoke test fixture"
 docker compose --profile test run --rm --no-deps -e SMOKE_EMAIL -e SMOKE_PASSWORD -e SMOKE_BASE_URL -e SMOKE_SUPPLIER_URL -e SMOKE_API_ONLY smoke check
 if [ "${SMOKE_KEEP:-0}" = "1" ]; then
   echo 'Smoke test passed. The generated admin account remains in local data.'

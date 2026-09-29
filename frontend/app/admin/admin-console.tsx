@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { UserApiError, userApi, type User } from "@/lib/user-api";
+import { UserApiError, userApi, type RoleEvent, type User } from "@/lib/user-api";
+import Modal from "@/app/modal";
 
 const checks = [
   { label: "Gateway", service: "Gateway", path: "/healthz" },
@@ -20,9 +21,15 @@ export default function AdminConsole({ admin }: { admin: User }) {
   const [email, setEmail] = useState("");
   const [target, setTarget] = useState<User | null>(null);
   const [searching, setSearching] = useState(false);
-  const [promoting, setPromoting] = useState(false);
+  const [changingRole, setChangingRole] = useState(false);
+  const [pendingRole, setPendingRole] = useState<"user" | "admin" | null>(null);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [confirmError, setConfirmError] = useState("");
   const [roleMessage, setRoleMessage] = useState("");
   const [roleError, setRoleError] = useState("");
+  const [events, setEvents] = useState<RoleEvent[] | null>(null);
+  const [eventsBusy, setEventsBusy] = useState(false);
+  const [eventsError, setEventsError] = useState("");
   const [selectedCheck, setSelectedCheck] = useState<number>(0);
   const [checking, setChecking] = useState(false);
   const [checkResult, setCheckResult] = useState<CheckResult | null>(null);
@@ -67,20 +74,51 @@ export default function AdminConsole({ admin }: { admin: User }) {
     }
   }
 
-  async function promote() {
-    if (!target || target.id === admin.id || target.roles.includes("admin")) return;
-    if (!window.confirm(`Promote ${target.email} to admin? Their current sessions will end.`)) return;
-    setPromoting(true);
+  function openRoleChange(role: "user" | "admin") {
+    if (!target || target.id === admin.id) return;
+    setPendingRole(role);
+    setCurrentPassword("");
+    setConfirmError("");
+  }
+
+  function closeRoleChange() {
+    if (changingRole) return;
+    setPendingRole(null);
+    setCurrentPassword("");
+    setConfirmError("");
+  }
+
+  async function submitRoleChange(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!target || !pendingRole || !currentPassword) return;
+    const role = pendingRole;
+    setChangingRole(true);
     setRoleMessage("");
     setRoleError("");
+    setConfirmError("");
     try {
-      const result = await userApi.promoteUser(target.id);
+      const result = await userApi.changeUserRole(target.id, role, currentPassword);
       setTarget({ ...target, roles: result.roles });
-      setRoleMessage(`${target.email} is now an admin. They must log in again.`);
+      setRoleMessage(`${target.email} is now ${role === "admin" ? "an admin" : "a user"}. Their sessions ended; they must log in again.`);
+      setEvents(null);
+      setPendingRole(null);
     } catch (error) {
-      setRoleError(error instanceof UserApiError ? error.message : "Could not promote this user. Please retry.");
+      setConfirmError(error instanceof UserApiError ? error.message : "Could not change this role. Please retry.");
     } finally {
-      setPromoting(false);
+      setCurrentPassword("");
+      setChangingRole(false);
+    }
+  }
+
+  async function loadEvents() {
+    setEventsBusy(true);
+    setEventsError("");
+    try {
+      setEvents((await userApi.roleEvents()).events);
+    } catch (error) {
+      setEventsError(error instanceof UserApiError ? error.message : "Could not load role history. Please retry.");
+    } finally {
+      setEventsBusy(false);
     }
   }
 
@@ -121,18 +159,28 @@ export default function AdminConsole({ admin }: { admin: User }) {
       <section className="admin-heading"><p className="eyebrow">Administration</p><h1>Admin page</h1><p>Look up a verified user to grant admin access, or run a read-only request through the gateway.</p></section>
       <div className="admin-grid">
         <section className="admin-panel" aria-labelledby="role-title">
-          <h2 id="role-title">Promote a user</h2>
-          <p>Search by exact school email. Only verified accounts can be promoted.</p>
+          <h2 id="role-title">Manage user roles</h2>
+          <p>Search by exact school email. Only verified accounts can have their role changed.</p>
           <form className="admin-form" onSubmit={search}>
-            <label htmlFor="admin-email"><span>School email</span><input id="admin-email" type="email" value={email} disabled={searching || promoting} onChange={(event) => { setEmail(event.target.value); setTarget(null); setRoleError(""); setRoleMessage(""); }} placeholder="student@u.nus.edu" required /></label>
+            <label htmlFor="admin-email"><span>School email</span><input id="admin-email" type="email" value={email} disabled={searching || changingRole} onChange={(event) => { setEmail(event.target.value); setTarget(null); setRoleError(""); setRoleMessage(""); }} placeholder="student@u.nus.edu" required /></label>
             <button className="primary-button" disabled={searching}>{searching ? "Searching…" : "Find user"}</button>
           </form>
           {roleError && <p className="form-error" role="alert">{roleError}</p>}
           {roleMessage && <p className="notice" role="status">{roleMessage}</p>}
           {target && <div className="admin-user-result">
             <strong>{target.displayName}</strong><span>{target.email}</span><span>Current role: {target.roles.includes("admin") ? "Admin" : "User"}</span>
-            {target.id === admin.id ? <p>You cannot change your own role.</p> : target.roles.includes("admin") ? <p>This user is already an admin.</p> : <button className="primary-button" disabled={promoting} onClick={promote}>{promoting ? "Promoting…" : "Promote to admin"}</button>}
+            {target.id === admin.id ? <p>You cannot change your own role.</p> : target.roles.includes("admin") ? <button className="danger-button" onClick={() => openRoleChange("user")}>Remove admin access</button> : <button className="primary-button" onClick={() => openRoleChange("admin")}>Promote to admin</button>}
           </div>}
+        </section>
+        <section className="admin-panel" aria-labelledby="audit-title">
+          <h2 id="audit-title">Role change history</h2>
+          <p>Recent bootstrap, administrator and operator changes. Only administrators can read this history.</p>
+          <button className="secondary-button" disabled={eventsBusy} onClick={() => void loadEvents()}>{eventsBusy ? "Loading…" : "Load recent changes"}</button>
+          {eventsError && <p className="form-error" role="alert">{eventsError}</p>}
+          {events && (events.length ? <ul className="admin-event-list">{events.map(event => <li key={event.id}>
+            <strong>{event.actorLabel}</strong> ({event.actorKind}) changed <strong>{event.targetEmail}</strong> from {event.previousRole} to {event.newRole}.
+            <span> {new Date(event.occurredAt).toLocaleString()}</span>{event.reason ? <p>Reason: {event.reason}</p> : null}
+          </li>)}</ul> : <p>No role changes recorded yet.</p>)}
         </section>
         <section className="admin-panel" aria-labelledby="checks-title">
           <h2 id="checks-title">Service checks</h2>
@@ -149,5 +197,14 @@ export default function AdminConsole({ admin }: { admin: User }) {
         </section>
       </div>
     </main>
+    {pendingRole && target && <Modal titleId="role-confirm-title" className="confirm-dialog" busy={changingRole} onClose={closeRoleChange}>
+      <h2 id="role-confirm-title">{pendingRole === "admin" ? "Promote to admin" : "Remove admin access"}</h2>
+      <p>Change {target.email} to {pendingRole}? Their current sessions will end. Enter your password to confirm.</p>
+      <form onSubmit={submitRoleChange}>
+        <label htmlFor="admin-current-password"><span>Your current password</span><input id="admin-current-password" type="password" autoComplete="current-password" value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} required /></label>
+        {confirmError && <p className="form-error" role="alert">{confirmError}</p>}
+        <div className="detail-actions"><button type="button" className="secondary-button" disabled={changingRole} onClick={closeRoleChange}>Cancel</button><button type="submit" className={pendingRole === "admin" ? "primary-button" : "danger-button"} disabled={changingRole || !currentPassword}>{changingRole ? "Saving…" : "Confirm role change"}</button></div>
+      </form>
+    </Modal>}
   </div>;
 }

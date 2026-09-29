@@ -9,5 +9,5 @@
 - Run from the repository root: `sh user-service/scripts/init-env.sh`, `sh credit-service/scripts/init-env.sh`, then `docker compose up --build -d gateway`.
 - Check backend: `docker compose --profile test run --build --rm user-tests` (formatting, vet, race-enabled tests, build).
 - Format in a container: `docker compose --profile test run --rm --no-deps -v ./user-service:/app user-tests gofmt -w cmd internal`.
-- Promote a local account: `docker compose exec -T user-service user-service promote-admin <email>`.
+- Operator-only recovery/fixture grant: `docker compose exec -T user-service user-service promote-admin <verified-email> <operator-label> <reason>`; every successful grant is audited.
 - Outgoing mail in development goes to Mailpit at `http://localhost:8025`.

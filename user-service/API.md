@@ -17,15 +17,21 @@ For requests with a body, send `Content-Type: application/json`. All POST, PATCH
 | `GET /api/v1/users/me` | No body | 200, `user` | Session cookie |
 | `PATCH /api/v1/users/me` | `displayName` | 200, updated `user` | Session cookie |
 | `PUT /api/v1/users/me/password` | `currentPassword`, `newPassword` | 200, message; all sessions revoked | Session cookie and current password |
+| `POST /api/v1/admin/bootstrap-claim` | No body | 200, message; all claimant sessions revoked | Designated, verified user's session cookie |
 | `GET /api/v1/admin/users?email=...` | Exact school email query | 200, matching verified `user`; 404 if absent | Admin session cookie |
 | `GET /api/v1/admin/users?page=1&pageSize=20` | No body; page starts at 1, page size 1–100 | 200, `users`, `page`, `pageSize`, `total`, `totalPages` | Admin session cookie |
-| `PUT /api/v1/admin/users/{id}/role` | `role`: `user` or `admin` | 200, `userId` and `roles`; target sessions revoked | Admin session cookie |
+| `GET /api/v1/admin/role-events?page=1&pageSize=20` | No body; page starts at 1, page size 1–100 | 200, recent `events`, `page`, `pageSize`, `total`, `totalPages` | Admin session cookie |
+| `PUT /api/v1/admin/users/{id}/role` | `role`: `user` or `admin`; `currentPassword`: acting admin's password | 200, `userId` and `roles`; changed target sessions revoked | Admin session cookie and current password |
 | `GET /healthz` | No body | 200 if HTTP server is running | None |
 | `GET /readyz` | No body | 200 if database is reachable; otherwise 503 | None |
 
 Unknown JSON fields are rejected. Registration never accepts roles. A verified account is required to log in. Repeated registration restarts a pending signup with a new password/code/token; verified accounts are never changed. Use resend to get a new code while keeping the same signup attempt. A generic 202 with a token is also returned for an already verified email, without changing that account.
 
+The one-time bootstrap claim is enabled only when the operator sets `USER_BOOTSTRAP_ADMIN_EMAIL` to an allowed school address before deployment. The endpoint takes the identity from the session, not a submitted email or role. It returns `404 bootstrap_disabled` without that setting, `403 bootstrap_not_authorized` for another account, and `409 bootstrap_used` once claimed or when an admin already exists. A successful claim revokes all of that account's sessions; log in again. The used state is stored in PostgreSQL and never resets automatically. The existing operator promotion command also consumes it.
+
 The admin list returns newest accounts first, including pending accounts with `verifiedAt: null`. Each entry includes only `id`, `email`, `displayName`, `roles`, `verifiedAt` and `createdAt`. It never includes password hashes, verification challenges or session data. The exact-email lookup still returns only verified accounts.
+
+Role changes require the acting administrator's password for each request and are rate-limited to 10 attempts per admin per 10 minutes. Wrong or missing passwords return `401 invalid_credentials`. Self-role changes are rejected. An unchanged role is an idempotent success and does not revoke sessions or create an audit event. Actual changes revoke the target's sessions and atomically append an event with actor, target, old/new role and timestamp. The audit endpoint returns these events newest first, including bootstrap and operator grants; only admins can read it. Operator grants also include a self-declared operator label and reason.
 
 Keep the returned `registrationToken` in the signup flow (for example, browser sessionStorage), pass it alongside the code, and remove it after verification. Losing it requires restarting registration. It binds the email code to the signup attempt that set the password. It grants no login access. On registration's email-delivery 503, the response still includes `registrationToken` so the user can retry delivery.
 
@@ -104,9 +110,9 @@ Domain errors have this shape:
 | --- | --- |
 | 400 | Bad input, unknown fields, invalid/expired/used code (`invalid_verification`), invalid role, self role change |
 | 401 | `invalid_credentials`, `invalid_session` or `invalid_service_credentials` |
-| 403 | `origin_rejected` or `admin_required` |
-| 404 | Verified target user not found; unknown route |
-| 409 | `display_name_taken`; verification may retry with an optional new `displayName` |
+| 403 | `origin_rejected`, `admin_required` or `bootstrap_not_authorized` |
+| 404 | `bootstrap_disabled`, verified target user not found or unknown route |
+| 409 | `display_name_taken` or `bootstrap_used`; verification may retry with an optional new `displayName` |
 | 415 | `json_required` |
 | 429 | `rate_limited`; wait before retrying |
 | 500 | `internal_error`; request failed without exposing internal details |

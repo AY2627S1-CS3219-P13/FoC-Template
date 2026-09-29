@@ -232,6 +232,9 @@ dialog.native-dialog.auth-dialog { padding: 32px; }
 .admin-response pre { max-height: 350px; overflow: auto; margin: 0; padding: 14px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .admin-pagination { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; font-size: 12px; }
 .admin-panel .admin-pending { margin: 22px 0 0; font-size: 12px; }
+.admin-event-list { margin: 18px 0 0; padding-left: 20px; display: grid; gap: 14px; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.admin-event-list span { color: var(--muted); }
+.admin-event-list p { margin: 2px 0 0; color: var(--muted); }
 
 @media (max-width: 900px) {
   .hero { align-items: start; flex-direction: column; }

@@ -12,6 +12,7 @@ import (
 
 type Config struct {
 	DatabaseURL, Origin, InternalToken, CodeSecret    string
+	BootstrapAdminEmail                               string
 	AllowedDomains                                    []string
 	SecureCookies                                     bool
 	SessionTTL                                        time.Duration
@@ -23,8 +24,9 @@ func LoadConfig() (Config, error) {
 	c := Config{
 		DatabaseURL: os.Getenv("USER_DATABASE_URL"), Origin: os.Getenv("USER_APP_ORIGIN"),
 		InternalToken: os.Getenv("USER_INTERNAL_TOKEN"), CodeSecret: os.Getenv("USER_CODE_SECRET"),
-		AllowedDomains: strings.Split(strings.ToLower(os.Getenv("USER_ALLOWED_EMAIL_DOMAINS")), ","),
-		SMTPAddress:    os.Getenv("USER_SMTP_ADDRESS"), SMTPFrom: os.Getenv("USER_SMTP_FROM"),
+		BootstrapAdminEmail: strings.ToLower(strings.TrimSpace(os.Getenv("USER_BOOTSTRAP_ADMIN_EMAIL"))),
+		AllowedDomains:      strings.Split(strings.ToLower(os.Getenv("USER_ALLOWED_EMAIL_DOMAINS")), ","),
+		SMTPAddress:         os.Getenv("USER_SMTP_ADDRESS"), SMTPFrom: os.Getenv("USER_SMTP_FROM"),
 		SMTPUsername: os.Getenv("USER_SMTP_USERNAME"), SMTPPassword: os.Getenv("USER_SMTP_PASSWORD"),
 	}
 	var err error
@@ -70,6 +72,25 @@ func LoadConfig() (Config, error) {
 		c.AllowedDomains[i] = strings.TrimSpace(d)
 		if c.AllowedDomains[i] == "" || strings.ContainsAny(d, "@/ *") {
 			return c, errors.New("set an explicit comma-separated school-domain allowlist")
+		}
+	}
+	if c.BootstrapAdminEmail != "" {
+		parsed, err := mail.ParseAddress(c.BootstrapAdminEmail)
+		if err != nil || parsed.Address != c.BootstrapAdminEmail || len(c.BootstrapAdminEmail) > 254 || strings.ContainsAny(c.BootstrapAdminEmail, "\r\n") {
+			return c, errors.New("USER_BOOTSTRAP_ADMIN_EMAIL must be a valid school email address")
+		}
+		_, domain, ok := strings.Cut(c.BootstrapAdminEmail, "@")
+		allowed := false
+		if ok {
+			for _, candidate := range c.AllowedDomains {
+				if domain == candidate {
+					allowed = true
+					break
+				}
+			}
+		}
+		if !allowed {
+			return c, errors.New("USER_BOOTSTRAP_ADMIN_EMAIL must belong to an allowed school domain")
 		}
 	}
 	return c, nil

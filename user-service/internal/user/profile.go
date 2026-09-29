@@ -200,7 +200,8 @@ func (a *App) changeRole(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	var body struct {
-		Role string `json:"role"`
+		Role            string `json:"role"`
+		CurrentPassword string `json:"currentPassword"`
 	}
 	if err = readJSON(w, r, &body); err != nil {
 		return err
@@ -220,6 +221,9 @@ func (a *App) changeRole(w http.ResponseWriter, r *http.Request) error {
 	if uuid.Bytes == actorUUID.Bytes {
 		return problem(400, "self_role_change", "Ask another admin to change your role.")
 	}
+	if err = a.limit(r.Context(), "role-change:"+u.ID, 10, 10*time.Minute); err != nil {
+		return err
+	}
 	tx, err := a.db.Begin(r.Context())
 	if err != nil {
 		return err
@@ -230,22 +234,52 @@ func (a *App) changeRole(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	var admin bool
-	if err = tx.QueryRow(r.Context(), "SELECT is_admin FROM users WHERE id=$1 FOR UPDATE", u.ID).Scan(&admin); err != nil {
+	var actorHash string
+	if err = tx.QueryRow(r.Context(), "SELECT is_admin,password_hash FROM users WHERE id=$1 FOR UPDATE", u.ID).Scan(&admin, &actorHash); err != nil {
 		return err
 	}
 	if !admin {
 		return problem(403, "admin_required", "An administrator is required.")
 	}
-	var target string
-	err = tx.QueryRow(r.Context(), "UPDATE users SET is_admin=$2 WHERE id=$1 AND verified_at IS NOT NULL RETURNING id", id, body.Role == "admin").Scan(&target)
+	cookie, err := r.Cookie(a.cfg.CookieName())
+	if err != nil {
+		return problem(401, "invalid_session", "Please log in again.")
+	}
+	var sessionActive bool
+	if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM sessions WHERE token_hash=$1 AND user_id=$2 AND expires_at>now())", tokenHash(cookie.Value), u.ID).Scan(&sessionActive); err != nil {
+		return err
+	}
+	if !sessionActive {
+		return problem(401, "invalid_session", "Please log in again.")
+	}
+	if !validPassword(body.CurrentPassword) || !checkPassword(actorHash, body.CurrentPassword) {
+		return problem(401, "invalid_credentials", "Your current password is incorrect.")
+	}
+	var target, targetEmail string
+	var targetAdmin bool
+	err = tx.QueryRow(r.Context(), "SELECT id,email,is_admin FROM users WHERE id=$1 AND verified_at IS NOT NULL FOR UPDATE", id).Scan(&target, &targetEmail, &targetAdmin)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return problem(404, "user_not_found", "No verified account matches that ID.")
 	}
 	if err != nil {
 		return err
 	}
+	if targetAdmin == (body.Role == "admin") {
+		writeJSON(w, 200, map[string]any{"userId": target, "roles": roles(targetAdmin)})
+		return nil
+	}
+	if _, err = tx.Exec(r.Context(), "UPDATE users SET is_admin=$2 WHERE id=$1", target, body.Role == "admin"); err != nil {
+		return err
+	}
 	// Re-login is required after any privilege change, including promotion.
 	if _, err = tx.Exec(r.Context(), "DELETE FROM sessions WHERE user_id=$1", id); err != nil {
+		return err
+	}
+	previousRole := "user"
+	if targetAdmin {
+		previousRole = "admin"
+	}
+	if err = recordRoleEvent(r.Context(), tx, "admin", &u.ID, u.Email, target, targetEmail, previousRole, body.Role, ""); err != nil {
 		return err
 	}
 	if err = tx.Commit(r.Context()); err != nil {
