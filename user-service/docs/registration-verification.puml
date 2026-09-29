@@ -11,8 +11,9 @@ participant "Email / local Mailpit" as Email
 participant "Credit Service" as Credit
 
 note over Frontend, User
-  Frontend is a planned caller of the implemented API.
-  Credit allocation is confirmed synchronously, with a durable retry job.
+  Frontend calls the implemented User Service API.
+  Verification attempts Credit allocation once, with a durable retry job.
+  Allocation failure does not block verification or login.
 end note
 
 Student -> Frontend: Enter email, display name and password
@@ -53,12 +54,11 @@ alt Valid verification and available display name
   alt Credit confirms wallet
     Credit --> User: 200 - wallet ready
     User -> DB: Mark allocation job complete
-    User --> Frontend: 200 - account and 100 credits ready
-    Frontend --> Student: You can now log in
   else Credit unavailable
-    User --> Frontend: 503 - credit_setup_pending
-    note over User, Credit: Worker retries; login also retries before issuing a session.
+    note over User, Credit: Worker retries the committed job; the account stays usable.
   end
+  User --> Frontend: 200 - account verified
+  Frontend --> Student: You can now log in
 else Wrong code with valid registration token and eligible challenge
   User -> DB: Increment failed attempts and commit
   User --> Frontend: 400 - verification rejected

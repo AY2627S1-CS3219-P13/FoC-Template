@@ -272,8 +272,10 @@ func (a *App) verifyEmail(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	a.log.Info("account verified", "userId", id)
+	// Credit setup is best effort here. The committed job survives an outage and
+	// the worker retries it; verification and login must not depend on Credit.
 	if err = a.ensureAllocation(r.Context(), id); err != nil {
-		return err
+		a.log.Warn("credit setup pending after verification", "userId", id)
 	}
 	writeJSON(w, 200, map[string]string{"message": "Email verified. You can now log in."})
 	return nil
@@ -315,26 +317,6 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if !checkPassword(hash, body.Password) {
-		return invalid
-	}
-	// Do not hold the account row lock across an HTTP call to Credit Service.
-	if err = tx.Commit(r.Context()); err != nil {
-		return err
-	}
-	if err = a.ensureAllocation(r.Context(), u.ID); err != nil {
-		return err
-	}
-	tx, err = a.db.Begin(r.Context())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(r.Context())
-	// A role change may have happened while the wallet was being confirmed.
-	var currentHash string
-	if err = tx.QueryRow(r.Context(), "SELECT email,display_name,password_hash,is_admin,verified_at FROM users WHERE id=$1 AND verified_at IS NOT NULL FOR UPDATE", u.ID).Scan(&u.Email, &u.DisplayName, &currentHash, &isAdmin, &u.VerifiedAt); err != nil {
-		return err
-	}
-	if currentHash != hash {
 		return invalid
 	}
 	token, err := randomToken()

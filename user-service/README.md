@@ -14,7 +14,7 @@ PlantUML sequence diagrams: [registration and verification](docs/registration-ve
 - Let a pre-designated, verified school account claim the first admin role once; admins can change another verified user's role.
 - Let other services validate sessions through a separate, authenticated internal API.
 
-Verification commits a durable allocation job with the verified account, then calls Credit Service's private idempotent endpoint. A 200 verification response means the 100-credit wallet is ready. Login also confirms any unfinished job before issuing a session. If Credit Service is unavailable, both return 503 `credit_setup_pending`; verification has already consumed the code, so retry **login**, not the code. A background worker retries with backoff after outages and restarts. Previously verified accounts are deliberately not backfilled in this development rollout.
+Verification commits a durable allocation job with the verified account, then makes a best-effort call to Credit Service's private idempotent endpoint. Verification returns 200 once the email is verified, whether or not the 100-credit wallet is ready. Login issues a session for a verified account without depending on Credit Service. A background worker retries unfinished grants with backoff after outages and restarts. `GET /api/v1/users/me` reports the job state so the frontend can show a temporary setup message for a pending wallet. Previously verified accounts are deliberately not backfilled in this development rollout.
 
 ## Run locally
 
@@ -22,17 +22,38 @@ From the repository root, with Docker Desktop running:
 
 ```sh
 sh user-service/scripts/init-env.sh
-docker compose up --build -d user-service
+sh credit-service/scripts/init-env.sh
+docker compose up --build -d gateway
 ```
 
-The setup script creates a git-ignored `.env` with random local secrets. It preserves existing values and appends Supplier database credentials if missing. For other settings missing from an older `.env`, use `.env.example` as a reference.
+The setup scripts create git-ignored `.env` files with random local secrets and preserve existing values. Credit's script also configures User Service's private Credit credential. For settings missing from an older `.env`, use `.env.example` as a reference.
 
 - Public API: `http://localhost:8080`
 - Local verification inbox: `http://localhost:8025`
 - Ready check: `http://localhost:8080/readyz`
 - Internal API, from another Compose service: `http://user-service:8081`
 
-PostgreSQL data is stored in a named volume and survives container restarts. Database and internal API ports are not published to your computer. Mailpit captures email locally; nothing is sent to a real mailbox. A minimal shared Next.js frontend and gateway are now available through the [Supplier setup](../supplier-service/README.md); `docker compose up --build -d gateway` serves the UI and both public APIs at `http://localhost:3000`. The direct User API defaults to port 8080; change `USER_HTTP_PORT` in `.env` if that host port is occupied.
+PostgreSQL data is stored in named volumes and survives container restarts. Database and internal API ports are not published to your computer. Mailpit captures email locally; nothing is sent to a real mailbox. The shared gateway serves the UI and public APIs at `http://localhost:3000`. The direct User API defaults to port 8080; change `USER_HTTP_PORT` in `.env` if that host port is occupied.
+
+### Fresh local User and Credit data
+
+There are no default User accounts or admins. On a fresh database, migrations create an unused one-time admin claim; `USER_BOOTSTRAP_ADMIN_EMAIL` designates who may claim it, but does **not** create an account or grant a role. The 100-credit grant is triggered when each new account verifies its email, not at service startup. If Credit Service is unavailable, login still works and the allocation worker retries.
+
+To intentionally discard **all local User and Credit data** (accounts, sessions, role history, wallets and credit history) while preserving the Supplier database, run from the repository root:
+
+```sh
+docker volume inspect foc_user-data foc_credit-data --format '{{.Name}} {{index .Labels "com.docker.compose.volume"}}'
+docker compose stop gateway frontend supplier-service user-service credit-service user-db credit-db
+docker compose rm -f user-db credit-db
+docker volume rm foc_user-data foc_credit-data
+sh user-service/scripts/init-env.sh
+sh credit-service/scripts/init-env.sh
+docker compose up --build -d gateway
+```
+
+This is irreversible without a separate backup. The volume names above are for this Compose project's `foc` name; verify them before running the removal command. Do **not** use `docker compose down -v` for this reset: it would also remove Supplier data. Existing `.env` files are preserved, so check that `USER_BOOTSTRAP_ADMIN_EMAIL` names the intended school address before starting User Service. After startup, that person must register, verify, log in, claim access at `http://localhost:3000/admin/setup`, then log in again.
+
+On a freshly reset database, run `scripts/smoke.sh` and `scripts/browser-check.sh` **only after** the designated first admin has claimed access. Those full checks temporarily promote fixture accounts through the operator command; that promotion consumes the one-time bootstrap claim even though their fixtures are later deleted.
 
 Set `USER_APP_ORIGIN` to the frontend's exact origin. The default is `http://localhost:3000`; frontend requests need `credentials: "include"`. Every public POST, PUT or PATCH needs the matching `Origin` header, including command-line requests. This, JSON-only request bodies and SameSite cookies protect browser mutations against CSRF.
 

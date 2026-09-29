@@ -200,22 +200,20 @@ func TestCreditAllocationRecovery(t *testing.T) {
 	verification := request(t, a.PublicHandler(), "POST", "/api/v1/auth/verify-email", map[string]string{
 		"email": email, "code": m.code(email), "registrationToken": m.token(email),
 	}, nil, nil)
-	status(t, verification, 503)
-	if !strings.Contains(verification.Body.String(), "credit_setup_pending") {
-		t.Fatal("verification should report credit setup, not an invalid code")
-	}
+	status(t, verification, 200)
 	var userID string
 	if err := a.db.QueryRow(context.Background(), "SELECT id FROM users WHERE email=$1 AND verified_at IS NOT NULL", email).Scan(&userID); err != nil {
 		t.Fatal("account must be verified even when Credit Service is down:", err)
 	}
-	login := request(t, a.PublicHandler(), "POST", "/api/v1/auth/login", map[string]string{"email": email, "password": testPassword}, nil, nil)
-	status(t, login, 503)
-	if len(login.Result().Cookies()) != 0 {
-		t.Fatal("login must not issue a session before allocation")
-	}
+	cookie := loginTest(t, a, email, testPassword)
 	var sessions int
-	if err := a.db.QueryRow(context.Background(), "SELECT count(*) FROM sessions WHERE user_id=$1", userID).Scan(&sessions); err != nil || sessions != 0 {
-		t.Fatalf("pending account has %d sessions: %v", sessions, err)
+	if err := a.db.QueryRow(context.Background(), "SELECT count(*) FROM sessions WHERE user_id=$1", userID).Scan(&sessions); err != nil || sessions != 1 {
+		t.Fatalf("pending account has %d sessions, expected one: %v", sessions, err)
+	}
+	profile := request(t, a.PublicHandler(), "GET", "/api/v1/users/me", nil, cookie, nil)
+	status(t, profile, 200)
+	if !strings.Contains(profile.Body.String(), `"creditSetup":"pending"`) {
+		t.Fatal("profile must report pending setup without blocking login")
 	}
 	allocator.mu.Lock()
 	allocator.fail = false
@@ -244,13 +242,28 @@ func TestCreditAllocationRecovery(t *testing.T) {
 	if err := a.db.QueryRow(context.Background(), "SELECT completed_at IS NOT NULL FROM credit_allocations WHERE user_id=$1", userID).Scan(&completed); err != nil || !completed {
 		t.Fatalf("retry did not complete: %v", err)
 	}
+	profile = request(t, a.PublicHandler(), "GET", "/api/v1/users/me", nil, cookie, nil)
+	status(t, profile, 200)
+	if !strings.Contains(profile.Body.String(), `"creditSetup":"ready"`) {
+		t.Fatal("profile must report completed setup")
+	}
 	loginTest(t, a, email, testPassword)
 	allocator.mu.Lock()
 	got := allocator.calls[userID]
 	allocator.mu.Unlock()
-	if got != 3 { // verification, failed login, one successful worker claim
-		t.Fatalf("allocation called %d times, expected three", got)
+	if got != 2 { // failed verification fast path, then one successful worker claim
+		t.Fatalf("allocation called %d times, expected two", got)
 	}
+	// Pre-integration accounts have no job; they still retain normal login access.
+	if _, err := a.db.Exec(context.Background(), "DELETE FROM credit_allocations WHERE user_id=$1", userID); err != nil {
+		t.Fatal(err)
+	}
+	profile = request(t, a.PublicHandler(), "GET", "/api/v1/users/me", nil, cookie, nil)
+	status(t, profile, 200)
+	if !strings.Contains(profile.Body.String(), `"creditSetup":"not_applicable"`) {
+		t.Fatal("profile must distinguish an absent job from pending setup")
+	}
+	loginTest(t, a, email, testPassword)
 }
 
 func TestCreditAllocationLostResponse(t *testing.T) {
@@ -263,13 +276,22 @@ func TestCreditAllocationLostResponse(t *testing.T) {
 	allocator.mu.Unlock()
 	status(t, request(t, a.PublicHandler(), "POST", "/api/v1/auth/verify-email", map[string]string{
 		"email": email, "code": m.code(email), "registrationToken": m.token(email),
-	}, nil, nil), 503)
+	}, nil, nil), 200)
 	loginTest(t, a, email, testPassword)
 	var userID string
+	if err := a.db.QueryRow(context.Background(), "SELECT id FROM users WHERE email=$1", email).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec(context.Background(), "UPDATE credit_allocations SET next_attempt_at=now() WHERE user_id=$1", userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.processAllocation(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	var completed bool
 	if err := a.db.QueryRow(context.Background(), `SELECT u.id, c.completed_at IS NOT NULL FROM users u
 		JOIN credit_allocations c ON c.user_id=u.id WHERE u.email=$1`, email).Scan(&userID, &completed); err != nil || !completed {
-		t.Fatalf("login did not recover allocation: %v", err)
+		t.Fatalf("worker did not recover allocation: %v", err)
 	}
 	allocator.mu.Lock()
 	created, calls := allocator.allocations[userID], allocator.calls[userID]

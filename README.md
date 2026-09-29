@@ -30,7 +30,7 @@ The [Supplier skeleton](supplier-service/README.md) adds its own Go/PostgreSQL s
 
 Credit Service is also available for local development. See its [setup and design](credit-service/README.md) and [API reference](credit-service/API.md).
 
-The [Next.js frontend](frontend/README.md) has real User Service signup, email verification, login and logout. Newly verified accounts receive 100 credits before verification reports success; the header shows their wallet after login. Its navy/orange Supplier screens read and modify live PostgreSQL-backed records through the Supplier API, including search, filtering, sorting, pagination and details.
+The [Next.js frontend](frontend/README.md) has real User Service signup, email verification, login and logout. Verification starts a best-effort 100-credit grant, but a verified user can log in while wallet setup is pending; the header then shows a temporary setup message until the balance is available. Its navy/orange Supplier screens read and modify live PostgreSQL-backed records through the Supplier API, including search, filtering, sorting, pagination and details.
 
 To run the shared UI, User, Credit and Supplier services:
 

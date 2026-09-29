@@ -33,6 +33,7 @@ export default function AuthDialog({ initialMode, onClose, onLogin }: { initialM
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [verificationUncertain, setVerificationUncertain] = useState(false);
   const codeInputs = useRef<Array<HTMLInputElement | null>>([]);
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
@@ -57,6 +58,7 @@ export default function AuthDialog({ initialMode, onClose, onLogin }: { initialM
     setMode(next);
     setError("");
     setMessage("");
+    setVerificationUncertain(false);
     setFieldErrors({});
     setTouched({ email: false, displayName: false, password: false });
     setPassword("");
@@ -103,10 +105,12 @@ export default function AuthDialog({ initialMode, onClose, onLogin }: { initialM
     setBusy(true);
     setError("");
     setMessage("");
+    setVerificationUncertain(false);
     try {
       const address = email.trim().toLowerCase();
       if (mode === "login") {
         const result = await userApi.login(address, password);
+        if (readPending()?.email === address) sessionStorage.removeItem(signupKey);
         onLogin(result.user);
         return;
       }
@@ -152,16 +156,16 @@ export default function AuthDialog({ initialMode, onClose, onLogin }: { initialM
       } else if (failure instanceof UserApiError && mode === "verify" && failure.code === "display_name_taken") {
         setNeedsNewName(true);
         setError("That display name was taken. Enter a different name and retry this code.");
-      } else if (failure instanceof UserApiError && mode === "verify" && failure.code === "credit_setup_pending") {
-        // The code was consumed and the account is verified; retry login, not verification.
-        sessionStorage.removeItem(signupKey);
-        setCode("");
-        setMode("login");
-        setMessage(failure.message);
       } else if (failure instanceof UserApiError && mode === "verify" && failure.code === "invalid_verification") {
-        setError("Incorrect, expired or unusable code. Your account is still unverified.");
+        setVerificationUncertain(true);
+        setError("This code could not be confirmed. If you already submitted it, your account may be verified. Try logging in; otherwise request a new code.");
       } else {
-        setError(failure instanceof UserApiError ? failure.message : "Could not reach the User Service. Check that it is running.");
+        if (mode === "verify") {
+          setVerificationUncertain(true);
+          setError("We could not confirm the result. Your email may already be verified. Try logging in before submitting the code again.");
+        } else {
+          setError(failure instanceof UserApiError ? failure.message : "Could not reach the User Service. Check that it is running.");
+        }
       }
     } finally {
       setBusy(false);
@@ -180,6 +184,7 @@ export default function AuthDialog({ initialMode, onClose, onLogin }: { initialM
       }
       await userApi.resend(email);
       setCode("");
+      setVerificationUncertain(false);
       setMessage("Check your inbox for the code.");
     } catch (failure) {
       setError(failure instanceof UserApiError ? failure.message : "Could not reach the User Service. Check that it is running.");
@@ -257,6 +262,7 @@ export default function AuthDialog({ initialMode, onClose, onLogin }: { initialM
                     <small className="auth-code-hint">Enter the 8-digit code. It expires after 30 minutes.</small>
                   </div>
                   {error && <p className="form-error" role="alert">{error}</p>}
+                  {verificationUncertain && <button type="button" className="text-button" onClick={() => changeMode("login")}>Try logging in</button>}
                   {needsNewName && <label className="auth-field"><span>New display name</span><input maxLength={50} required value={replacementName} onChange={(event) => setReplacementName(event.target.value)} /></label>}
                 </>
               )}
@@ -277,7 +283,7 @@ export default function AuthDialog({ initialMode, onClose, onLogin }: { initialM
                 <><span>New to FoC?</span><button type="button" className="text-button" disabled={busy} onClick={() => changeMode("register")}>Create an account</button><button type="button" className="text-button" disabled={busy} onClick={() => changeMode("verify")}>Have a code?</button></>
               )}
             </div>
-            {mode === "verify" && <div className="auth-verification-note">Your account stays unverified until the correct code is accepted. Sign-in becomes available after verification.</div>}
+            {mode === "verify" && <div className="auth-verification-note">{verificationUncertain ? "If login says your email is unverified, return here to request a new code." : "Your account stays unverified until the correct code is accepted. Sign-in becomes available after verification."}</div>}
           </>
         )}
     </Modal>

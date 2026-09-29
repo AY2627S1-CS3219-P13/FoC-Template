@@ -45,10 +45,27 @@ func NewCreditClient(cfg Config) CreditClient {
 }
 
 func creditPending() error {
-	return problem(503, "credit_setup_pending", "Your email is verified, but credits are still being set up. Please try logging in shortly.")
+	return errors.New("credit setup pending")
 }
 
-// ensureAllocation is the fast path used by verification and login. A crash
+// creditSetupStatus reports User Service's durable job state, not the balance.
+// Older verified accounts have no job because they are not backfilled.
+func (a *App) creditSetupStatus(ctx context.Context, userID string) (string, error) {
+	var completed bool
+	err := a.db.QueryRow(ctx, "SELECT completed_at IS NOT NULL FROM credit_allocations WHERE user_id=$1", userID).Scan(&completed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "not_applicable", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if completed {
+		return "ready", nil
+	}
+	return "pending", nil
+}
+
+// ensureAllocation is the best-effort fast path used by verification. A crash
 // after Credit commits but before this job is marked done is safe to retry.
 func (a *App) ensureAllocation(ctx context.Context, userID string) error {
 	var completed bool

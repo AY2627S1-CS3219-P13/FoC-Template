@@ -6,19 +6,27 @@
 # Usage: sh scripts/cleanup-test-data.sh [email]   (no argument removes every fixture)
 set -eu
 cd "$(dirname "$0")/.."
+email="${1:-}"
+if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ -z "$email" ]; } || { [ -n "$email" ] && ! printf '%s\n' "$email" | LC_ALL=C grep -Eq '^(smoke-[0-9]+-[0-9a-f]{8}|browser-admin-[0-9]+-[0-9a-f]{6}|d2-student-[0-9]+-[0-9a-f]{6})@u[.]nus[.]edu$'; }; then
+  echo 'Refusing cleanup: specify a generated smoke, browser-admin or d2-student email.' >&2
+  exit 2
+fi
+
 sh user-service/scripts/init-env.sh
 sh credit-service/scripts/init-env.sh
 
-email="${1:-}"
 if [ -n "$email" ]; then
-  user_filter="email = '$(printf %s "$email" | tr -d "'")'"
-  supplier_filter="name LIKE '$(printf %s "${email%@*}" | tr -d "'")%'"
+  user_filter="email = '$email'"
+  supplier_name="${email%@*}"
+  supplier_filter="name = '$supplier_name' OR name = '$supplier_name edited'"
 else
-  user_filter="email LIKE 'smoke-%@u.nus.edu' OR email LIKE 'browser-admin-%@u.nus.edu'"
-  supplier_filter="name LIKE 'smoke-%' OR name LIKE 'browser-admin-%'"
+  user_filter="email ~ '^(smoke-[0-9]+-[0-9a-f]{8}|browser-admin-[0-9]+-[0-9a-f]{6})@u[.]nus[.]edu$'"
+  supplier_filter="name ~ '^smoke-[0-9]+-[0-9a-f]{8}( edited)?$'"
 fi
 
-docker compose up -d --wait user-db supplier-db >/dev/null
+# Fail closed if Credit's database is unavailable. Otherwise deleting the User
+# first could leave an orphan wallet that a later cleanup cannot discover.
+docker compose up -d --wait user-db supplier-db credit-db >/dev/null
 
 user_sql() {
   docker compose exec -T user-db psql -v ON_ERROR_STOP=1 -U foc_user -d foc_user "$@"
@@ -46,8 +54,7 @@ credit_sql() {
 }
 
 wallets_removed=0
-if [ -n "$user_ids" ] && [ -n "$(docker compose ps -q credit-db)" ] &&
-  [ "$(credit_sql -At -c "SELECT to_regclass('public.wallets') IS NOT NULL")" = "t" ]; then
+if [ -n "$user_ids" ] && [ "$(credit_sql -At -c "SELECT to_regclass('public.wallets') IS NOT NULL")" = "t" ]; then
   values="$(printf "'%s'," $user_ids)"
   # Only this local fixture cleanup bypasses the append-only ledger trigger.
   # Keep it inside one transaction so a failure restores the trigger and rows.
