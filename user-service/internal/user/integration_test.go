@@ -164,6 +164,86 @@ func validateTest(t *testing.T, a *App, cookie *http.Cookie) *httptest.ResponseR
 	return request(t, a.InternalHandler(), "POST", "/internal/v1/sessions/validate", map[string]string{"sessionToken": cookie.Value}, nil, map[string]string{"Authorization": "Bearer " + a.cfg.InternalToken})
 }
 
+func TestFirstAdminBootstrapClaim(t *testing.T) {
+	a, m := testApp(t)
+	owner := "owner@u.nus.edu"
+	other := "other@u.nus.edu"
+	registerTest(t, a, owner, "Owner")
+	registerTest(t, a, other, "Other")
+	verifyTest(t, a, m, owner)
+	verifyTest(t, a, m, other)
+	ownerCookie := loginTest(t, a, owner, testPassword)
+	otherCookie := loginTest(t, a, other, testPassword)
+	path := "/api/v1/admin/bootstrap-claim"
+	status(t, request(t, a.PublicHandler(), "POST", path, nil, ownerCookie, nil), 404)
+	a.cfg.BootstrapAdminEmail = owner
+	status(t, request(t, a.PublicHandler(), "POST", path, nil, nil, nil), 401)
+	status(t, request(t, a.PublicHandler(), "POST", path, nil, otherCookie, nil), 403)
+	status(t, request(t, a.PublicHandler(), "POST", path, nil, ownerCookie, map[string]string{"Origin": "https://untrusted.example"}), 403)
+	secondOwnerCookie := loginTest(t, a, owner, testPassword)
+	status(t, request(t, a.PublicHandler(), "POST", path, nil, ownerCookie, nil), 200)
+	status(t, validateTest(t, a, ownerCookie), 401)
+	status(t, validateTest(t, a, secondOwnerCookie), 401)
+	status(t, request(t, a.PublicHandler(), "GET", "/api/v1/users/me", nil, otherCookie, nil), 200)
+	newOwnerCookie := loginTest(t, a, owner, testPassword)
+	profile := request(t, a.PublicHandler(), "GET", "/api/v1/users/me", nil, newOwnerCookie, nil)
+	status(t, profile, 200)
+	if !strings.Contains(profile.Body.String(), `"admin"`) {
+		t.Fatal("claimed account lacks admin role")
+	}
+	status(t, request(t, a.PublicHandler(), "POST", path, nil, newOwnerCookie, nil), 409)
+	// Even losing the only admin must not reopen the one-time claim.
+	if _, err := a.db.Exec(context.Background(), "UPDATE users SET is_admin=false WHERE email=$1", owner); err != nil {
+		t.Fatal(err)
+	}
+	status(t, request(t, a.PublicHandler(), "POST", path, nil, newOwnerCookie, nil), 409)
+	var consumed bool
+	if err := a.db.QueryRow(context.Background(), "SELECT consumed_at IS NOT NULL FROM admin_bootstrap WHERE singleton=true").Scan(&consumed); err != nil || !consumed {
+		t.Fatal("bootstrap claim was not persisted")
+	}
+}
+
+func TestOperatorPromotionConsumesBootstrapClaim(t *testing.T) {
+	a, m := testApp(t)
+	owner := "owner@u.nus.edu"
+	registerTest(t, a, owner, "Owner")
+	verifyTest(t, a, m, owner)
+	a.cfg.BootstrapAdminEmail = owner
+	if err := PromoteAdmin(context.Background(), a.db, owner); err != nil {
+		t.Fatal(err)
+	}
+	cookie := loginTest(t, a, owner, testPassword)
+	status(t, request(t, a.PublicHandler(), "POST", "/api/v1/admin/bootstrap-claim", nil, cookie, nil), 409)
+}
+
+func TestConcurrentBootstrapClaims(t *testing.T) {
+	a, m := testApp(t)
+	owner := "owner@u.nus.edu"
+	registerTest(t, a, owner, "Owner")
+	verifyTest(t, a, m, owner)
+	a.cfg.BootstrapAdminEmail = owner
+	one := loginTest(t, a, owner, testPassword)
+	two := loginTest(t, a, owner, testPassword)
+	results := make(chan int, 2)
+	var wg sync.WaitGroup
+	for _, cookie := range []*http.Cookie{one, two} {
+		wg.Add(1)
+		go func(cookie *http.Cookie) {
+			defer wg.Done()
+			results <- request(t, a.PublicHandler(), "POST", "/api/v1/admin/bootstrap-claim", nil, cookie, nil).Code
+		}(cookie)
+	}
+	wg.Wait()
+	close(results)
+	counts := map[int]int{}
+	for code := range results {
+		counts[code]++
+	}
+	if counts[200] != 1 || counts[401]+counts[409] != 1 {
+		t.Fatalf("only one claim may succeed: %v", counts)
+	}
+}
+
 func TestAccountLifecycle(t *testing.T) {
 	a, m := testApp(t)
 	email := "keith@u.nus.edu"

@@ -64,7 +64,7 @@ checks the role on every write, so bypassing the UI does not grant permission.
 Returning to a tab rechecks the session; 401 clears the catalogue and open forms.
 Requester/courier are future order participation modes, not separate Supplier roles.
 
-The first admin is created with the controlled User Service operator command:
+This demo creates its first admin with the controlled User Service operator command. For a fresh deployment, the designated verified user can instead use the one-time `/admin/setup` claim after `USER_BOOTSTRAP_ADMIN_EMAIL` has been configured (see `user-service/README.md`):
 
 ```sh
 docker compose exec user-service user-service promote-admin your-verified-email@u.nus.edu

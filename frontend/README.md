@@ -33,11 +33,11 @@ production build; the runtime uses Next standalone output. No host npm install i
   from the catalogue; the backend retains the row for historical references.
 - Loading, empty, network-error and retry states are included. Obsolete reads are
   cancelled so a slower response cannot replace a newer search.
+- The pre-designated, verified first admin can open `/admin/setup` after login and claim admin access once. Their sessions are revoked, so they must log in again. Local Mailpit is only a workflow demonstration, not proof of real mailbox ownership.
 - `/admin` is checked against the current User Service session during server rendering
   and again in the browser. A non-admin receives no admin page. Admins can look up
   one verified user by exact school email and promote them; the target's sessions
-  are revoked, so they must log in again. The first admin still needs the operator
-  bootstrap command described by User Service.
+  are revoked, so they must log in again. The existing operator bootstrap command remains available as an alternative.
 - The admin page has preset, read-only GET checks for the gateway, current user,
   suppliers and paginated User Service account summaries. It shows the actual
   status, duration and response body. The account summary includes pending and

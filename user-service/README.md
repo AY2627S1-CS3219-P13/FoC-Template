@@ -11,7 +11,7 @@ PlantUML sequence diagrams: [registration and verification](docs/registration-ve
 - Verify ownership using an emailed code; resend if needed.
 - Log in, read/update your display name, change your password and log out.
 - Store sessions in PostgreSQL so logout takes effect on subsequent requests.
-- Promote the first admin using an operator command; admins can change another verified user's role.
+- Let a pre-designated, verified school account claim the first admin role once; admins can change another verified user's role.
 - Let other services validate sessions through a separate, authenticated internal API.
 
 **Credit integration is deferred.** Verification does not create a wallet, award credits, call Credit Service or publish an event. There is no broker or outbox dependency. Existing verified accounts will need onboarding when that integration is added.
@@ -64,13 +64,17 @@ Verification email is sent after committing the pending account. If SMTP fails, 
 
 ## Create the first admin
 
-Register and verify the designated account first, then run this operator-only command:
+Before starting User Service, set `USER_BOOTSTRAP_ADMIN_EMAIL` in the deployment environment to the exact school address of the designated initial admin. It must belong to `USER_ALLOWED_EMAIL_DOMAINS`. This is optional; leaving it blank disables self-service bootstrap. The setup script preserves an existing `.env`, so add the value yourself if `.env` already exists, then recreate User Service to load it.
+
+The designated person registers and verifies that address, logs in, opens `/admin/setup` on the frontend, and selects **Claim administrator access**. Their current sessions are revoked; they log in again to use `/admin`. The claim is consumed once in PostgreSQL, including if the account later loses admin access or the deployment setting changes. Other signed-in users cannot claim it. Existing installations with an admin have the claim marked consumed during migration.
+
+Alternatively, an operator can still promote a verified account with the existing command; doing so permanently consumes the bootstrap claim:
 
 ```sh
 docker compose exec user-service user-service promote-admin your-email@u.nus.edu
 ```
 
-The account must log in again afterward. This requires access to the service container and database credentials; there is no public admin signup or shared default admin password.
+The account must log in again afterward. There is no public admin signup or shared default admin password. Locally, Mailpit captures every verification email, so the claim demonstrates the workflow but does not prove real mailbox ownership; deployment needs real email delivery or institutional identity verification. Keep the designated mailbox private.
 
 ## Test
 
@@ -78,7 +82,7 @@ The account must log in again afterward. This requires access to the service con
 docker compose --profile test run --build --rm user-tests
 ```
 
-This checks formatting, runs `go vet`, runs unit and PostgreSQL integration tests with Go's race detector, and builds the binary. The test database is separate from application data and uses temporary storage. Each integration test gets its own schema. Integration tests cover the full account lifecycle, concurrent verification, display-name conflicts, code expiry/reuse/attempt limits, email failures, session revocation, role permissions, CSRF and internal API authentication.
+This checks formatting, runs `go vet`, runs unit and PostgreSQL integration tests with Go's race detector, and builds the binary. The test database is separate from application data and uses temporary storage. Each integration test gets its own schema. Integration tests cover the full account lifecycle, one-time and concurrent admin claims, concurrent verification, display-name conflicts, code expiry/reuse/attempt limits, email failures, session revocation, role permissions, CSRF and internal API authentication.
 
 To format after changing Go files without installing Go on the host:
 
@@ -98,6 +102,7 @@ docker compose --profile test run --rm --no-deps --volume ./user-service:/app us
 | `internal/user/store.go` | Migrations, session lookup and housekeeping |
 | `internal/user/mail.go` | SMTP delivery, with STARTTLS for deployment |
 | `internal/user/migrations/001_initial.sql` | Users, challenges, sessions and rate limits |
+| `internal/user/migrations/002_admin_bootstrap.sql` | Durable one-time admin setup state |
 
 SQL is parameterised and kept beside the relevant operation. There is no ORM or extra HTTP framework. Migration files are embedded in the binary and applied once at startup under a database lock; add a new numbered file for future changes instead of editing an applied migration.
 

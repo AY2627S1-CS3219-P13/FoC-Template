@@ -113,6 +113,9 @@ func PromoteAdmin(ctx context.Context, db *pgxpool.Pool, email string) error {
 	if _, err = tx.Exec(ctx, "DELETE FROM sessions WHERE user_id=$1", id); err != nil {
 		return err
 	}
+	if _, err = tx.Exec(ctx, "UPDATE admin_bootstrap SET consumed_at=COALESCE(consumed_at,now()) WHERE singleton=true"); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 

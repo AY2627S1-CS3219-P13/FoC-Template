@@ -44,6 +44,7 @@ export const userApi = {
   me: () => request<{ user: User }>("/api/v1/users/me"),
   findUserByEmail: (email: string) => request<{ user: User }>(`/api/v1/admin/users?${new URLSearchParams({ email })}`),
   promoteUser: (id: string) => request<{ userId: string; roles: string[] }>(`/api/v1/admin/users/${encodeURIComponent(id)}/role`, { role: "admin" }, "PUT"),
+  claimFirstAdmin: () => request<{ message: string }>("/api/v1/admin/bootstrap-claim", undefined, "POST"),
   login: (email: string, password: string) =>
     request<{ user: User; expiresAt: string }>("/api/v1/auth/login", { email, password }),
   // Logout has no request body, but it must be a POST.
