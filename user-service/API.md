@@ -10,7 +10,7 @@ For requests with a body, send `Content-Type: application/json`. All POST, PATCH
 | Method and path | Request body | Success | Authentication |
 | --- | --- | --- | --- |
 | `POST /api/v1/auth/register` | `email`, `displayName`, `password` | 202, generic message and `registrationToken` | None |
-| `POST /api/v1/auth/verify-email` | `email`, `code`, `registrationToken`; optional `displayName` | 200, verified message | Code and registration token |
+| `POST /api/v1/auth/verify-email` | `email`, `code`, `registrationToken`; optional `displayName` | 200 only after the initial wallet is ready | Code and registration token |
 | `POST /api/v1/auth/resend-verification` | `email` | 202, generic verification message | None |
 | `POST /api/v1/auth/login` | `email`, `password` | 200, `user` and `expiresAt`; sets session cookie | Credentials |
 | `POST /api/v1/auth/logout` | No body | 204; clears cookie and revokes current session | Cookie, if present; repeat calls are safe |
@@ -34,6 +34,8 @@ The admin list returns newest accounts first, including pending accounts with `v
 Role changes require the acting administrator's password for each request and are rate-limited to 10 attempts per admin per 10 minutes. Wrong or missing passwords return `401 invalid_credentials`. Self-role changes are rejected. An unchanged role is an idempotent success and does not revoke sessions or create an audit event. Actual changes revoke the target's sessions and atomically append an event with actor, target, old/new role and timestamp. The audit endpoint returns these events newest first, including bootstrap and operator grants; only admins can read it. Operator grants also include a self-declared operator label and reason.
 
 Keep the returned `registrationToken` in the signup flow (for example, browser sessionStorage), pass it alongside the code, and remove it after verification. Losing it requires restarting registration. It binds the email code to the signup attempt that set the password. It grants no login access. On registration's email-delivery 503, the response still includes `registrationToken` so the user can retry delivery.
+
+Verification commits account activation and a durable allocation job together, then confirms the wallet through Credit Service. A 200 means the initial 100 credits are available. If Credit Service is unavailable, verification returns 503 `credit_setup_pending`: the email **is verified** and the code **is consumed**. The frontend should switch to login and retry there; login returns the same 503 without issuing a session until the wallet is confirmed. The worker also retries automatically. There is no backfill for accounts verified before this integration.
 
 Example profile response:
 
@@ -116,6 +118,6 @@ Domain errors have this shape:
 | 415 | `json_required` |
 | 429 | `rate_limited`; wait before retrying |
 | 500 | `internal_error`; request failed without exposing internal details |
-| 503 | `email_unavailable`, `busy`, `auth_unavailable` or `not_ready` |
+| 503 | `email_unavailable`, `credit_setup_pending`, `busy`, `auth_unavailable` or `not_ready` |
 
-Unknown routes/methods use Go's standard 404/405 responses. Registration/resend's 202 does not reveal whether an email already belongs to an account. Login does not distinguish a wrong password from an unknown or unverified account. Credit allocation is not part of any response or endpoint yet.
+Unknown routes/methods use Go's standard 404/405 responses. Registration/resend's 202 does not reveal whether an email already belongs to an account. Login does not distinguish a wrong password from an unknown or unverified account. Existing pre-integration verified accounts are not automatically backfilled.

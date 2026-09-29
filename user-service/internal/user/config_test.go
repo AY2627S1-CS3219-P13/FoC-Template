@@ -10,6 +10,8 @@ func TestBootstrapEmailConfiguration(t *testing.T) {
 	t.Setenv("USER_APP_ORIGIN", "http://localhost:3000")
 	t.Setenv("USER_INTERNAL_TOKEN", strings.Repeat("i", 32))
 	t.Setenv("USER_CODE_SECRET", strings.Repeat("c", 32))
+	t.Setenv("USER_CREDIT_SERVICE_URL", "http://credit-service:8081")
+	t.Setenv("USER_CREDIT_INTERNAL_TOKEN", strings.Repeat("k", 32))
 	t.Setenv("USER_ALLOWED_EMAIL_DOMAINS", "u.nus.edu")
 	t.Setenv("USER_COOKIE_SECURE", "false")
 	t.Setenv("USER_SESSION_TTL", "24h")
@@ -33,5 +35,15 @@ func TestBootstrapEmailConfiguration(t *testing.T) {
 		if _, err := LoadConfig(); err == nil {
 			t.Fatalf("invalid bootstrap address was accepted: %q", value)
 		}
+	}
+	t.Setenv("USER_BOOTSTRAP_ADMIN_EMAIL", "")
+	t.Setenv("USER_CREDIT_SERVICE_URL", "http://credit-service:8081/")
+	if _, err := LoadConfig(); err == nil {
+		t.Fatal("credit URL with path was accepted")
+	}
+	t.Setenv("USER_CREDIT_SERVICE_URL", "http://credit-service:8081")
+	t.Setenv("USER_CREDIT_INTERNAL_TOKEN", "short")
+	if _, err := LoadConfig(); err == nil {
+		t.Fatal("short credit credential was accepted")
 	}
 }

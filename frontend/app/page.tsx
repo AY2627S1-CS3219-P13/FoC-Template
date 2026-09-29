@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import AuthDialog from "./auth-dialog";
 import Catalogue from "./catalogue";
+import WalletBalance from "./wallet-balance";
 import { UserApiError, userApi, type User } from "@/lib/user-api";
 
 export default function Home() {
@@ -63,6 +64,7 @@ export default function Home() {
       <div className="account-actions">
         {checking ? <span className="account-label">Checking session…</span> : user ? <>
           <span className="account-label" title={user.displayName}>{user.displayName} · {user.roles.includes("admin") ? "Admin" : "User"}</span>
+          <WalletBalance key={user.id} />
           {user.roles.includes("admin") && <Link className="secondary-button admin-nav-link" href="/admin">Admin page</Link>}
           <button className="secondary-button" disabled={loggingOut} onClick={logout}>{loggingOut ? "Logging out…" : "Log out"}</button>
         </> : <>

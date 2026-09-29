@@ -264,11 +264,17 @@ func (a *App) verifyEmail(w http.ResponseWriter, r *http.Request) error {
 	if _, err = tx.Exec(r.Context(), "DELETE FROM verification_challenges WHERE user_id=$1", id); err != nil {
 		return err
 	}
-	// Activation and consumption commit together. Credit integration is deferred.
+	if _, err = tx.Exec(r.Context(), "INSERT INTO credit_allocations(user_id) VALUES($1)", id); err != nil {
+		return err
+	}
+	// Activation, challenge consumption and the durable allocation job commit together.
 	if err = tx.Commit(r.Context()); err != nil {
 		return err
 	}
 	a.log.Info("account verified", "userId", id)
+	if err = a.ensureAllocation(r.Context(), id); err != nil {
+		return err
+	}
 	writeJSON(w, 200, map[string]string{"message": "Email verified. You can now log in."})
 	return nil
 }
@@ -309,6 +315,26 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if !checkPassword(hash, body.Password) {
+		return invalid
+	}
+	// Do not hold the account row lock across an HTTP call to Credit Service.
+	if err = tx.Commit(r.Context()); err != nil {
+		return err
+	}
+	if err = a.ensureAllocation(r.Context(), u.ID); err != nil {
+		return err
+	}
+	tx, err = a.db.Begin(r.Context())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(r.Context())
+	// A role change may have happened while the wallet was being confirmed.
+	var currentHash string
+	if err = tx.QueryRow(r.Context(), "SELECT email,display_name,password_hash,is_admin,verified_at FROM users WHERE id=$1 AND verified_at IS NOT NULL FOR UPDATE", u.ID).Scan(&u.Email, &u.DisplayName, &currentHash, &isAdmin, &u.VerifiedAt); err != nil {
+		return err
+	}
+	if currentHash != hash {
 		return invalid
 	}
 	token, err := randomToken()

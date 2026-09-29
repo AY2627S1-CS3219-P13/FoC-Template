@@ -152,6 +152,12 @@ export default function AuthDialog({ initialMode, onClose, onLogin }: { initialM
       } else if (failure instanceof UserApiError && mode === "verify" && failure.code === "display_name_taken") {
         setNeedsNewName(true);
         setError("That display name was taken. Enter a different name and retry this code.");
+      } else if (failure instanceof UserApiError && mode === "verify" && failure.code === "credit_setup_pending") {
+        // The code was consumed and the account is verified; retry login, not verification.
+        sessionStorage.removeItem(signupKey);
+        setCode("");
+        setMode("login");
+        setMessage(failure.message);
       } else if (failure instanceof UserApiError && mode === "verify" && failure.code === "invalid_verification") {
         setError("Incorrect, expired or unusable code. Your account is still unverified.");
       } else {

@@ -12,6 +12,7 @@ import (
 
 type Config struct {
 	DatabaseURL, Origin, InternalToken, CodeSecret    string
+	CreditServiceURL, CreditServiceToken              string
 	BootstrapAdminEmail                               string
 	AllowedDomains                                    []string
 	SecureCookies                                     bool
@@ -24,6 +25,7 @@ func LoadConfig() (Config, error) {
 	c := Config{
 		DatabaseURL: os.Getenv("USER_DATABASE_URL"), Origin: os.Getenv("USER_APP_ORIGIN"),
 		InternalToken: os.Getenv("USER_INTERNAL_TOKEN"), CodeSecret: os.Getenv("USER_CODE_SECRET"),
+		CreditServiceURL: os.Getenv("USER_CREDIT_SERVICE_URL"), CreditServiceToken: os.Getenv("USER_CREDIT_INTERNAL_TOKEN"),
 		BootstrapAdminEmail: strings.ToLower(strings.TrimSpace(os.Getenv("USER_BOOTSTRAP_ADMIN_EMAIL"))),
 		AllowedDomains:      strings.Split(strings.ToLower(os.Getenv("USER_ALLOWED_EMAIL_DOMAINS")), ","),
 		SMTPAddress:         os.Getenv("USER_SMTP_ADDRESS"), SMTPFrom: os.Getenv("USER_SMTP_FROM"),
@@ -47,6 +49,13 @@ func LoadConfig() (Config, error) {
 	}
 	if c.InternalToken == c.CodeSecret {
 		return c, errors.New("internal and verification secrets must differ")
+	}
+	if len(c.CreditServiceToken) < 32 || strings.Contains(c.CreditServiceToken, "REPLACE") {
+		return c, errors.New("USER_CREDIT_INTERNAL_TOKEN must be a service credential of at least 32 characters")
+	}
+	creditURL, err := url.Parse(c.CreditServiceURL)
+	if err != nil || creditURL.Host == "" || creditURL.User != nil || creditURL.RawQuery != "" || creditURL.Fragment != "" || creditURL.Path != "" || (creditURL.Scheme != "http" && creditURL.Scheme != "https") {
+		return c, errors.New("USER_CREDIT_SERVICE_URL must be an HTTP(S) origin without a trailing slash")
 	}
 	u, err := url.Parse(c.Origin)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" || (u.Scheme != "http" && u.Scheme != "https") {

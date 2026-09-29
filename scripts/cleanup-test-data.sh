@@ -2,6 +2,7 @@
 # Removes the accounts and suppliers that scripts/smoke.sh and scripts/browser-check.sh
 # generate in LOCAL app data. Seeded and hand-created rows are never touched: only the
 # generated `smoke-<timestamp>-<random>` and `browser-admin-<timestamp>-<random>` names.
+# The browser check passes its unique d2-student address explicitly.
 # Usage: sh scripts/cleanup-test-data.sh [email]   (no argument removes every fixture)
 set -eu
 cd "$(dirname "$0")/.."
@@ -29,8 +30,6 @@ users_removed=0
 if [ "$(user_sql -At -c "SELECT to_regclass('public.users') IS NOT NULL")" = "t" ]; then
   # Wallets reference users by id, so collect the ids before the accounts disappear.
   user_ids="$(user_sql -At -c "SELECT id FROM users WHERE $user_filter")"
-  # Sessions and verification challenges cascade with the account.
-  users_removed="$(user_sql -At -c "WITH removed AS (DELETE FROM users WHERE $user_filter RETURNING 1) SELECT count(*) FROM removed")"
 fi
 
 supplier_sql() {
@@ -50,11 +49,22 @@ wallets_removed=0
 if [ -n "$user_ids" ] && [ -n "$(docker compose ps -q credit-db)" ] &&
   [ "$(credit_sql -At -c "SELECT to_regclass('public.wallets') IS NOT NULL")" = "t" ]; then
   values="$(printf "'%s'," $user_ids)"
-  wallets_removed="$(credit_sql -At -c "
+  # Only this local fixture cleanup bypasses the append-only ledger trigger.
+  # Keep it inside one transaction so a failure restores the trigger and rows.
+  wallets_removed="$(credit_sql -Atq -c "
+    BEGIN;
+    ALTER TABLE transactions DISABLE TRIGGER USER;
     DELETE FROM transactions WHERE user_id IN (${values%,});
     DELETE FROM reservations WHERE user_id IN (${values%,}) OR courier_id IN (${values%,});
-    WITH removed AS (DELETE FROM wallets WHERE user_id IN (${values%,}) RETURNING 1) SELECT count(*) FROM removed")"
-  wallets_removed="$(printf %s "$wallets_removed" | tail -n 1)"
+    WITH removed AS (DELETE FROM wallets WHERE user_id IN (${values%,}) RETURNING 1) SELECT count(*) FROM removed;
+    ALTER TABLE transactions ENABLE TRIGGER USER;
+    COMMIT;")"
+  wallets_removed="$(printf '%s\n' "$wallets_removed" | grep -E '^[0-9]+$' | tail -n 1)"
+fi
+
+if [ -n "$user_ids" ]; then
+  # Sessions, challenges and allocation jobs cascade with the account.
+  users_removed="$(user_sql -At -c "WITH removed AS (DELETE FROM users WHERE $user_filter RETURNING 1) SELECT count(*) FROM removed")"
 fi
 
 echo "Removed $users_removed test accounts, $suppliers_removed test suppliers and $wallets_removed test wallets."

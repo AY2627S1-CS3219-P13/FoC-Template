@@ -28,6 +28,31 @@ type testMailer struct {
 	fail   bool
 }
 
+type testAllocator struct {
+	mu              sync.Mutex
+	calls           map[string]int
+	allocations     map[string]int
+	fail            bool
+	failAfterCommit bool
+}
+
+func (c *testAllocator) AllocateInitial(_ context.Context, userID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls[userID]++
+	if c.fail {
+		return errors.New("simulated Credit Service outage")
+	}
+	if c.allocations[userID] == 0 {
+		c.allocations[userID]++
+	}
+	if c.failAfterCommit {
+		c.failAfterCommit = false
+		return errors.New("simulated lost Credit Service response")
+	}
+	return nil
+}
+
 func (m *testMailer) SendVerification(_ context.Context, email, code string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -103,7 +128,7 @@ func testApp(t *testing.T) (*App, *testMailer) {
 		t.Fatal("migration was not repeatable:", err)
 	}
 	mailer := &testMailer{codes: map[string]string{}, tokens: map[string]string{}}
-	app, err := New(db, Config{Origin: "http://localhost:3000", AllowedDomains: []string{"u.nus.edu"}, SessionTTL: 24 * time.Hour, InternalToken: strings.Repeat("i", 32), CodeSecret: strings.Repeat("c", 32)}, mailer, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	app, err := New(db, Config{Origin: "http://localhost:3000", AllowedDomains: []string{"u.nus.edu"}, SessionTTL: 24 * time.Hour, InternalToken: strings.Repeat("i", 32), CodeSecret: strings.Repeat("c", 32)}, mailer, &testAllocator{calls: make(map[string]int), allocations: make(map[string]int)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,6 +187,96 @@ func loginTest(t *testing.T, a *App, email, password string) *http.Cookie {
 func validateTest(t *testing.T, a *App, cookie *http.Cookie) *httptest.ResponseRecorder {
 	t.Helper()
 	return request(t, a.InternalHandler(), "POST", "/internal/v1/sessions/validate", map[string]string{"sessionToken": cookie.Value}, nil, map[string]string{"Authorization": "Bearer " + a.cfg.InternalToken})
+}
+
+func TestCreditAllocationRecovery(t *testing.T) {
+	a, m := testApp(t)
+	allocator := a.allocator.(*testAllocator)
+	email := "credits@u.nus.edu"
+	registerTest(t, a, email, "Credits")
+	allocator.mu.Lock()
+	allocator.fail = true
+	allocator.mu.Unlock()
+	verification := request(t, a.PublicHandler(), "POST", "/api/v1/auth/verify-email", map[string]string{
+		"email": email, "code": m.code(email), "registrationToken": m.token(email),
+	}, nil, nil)
+	status(t, verification, 503)
+	if !strings.Contains(verification.Body.String(), "credit_setup_pending") {
+		t.Fatal("verification should report credit setup, not an invalid code")
+	}
+	var userID string
+	if err := a.db.QueryRow(context.Background(), "SELECT id FROM users WHERE email=$1 AND verified_at IS NOT NULL", email).Scan(&userID); err != nil {
+		t.Fatal("account must be verified even when Credit Service is down:", err)
+	}
+	login := request(t, a.PublicHandler(), "POST", "/api/v1/auth/login", map[string]string{"email": email, "password": testPassword}, nil, nil)
+	status(t, login, 503)
+	if len(login.Result().Cookies()) != 0 {
+		t.Fatal("login must not issue a session before allocation")
+	}
+	var sessions int
+	if err := a.db.QueryRow(context.Background(), "SELECT count(*) FROM sessions WHERE user_id=$1", userID).Scan(&sessions); err != nil || sessions != 0 {
+		t.Fatalf("pending account has %d sessions: %v", sessions, err)
+	}
+	allocator.mu.Lock()
+	allocator.fail = false
+	allocator.mu.Unlock()
+	if _, err := a.db.Exec(context.Background(), "UPDATE credit_allocations SET next_attempt_at=now() WHERE user_id=$1", userID); err != nil {
+		t.Fatal(err)
+	}
+	// Two replicas may wake after an outage; only one may claim this job.
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- a.processAllocation(context.Background())
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var completed bool
+	if err := a.db.QueryRow(context.Background(), "SELECT completed_at IS NOT NULL FROM credit_allocations WHERE user_id=$1", userID).Scan(&completed); err != nil || !completed {
+		t.Fatalf("retry did not complete: %v", err)
+	}
+	loginTest(t, a, email, testPassword)
+	allocator.mu.Lock()
+	got := allocator.calls[userID]
+	allocator.mu.Unlock()
+	if got != 3 { // verification, failed login, one successful worker claim
+		t.Fatalf("allocation called %d times, expected three", got)
+	}
+}
+
+func TestCreditAllocationLostResponse(t *testing.T) {
+	a, m := testApp(t)
+	allocator := a.allocator.(*testAllocator)
+	email := "lost-response@u.nus.edu"
+	registerTest(t, a, email, "Lost Response")
+	allocator.mu.Lock()
+	allocator.failAfterCommit = true
+	allocator.mu.Unlock()
+	status(t, request(t, a.PublicHandler(), "POST", "/api/v1/auth/verify-email", map[string]string{
+		"email": email, "code": m.code(email), "registrationToken": m.token(email),
+	}, nil, nil), 503)
+	loginTest(t, a, email, testPassword)
+	var userID string
+	var completed bool
+	if err := a.db.QueryRow(context.Background(), `SELECT u.id, c.completed_at IS NOT NULL FROM users u
+		JOIN credit_allocations c ON c.user_id=u.id WHERE u.email=$1`, email).Scan(&userID, &completed); err != nil || !completed {
+		t.Fatalf("login did not recover allocation: %v", err)
+	}
+	allocator.mu.Lock()
+	created, calls := allocator.allocations[userID], allocator.calls[userID]
+	allocator.mu.Unlock()
+	if created != 1 || calls != 2 {
+		t.Fatalf("lost response created %d wallets in %d calls", created, calls)
+	}
 }
 
 func TestFirstAdminBootstrapClaim(t *testing.T) {

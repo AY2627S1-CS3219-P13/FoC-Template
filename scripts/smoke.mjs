@@ -6,6 +6,7 @@ const email = process.env.SMOKE_EMAIL;
 const password = process.env.SMOKE_PASSWORD;
 const mailpit = process.env.MAILPIT_URL;
 const supplierBase = process.env.SMOKE_SUPPLIER_URL || base;
+const creditBase = process.env.SMOKE_CREDIT_URL || base;
 assert(base && origin && email && password && mailpit, "Smoke configuration missing");
 const pause = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -13,7 +14,7 @@ async function call(path, method = "GET", data, cookie, expected = 200) {
   const headers = { Origin: origin };
   if (data !== undefined) headers["Content-Type"] = "application/json";
   if (cookie) headers.Cookie = cookie;
-  const service = path.startsWith("/api/v1/suppliers") || path.startsWith("/api/v1/locations") ? supplierBase : base;
+  const service = path.startsWith("/api/v1/wallets") ? creditBase : path.startsWith("/api/v1/suppliers") || path.startsWith("/api/v1/locations") ? supplierBase : base;
   const response = await fetch(service + path, {
     method, headers, body: data === undefined ? undefined : JSON.stringify(data),
     signal: AbortSignal.timeout(15000),
@@ -56,6 +57,12 @@ if (process.argv[2] === "setup") {
   assert(code, "Verification email not found in local Mailpit");
   await call("/api/v1/auth/verify-email", "POST", { email, code, registrationToken: registration.registrationToken });
   const cookie = await login();
+  const wallet = await (await call("/api/v1/wallets/me", "GET", undefined, cookie)).json();
+  assert.equal(wallet.available, 100, "Verification must finish with 100 available credits");
+  assert.equal(wallet.reserved, 0);
+  const history = await (await call("/api/v1/wallets/me/transactions", "GET", undefined, cookie)).json();
+  assert.equal(history.transactions.length, 1, "Initial credits must be recorded once");
+  assert.equal(history.transactions[0].kind, "allocation");
   const suppliers = await (await call("/api/v1/suppliers", "GET", undefined, cookie)).json();
   assert(Array.isArray(suppliers.suppliers), "Expected supplier list");
   await call("/api/v1/suppliers", "POST", { name: "Denied", category: "food", locationId: "com2" }, cookie, 403);

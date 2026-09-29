@@ -17,8 +17,8 @@ sh credit-service/scripts/init-env.sh
 docker compose up --build -d gateway
 ```
 
-The gateway owns `http://localhost:3000` and starts the frontend, User and
-Supplier services; add `docker compose up --build -d credit-service` for Credit.
+The gateway owns `http://localhost:3000` and starts the frontend, User, Credit
+and Supplier services. New verified accounts need Credit Service to finish setup.
 Direct development ports are User 8080, Credit 8082 and Supplier 8083; Mailpit is
 on 8025. Internal ports (8081) stay on the Compose network and are rejected by
 the gateway.
@@ -57,8 +57,9 @@ push and pull request, so a green local run is a green CI run.
   validate each request through User's internal endpoint.
 - Each service owns its own PostgreSQL database and its own numbered, embedded
   migrations. Add migrations; never edit an applied one.
-- Credits move only through Credit Service escrows; balances are never written
-  directly.
+- Credit Service owns wallet balances and history; other services never write
+  them directly. Initial allocations and admin debits are explicit exceptions
+  to the normal escrow transfer flow.
 - Cross-service calls are internal HTTP with a bearer token, never shared
   database access.
 
