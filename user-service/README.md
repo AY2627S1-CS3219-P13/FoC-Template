@@ -50,7 +50,7 @@ Set `USER_APP_ORIGIN` to the frontend's exact origin. The default is `http://loc
 | Multiple devices | Allowed; logout revokes the current browser session |
 | Password changes | Require current password and revoke every session, including the current one |
 | Roles | Every account has `user`; administrators also have `admin`; requester/courier are not separate account types |
-| Role changes | Revoke the target's sessions; an admin cannot change their own role |
+| Role changes | Require the acting admin's current password, revoke the target's sessions, and write an audit event; an admin cannot change their own role |
 
 Session cookies are HttpOnly and SameSite=Lax. HTTPS deployments use Secure and the `__Host-` prefix. Local HTTP uses `foc_session`; production uses `__Host-foc_session`. JavaScript does not need to read the cookie.
 
@@ -58,7 +58,7 @@ Registration also returns a random `registrationToken`. The frontend keeps it fo
 
 Account activation and code consumption happen in one transaction. Database constraints handle concurrent email registration and display-name claims. If two pending users chose the same display name, the second verification can provide another name without losing the valid code.
 
-Rate limits are stored in PostgreSQL: 60 authentication requests/minute per connected IP; per email, 10 login attempts, 5 registrations, 5 resends and 20 verification requests per 10 minutes. Password changes allow 5 attempts per user per 10 minutes. Limits count successful and failed attempts. A 429 includes `Retry-After: 60`; the longer account window may require waiting longer. Up to four expensive authentication operations run at once; excess requests return 503.
+Rate limits are stored in PostgreSQL: 60 authentication requests/minute per connected IP; per email, 10 login attempts, 5 registrations, 5 resends and 20 verification requests per 10 minutes. Password changes allow 5 attempts per user per 10 minutes; admin role changes allow 10 attempts per admin per 10 minutes. Limits count successful and failed attempts. A 429 includes `Retry-After: 60`; the longer account window may require waiting longer. Up to four expensive authentication operations run at once; excess requests return 503.
 
 Verification email is sent after committing the pending account. If SMTP fails, registration returns 503 with the `registrationToken` and the account remains pending; keep the token and use resend. There is no background delivery retry yet. Resend during cooldown, or for an unknown/already verified account, returns the same 202 response. Resend retains the registration token. Expired challenges remain unusable and can be replaced by resend. Expired sessions/rate-limit records are cleaned hourly; their expiry is enforced on every request even before cleanup.
 
@@ -68,13 +68,15 @@ Before starting User Service, set `USER_BOOTSTRAP_ADMIN_EMAIL` in the deployment
 
 The designated person registers and verifies that address, logs in, opens `/admin/setup` on the frontend, and selects **Claim administrator access**. Their current sessions are revoked; they log in again to use `/admin`. The claim is consumed once in PostgreSQL, including if the account later loses admin access or the deployment setting changes. Other signed-in users cannot claim it. Existing installations with an admin have the claim marked consumed during migration.
 
-Alternatively, an operator can still promote a verified account with the existing command; doing so permanently consumes the bootstrap claim:
+Alternatively, an operator with access to the User Service container can grant a verified account admin access for emergency recovery (or local test setup). The command now requires an operator label and reason; it revokes the target's sessions, writes an audit event, and permanently consumes the bootstrap claim:
 
 ```sh
-docker compose exec user-service user-service promote-admin your-email@u.nus.edu
+docker compose exec -T user-service user-service promote-admin your-email@u.nus.edu operator-name "emergency recovery after admin access loss"
 ```
 
-The account must log in again afterward. There is no public admin signup or shared default admin password. Locally, Mailpit captures every verification email, so the claim demonstrates the workflow but does not prove real mailbox ownership; deployment needs real email delivery or institutional identity verification. Keep the designated mailbox private.
+The account must log in again afterward. Restrict container-execution and database credentials to designated operators; the label is self-declared and must be corroborated with platform/IAM logs. For production recovery, verify the incident, obtain independent approval, run the command, review the audit event, and notify the restored admin. The command is not a public API or a replacement for normal admin-to-admin promotion. There is no public admin signup or shared default admin password. Locally, Mailpit captures every verification email, so the claim demonstrates the workflow but does not prove real mailbox ownership; deployment needs real email delivery or institutional identity verification. Keep the designated mailbox private.
+
+Each successful bootstrap, admin role change, and operator grant writes a row to `admin_role_events` in the same transaction as the privilege change. Admins can read recent events through `GET /api/v1/admin/role-events` or the admin page. The table preserves actor and target identifiers even if an account is later removed. Events predating migration `003_admin_role_events.sql` cannot be reconstructed automatically. Database administrators can still modify local tables, so production audit integrity also depends on restricted database access and external log retention.
 
 ## Test
 
@@ -103,6 +105,7 @@ docker compose --profile test run --rm --no-deps --volume ./user-service:/app us
 | `internal/user/mail.go` | SMTP delivery, with STARTTLS for deployment |
 | `internal/user/migrations/001_initial.sql` | Users, challenges, sessions and rate limits |
 | `internal/user/migrations/002_admin_bootstrap.sql` | Durable one-time admin setup state |
+| `internal/user/migrations/003_admin_role_events.sql` | Durable role-change audit history |
 
 SQL is parameterised and kept beside the relevant operation. There is no ORM or extra HTTP framework. Migration files are embedded in the binary and applied once at startup under a database lock; add a new numbered file for future changes instead of editing an applied migration.
 

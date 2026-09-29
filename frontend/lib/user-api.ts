@@ -9,6 +9,19 @@ export type User = {
   verifiedAt: string;
 };
 
+export type RoleEvent = {
+  id: string;
+  actorKind: "bootstrap" | "admin" | "operator";
+  actorUserId: string | null;
+  actorLabel: string;
+  targetUserId: string;
+  targetEmail: string;
+  previousRole: "user" | "admin";
+  newRole: "user" | "admin";
+  reason: string;
+  occurredAt: string;
+};
+
 export class UserApiError extends Error {
   constructor(
     message: string,
@@ -43,7 +56,9 @@ async function request<T>(path: string, body?: object, method?: string): Promise
 export const userApi = {
   me: () => request<{ user: User }>("/api/v1/users/me"),
   findUserByEmail: (email: string) => request<{ user: User }>(`/api/v1/admin/users?${new URLSearchParams({ email })}`),
-  promoteUser: (id: string) => request<{ userId: string; roles: string[] }>(`/api/v1/admin/users/${encodeURIComponent(id)}/role`, { role: "admin" }, "PUT"),
+  changeUserRole: (id: string, role: "user" | "admin", currentPassword: string) =>
+    request<{ userId: string; roles: string[] }>(`/api/v1/admin/users/${encodeURIComponent(id)}/role`, { role, currentPassword }, "PUT"),
+  roleEvents: () => request<{ events: RoleEvent[]; total: number }>("/api/v1/admin/role-events?pageSize=20"),
   claimFirstAdmin: () => request<{ message: string }>("/api/v1/admin/bootstrap-claim", undefined, "POST"),
   login: (email: string, password: string) =>
     request<{ user: User; expiresAt: string }>("/api/v1/auth/login", { email, password }),

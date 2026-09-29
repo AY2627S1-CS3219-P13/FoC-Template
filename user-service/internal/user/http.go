@@ -111,7 +111,8 @@ func (a *App) PublicHandler() http.Handler {
 	m.HandleFunc("PUT /api/v1/users/me/password", a.endpoint(a.authLimited(a.changePassword)))
 	m.HandleFunc("POST /api/v1/admin/bootstrap-claim", a.endpoint(a.bootstrapClaim))
 	m.HandleFunc("GET /api/v1/admin/users", a.endpoint(a.adminUsers))
-	m.HandleFunc("PUT /api/v1/admin/users/{id}/role", a.endpoint(a.changeRole))
+	m.HandleFunc("GET /api/v1/admin/role-events", a.endpoint(a.roleEvents))
+	m.HandleFunc("PUT /api/v1/admin/users/{id}/role", a.endpoint(a.authLimited(a.changeRole)))
 	return a.middleware(m, true)
 }
 

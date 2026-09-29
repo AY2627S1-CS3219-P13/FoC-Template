@@ -47,13 +47,13 @@ func run(log *slog.Logger) error {
 		return errors.New("database migration failed")
 	}
 	if len(os.Args) > 1 {
-		if len(os.Args) != 3 || os.Args[1] != "promote-admin" {
-			return errors.New("usage: user-service [promote-admin verified-school-email]")
+		if len(os.Args) != 5 || os.Args[1] != "promote-admin" {
+			return errors.New("usage: user-service promote-admin verified-school-email operator-label reason")
 		}
-		if err = user.PromoteAdmin(ctx, db, strings.ToLower(strings.TrimSpace(os.Args[2]))); err != nil {
-			return errors.New("admin promotion failed: account must already be verified")
+		if err = user.PromoteAdmin(ctx, db, strings.ToLower(strings.TrimSpace(os.Args[2])), os.Args[3], os.Args[4]); err != nil {
+			return errors.New("admin promotion failed: verify the target account, operator label and reason")
 		}
-		log.Info("operator promoted a verified account to admin")
+		log.Info("operator promoted a verified account to admin", "operator", os.Args[3])
 		return nil
 	}
 	app, err := user.New(db, cfg, user.SMTPMailer{Config: cfg}, log)

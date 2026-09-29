@@ -36,8 +36,9 @@ production build; the runtime uses Next standalone output. No host npm install i
 - The pre-designated, verified first admin can open `/admin/setup` after login and claim admin access once. Their sessions are revoked, so they must log in again. Local Mailpit is only a workflow demonstration, not proof of real mailbox ownership.
 - `/admin` is checked against the current User Service session during server rendering
   and again in the browser. A non-admin receives no admin page. Admins can look up
-  one verified user by exact school email and promote them; the target's sessions
-  are revoked, so they must log in again. The existing operator bootstrap command remains available as an alternative.
+  one verified user by exact school email and promote or demote them after entering
+  their own current password; the target's sessions are revoked, so they must log in again. The operator-only recovery command remains available as an alternative.
+- The admin page also shows recent durable role-change audit events, including bootstrap and operator grants.
 - The admin page has preset, read-only GET checks for the gateway, current user,
   suppliers and paginated User Service account summaries. It shows the actual
   status, duration and response body. The account summary includes pending and

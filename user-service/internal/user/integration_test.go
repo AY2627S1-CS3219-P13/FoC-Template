@@ -201,6 +201,19 @@ func TestFirstAdminBootstrapClaim(t *testing.T) {
 	if err := a.db.QueryRow(context.Background(), "SELECT consumed_at IS NOT NULL FROM admin_bootstrap WHERE singleton=true").Scan(&consumed); err != nil || !consumed {
 		t.Fatal("bootstrap claim was not persisted")
 	}
+	var kind, previousRole, newRole string
+	if err := a.db.QueryRow(context.Background(), "SELECT actor_kind,previous_role,new_role FROM admin_role_events WHERE target_user_id=$1", profileUserID(t, a, owner)).Scan(&kind, &previousRole, &newRole); err != nil || kind != "bootstrap" || previousRole != "user" || newRole != "admin" {
+		t.Fatalf("bootstrap audit event missing: %s %s %s %v", kind, previousRole, newRole, err)
+	}
+}
+
+func profileUserID(t *testing.T, a *App, email string) string {
+	t.Helper()
+	var id string
+	if err := a.db.QueryRow(context.Background(), "SELECT id FROM users WHERE email=$1", email).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 
 func TestOperatorPromotionConsumesBootstrapClaim(t *testing.T) {
@@ -209,11 +222,18 @@ func TestOperatorPromotionConsumesBootstrapClaim(t *testing.T) {
 	registerTest(t, a, owner, "Owner")
 	verifyTest(t, a, m, owner)
 	a.cfg.BootstrapAdminEmail = owner
-	if err := PromoteAdmin(context.Background(), a.db, owner); err != nil {
+	if err := PromoteAdmin(context.Background(), a.db, owner, "", ""); err == nil {
+		t.Fatal("operator promotion must require attribution and reason")
+	}
+	if err := PromoteAdmin(context.Background(), a.db, owner, "test-operator", "recovery test"); err != nil {
 		t.Fatal(err)
 	}
 	cookie := loginTest(t, a, owner, testPassword)
 	status(t, request(t, a.PublicHandler(), "POST", "/api/v1/admin/bootstrap-claim", nil, cookie, nil), 409)
+	var label, reason string
+	if err := a.db.QueryRow(context.Background(), "SELECT actor_label,reason FROM admin_role_events WHERE actor_kind='operator'").Scan(&label, &reason); err != nil || label != "test-operator" || reason != "recovery test" {
+		t.Fatalf("operator audit event missing: %q %q %v", label, reason, err)
+	}
 }
 
 func TestConcurrentBootstrapClaims(t *testing.T) {
@@ -361,7 +381,7 @@ func TestAdminPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	status(t, request(t, a.PublicHandler(), "PUT", "/api/v1/admin/users/"+u.ID+"/role", map[string]string{"role": "admin"}, admin, nil), 403)
-	if err = PromoteAdmin(context.Background(), a.db, "admin@u.nus.edu"); err != nil {
+	if err = PromoteAdmin(context.Background(), a.db, "admin@u.nus.edu", "test-operator", "admin test fixture"); err != nil {
 		t.Fatal(err)
 	}
 	admin = loginTest(t, a, "admin@u.nus.edu", testPassword)
@@ -397,7 +417,11 @@ func TestAdminPermissions(t *testing.T) {
 	}
 	status(t, request(t, a.PublicHandler(), "GET", "/api/v1/admin/users?email=missing%40u.nus.edu", nil, admin, nil), 404)
 	status(t, request(t, a.PublicHandler(), "GET", "/api/v1/admin/users?email=invalid", nil, admin, nil), 400)
-	status(t, request(t, a.PublicHandler(), "PUT", "/api/v1/admin/users/"+u.ID+"/role", map[string]string{"role": "admin"}, admin, nil), 200)
+	status(t, request(t, a.PublicHandler(), "GET", "/api/v1/admin/role-events", nil, student, nil), 403)
+	status(t, request(t, a.PublicHandler(), "PUT", "/api/v1/admin/users/"+u.ID+"/role", map[string]string{"role": "admin"}, admin, nil), 401)
+	status(t, request(t, a.PublicHandler(), "PUT", "/api/v1/admin/users/"+u.ID+"/role", map[string]string{"role": "admin", "currentPassword": "wrong password"}, admin, nil), 401)
+	status(t, validateTest(t, a, student), 200)
+	status(t, request(t, a.PublicHandler(), "PUT", "/api/v1/admin/users/"+u.ID+"/role", map[string]string{"role": "admin", "currentPassword": testPassword}, admin, nil), 200)
 	status(t, validateTest(t, a, student), 401)
 	student = loginTest(t, a, "student@u.nus.edu", testPassword)
 	w := validateTest(t, a, student)
@@ -405,10 +429,29 @@ func TestAdminPermissions(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "admin") {
 		t.Fatal("role missing")
 	}
+	status(t, request(t, a.PublicHandler(), "PUT", "/api/v1/admin/users/"+u.ID+"/role", map[string]string{"role": "admin", "currentPassword": testPassword}, admin, nil), 200)
+	status(t, validateTest(t, a, student), 200)
 	status(t, request(t, a.PublicHandler(), "PUT", "/api/v1/admin/users/"+u.ID+"/role", map[string]string{"role": "user"}, student, nil), 400)
 	status(t, request(t, a.PublicHandler(), "PUT", "/api/v1/admin/users/"+strings.ToUpper(u.ID)+"/role", map[string]string{"role": "user"}, student, nil), 400)
-	status(t, request(t, a.PublicHandler(), "PUT", "/api/v1/admin/users/"+u.ID+"/role", map[string]string{"role": "user"}, admin, nil), 200)
+	status(t, request(t, a.PublicHandler(), "PUT", "/api/v1/admin/users/"+u.ID+"/role", map[string]string{"role": "user", "currentPassword": testPassword}, admin, nil), 200)
 	status(t, validateTest(t, a, student), 401)
+	events := request(t, a.PublicHandler(), "GET", "/api/v1/admin/role-events?pageSize=10", nil, admin, nil)
+	status(t, events, 200)
+	var history struct {
+		Total  int `json:"total"`
+		Events []struct {
+			ActorKind    string `json:"actorKind"`
+			PreviousRole string `json:"previousRole"`
+			NewRole      string `json:"newRole"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal(events.Body.Bytes(), &history); err != nil || history.Total != 3 || len(history.Events) != 3 {
+		t.Fatalf("expected operator grant plus admin grant/revoke: %s", events.Body.String())
+	}
+	if history.Events[0].ActorKind != "admin" || history.Events[0].PreviousRole != "admin" || history.Events[0].NewRole != "user" {
+		t.Fatalf("newest audit event should be a demotion: %s", events.Body.String())
+	}
+	status(t, request(t, a.PublicHandler(), "GET", "/api/v1/admin/role-events?page=0", nil, admin, nil), 400)
 }
 
 func TestBoundaryProtection(t *testing.T) {

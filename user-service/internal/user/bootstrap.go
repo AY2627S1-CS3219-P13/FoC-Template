@@ -77,6 +77,9 @@ func (a *App) bootstrapClaim(w http.ResponseWriter, r *http.Request) error {
 	if _, err = tx.Exec(r.Context(), "DELETE FROM sessions WHERE user_id=$1", u.ID); err != nil {
 		return err
 	}
+	if err = recordRoleEvent(r.Context(), tx, "bootstrap", &u.ID, u.Email, u.ID, u.Email, "user", "admin", ""); err != nil {
+		return err
+	}
 	if err = tx.Commit(r.Context()); err != nil {
 		return err
 	}
