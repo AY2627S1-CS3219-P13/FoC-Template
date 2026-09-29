@@ -264,11 +264,19 @@ func (a *App) verifyEmail(w http.ResponseWriter, r *http.Request) error {
 	if _, err = tx.Exec(r.Context(), "DELETE FROM verification_challenges WHERE user_id=$1", id); err != nil {
 		return err
 	}
-	// Activation and consumption commit together. Credit integration is deferred.
+	if _, err = tx.Exec(r.Context(), "INSERT INTO credit_allocations(user_id) VALUES($1)", id); err != nil {
+		return err
+	}
+	// Activation, challenge consumption and the durable allocation job commit together.
 	if err = tx.Commit(r.Context()); err != nil {
 		return err
 	}
 	a.log.Info("account verified", "userId", id)
+	// Credit setup is best effort here. The committed job survives an outage and
+	// the worker retries it; verification and login must not depend on Credit.
+	if err = a.ensureAllocation(r.Context(), id); err != nil {
+		a.log.Warn("credit setup pending after verification", "userId", id)
+	}
 	writeJSON(w, 200, map[string]string{"message": "Email verified. You can now log in."})
 	return nil
 }

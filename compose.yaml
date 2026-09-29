@@ -32,6 +32,9 @@ services:
   user-service:
     build: ./user-service
     env_file: .env
+    environment:
+      USER_CREDIT_SERVICE_URL: http://credit-service:8081
+      USER_CREDIT_INTERNAL_TOKEN: ${USER_CREDIT_INTERNAL_TOKEN:?Run sh credit-service/scripts/init-env.sh}
     ports:
       - "127.0.0.1:${USER_HTTP_PORT:-8080}:8080"
     # Port 8081 is accessible only inside the container network.
@@ -39,6 +42,8 @@ services:
       user-db:
         condition: service_healthy
       mailpit:
+        condition: service_started
+      credit-service:
         condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/readyz"]

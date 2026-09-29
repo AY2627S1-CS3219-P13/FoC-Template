@@ -8,10 +8,12 @@ participant Frontend
 participant "User Service" as User
 database PostgreSQL as DB
 participant "Email / local Mailpit" as Email
+participant "Credit Service" as Credit
 
 note over Frontend, User
-  Frontend is a planned caller of the implemented API.
-  Credit integration and event publishing are deferred.
+  Frontend calls the implemented User Service API.
+  Verification attempts Credit allocation once, with a durable retry job.
+  Allocation failure does not block verification or login.
 end note
 
 Student -> Frontend: Enter email, display name and password
@@ -45,9 +47,16 @@ DB --> User: Account and challenge
 User -> User: Check token, code, expiry and attempt limit
 
 alt Valid verification and available display name
-  User -> DB: Activate account and delete challenge
+  User -> DB: Activate account, delete challenge, enqueue allocation
   User -> DB: Commit
   DB --> User: Committed
+  User -> Credit: POST /internal/v1/wallets/{userId}/initial-allocation
+  alt Credit confirms wallet
+    Credit --> User: 200 - wallet ready
+    User -> DB: Mark allocation job complete
+  else Credit unavailable
+    note over User, Credit: Worker retries the committed job; the account stays usable.
+  end
   User --> Frontend: 200 - account verified
   Frontend --> Student: You can now log in
 else Wrong code with valid registration token and eligible challenge

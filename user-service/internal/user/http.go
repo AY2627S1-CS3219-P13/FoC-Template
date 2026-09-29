@@ -21,21 +21,26 @@ type Mailer interface {
 	SendVerification(context.Context, string, string) error
 }
 
+type InitialAllocator interface {
+	AllocateInitial(context.Context, string) error
+}
+
 type App struct {
 	db            *pgxpool.Pool
 	cfg           Config
 	mailer        Mailer
+	allocator     InitialAllocator
 	log           *slog.Logger
 	dummyHash     string
 	passwordSlots chan struct{}
 }
 
-func New(db *pgxpool.Pool, cfg Config, mailer Mailer, log *slog.Logger) (*App, error) {
+func New(db *pgxpool.Pool, cfg Config, mailer Mailer, allocator InitialAllocator, log *slog.Logger) (*App, error) {
 	dummy, err := hashPassword("unused dummy password")
 	if err != nil {
 		return nil, err
 	}
-	return &App{db: db, cfg: cfg, mailer: mailer, log: log, dummyHash: dummy, passwordSlots: make(chan struct{}, 4)}, nil
+	return &App{db: db, cfg: cfg, mailer: mailer, allocator: allocator, log: log, dummyHash: dummy, passwordSlots: make(chan struct{}, 4)}, nil
 }
 
 type apiError struct {

@@ -1,10 +1,10 @@
 # Friend on Campus project brief
 
-CS3219 AY2627 Semester 1 · Group 13 · Updated 18 September 2026
+CS3219 AY2627 Semester 1 · Group 13 · Updated 29 September 2026
 
 This document records the project backlog, technology direction and deployment strategy. The backlog below is a paraphrased summary of the supplied D1 document. Sprint labels are its planned iterations, not claims of completed work. Unresolved technical choices remain explicitly open.
 
-User Service implementation is now authorised, following the recommended Go/PostgreSQL/session design. Its [README](../user-service/README.md) records implemented behaviour and its [API guide](../user-service/API.md) describes the contract for teammates. **Credit integration is explicitly deferred**, including wallet creation, initial credits and verification events. These User Service choices do not finalise technology choices for every other service.
+User Service follows the Go/PostgreSQL/session design. Its [README](../user-service/README.md) records implemented behaviour and its [API guide](../user-service/API.md) describes the contract for teammates. Verification now confirms Credit Service's initial wallet through an internal HTTP call; User Service retains a durable retry job. This is not RabbitMQ-based event publishing.
 
 ## Product and scope
 
@@ -39,7 +39,7 @@ Update, 27 September 2026: the Supplier branch incorporates main's shared navy/o
 | Database | PostgreSQL | Adopted for User and Supplier; other service schemas remain open |
 | Database hosting | Database on EC2 versus managed RDS | Not finalised |
 | Messaging | RabbitMQ | Confirmed team direction; not yet implemented |
-| Event reliability | Outbox discussed as an option | **Not finalised; not a requirement to implement** |
+| Event reliability | Durable User Service allocation jobs | Implemented for credit onboarding; wider RabbitMQ topology remains open |
 | Container tooling | Docker and Docker Compose | Local User/Supplier, frontend and gateway implemented; full-team cloud deployment open |
 | Email delivery | Local Mailpit capture; SMTP adapter with STARTTLS for deployment | Production provider not selected; SES remains an option |
 
@@ -127,7 +127,7 @@ These are selected backlog items, not completed features. Ownership and appropri
 ## Decisions still needed
 
 - Confirm User Service's documented defaults with teammates, especially accepted school domains and session/rate-limit policies. First-admin provisioning uses an operator command for a verified account; Supplier can use this in S1.
-- Database hosting, remaining service schemas, RabbitMQ topology/reliability, production email provider and full-team container deployment. **Outbox remains undecided; Credit integration is deferred**, including recovery and eventual onboarding of accounts verified before integration exists.
+- Database hosting, remaining service schemas, RabbitMQ topology/reliability, production email provider and full-team container deployment. New verified accounts now have durable credit allocation retries; onboarding accounts verified before this integration remains deliberately deferred during development.
 - Cancellation eligibility, expiry duration and post-pickup penalty rules. Reconcile FR3.6.1's penalty with FR4.1.6's release rule, and clarify the release-on-completion wording in FR4.1.7.
 - Physical quantity limits, supported pickup-location choices, and the meaning of S1 assignment notification versus S2 general notifications.
 - Behaviour of rating-based simultaneous acceptance, and ownership of frontend, integration, deployment and nice-to-have work.
@@ -137,6 +137,6 @@ These are selected backlog items, not completed features. Ownership and appropri
 
 - `CS3219-ProjectDescription.pdf`, supplied by the user: required services, scope boundaries, deployment baseline and contribution expectations, particularly pages 2–6.
 - `Project-D1-Template.docx`, supplied by the user: functional/non-functional requirements, selected nice-to-haves and S1–S4 allocation. The summaries here paraphrase those tables.
-- Team discussion: Next.js/TypeScript and Go stack direction; EC2 application hosting; own email verification; outbox explicitly not finalised.
+- Team discussion: Next.js/TypeScript and Go stack direction; EC2 application hosting; own email verification. The later credit-onboarding implementation adopted a narrowly scoped durable job table; general event messaging remains undecided.
 
 The source attachments are not stored in this repository. This brief records requirements and decisions; service-specific implementation details belong in the service documentation.

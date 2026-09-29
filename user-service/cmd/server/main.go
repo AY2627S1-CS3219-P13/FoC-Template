@@ -56,7 +56,7 @@ func run(log *slog.Logger) error {
 		log.Info("operator promoted a verified account to admin", "operator", os.Args[3])
 		return nil
 	}
-	app, err := user.New(db, cfg, user.SMTPMailer{Config: cfg}, log)
+	app, err := user.New(db, cfg, user.SMTPMailer{Config: cfg}, user.NewCreditClient(cfg), log)
 	if err != nil {
 		return errors.New("authentication initialization failed")
 	}
@@ -65,6 +65,7 @@ func run(log *slog.Logger) error {
 	fail := make(chan error, 2)
 	go func() { fail <- public.ListenAndServe() }()
 	go func() { fail <- internal.ListenAndServe() }()
+	go app.RunAllocationWorker(ctx)
 	go func() {
 		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()

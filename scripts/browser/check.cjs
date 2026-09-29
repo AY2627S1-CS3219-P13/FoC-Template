@@ -11,7 +11,7 @@ const adminEmail = process.env.SMOKE_EMAIL;
 const adminPassword = process.env.SMOKE_PASSWORD;
 assert(adminEmail && adminPassword, 'Run scripts/browser-check.sh to supply local fixtures');
 const stamp = Date.now();
-const studentEmail = `d2-student-${stamp}@u.nus.edu`;
+const studentEmail = process.env.E2E_STUDENT_EMAIL || `d2-student-${stamp}@u.nus.edu`;
 const studentPassword = randomBytes(24).toString('hex');
 const cases = [];
 const pass = name => { cases.push(name); console.log(`PASS: ${name}`); };
@@ -84,15 +84,57 @@ async function screenshot(page, filename, width) {
     }, 'Verification email missing');
     const digits = dialog.getByRole('group', { name: 'Eight-digit verification code' }).getByRole('textbox');
     for (let i = 0; i < code.length; i++) await digits.nth(i).fill(code[i]);
+    // Commit verification on the server, then lose its response in the browser.
+    // The UI must not claim the account is still unverified.
+    await page.route('**/api/v1/auth/verify-email', async route => {
+      const response = await route.fetch();
+      assert.equal(response.status(), 200);
+      await route.abort('failed');
+    });
     await dialog.getByRole('button', { name: 'Verify', exact: true }).click();
-    await dialog.getByRole('heading', { name: 'Email verified — account active' }).waitFor();
-    await dialog.getByRole('button', { name: 'Close account form' }).click();
-    await login(page, studentEmail, studentPassword);
+    await dialog.getByRole('alert').filter({ hasText: 'may already be verified' }).waitFor();
+    assert.equal(await dialog.getByText('Your account stays unverified until the correct code is accepted.').count(), 0);
+    await dialog.getByRole('button', { name: 'Try logging in' }).click();
+    await dialog.getByLabel(/^Password/).fill(studentPassword);
+    await dialog.getByRole('button', { name: 'Log in', exact: true }).click();
+    await page.locator('[aria-label="Supplier results"] .supplier-card').first().waitFor();
+    await page.unroute('**/api/v1/auth/verify-email');
+    await page.getByText('100 credits available', { exact: true }).waitFor();
+    const walletRoute = '**/api/v1/wallets/me';
+    await page.route('**/api/v1/users/me', async route => {
+      const response = await route.fetch();
+      await route.fulfill({ response, json: { ...(await response.json()), creditSetup: 'pending' } });
+    });
+    await page.route(walletRoute, route => route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":{"code":"wallet_not_found","message":"Wallet not found"}}' }));
+    await page.evaluate(() => window.dispatchEvent(new Event('foc:wallet-changed')));
+    await page.getByText('Setting up your credits…', { exact: true }).waitFor();
+    assert.equal(await page.getByText('0 credits available', { exact: true }).count(), 0);
+    await page.unroute(walletRoute);
+    await page.unroute('**/api/v1/users/me');
+    await page.evaluate(() => window.dispatchEvent(new Event('foc:wallet-changed')));
+    await page.getByText('100 credits available', { exact: true }).waitFor();
+    await page.route(walletRoute, route => route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":{"code":"wallet_not_found","message":"Wallet not found"}}' }));
+    await page.evaluate(() => window.dispatchEvent(new Event('foc:wallet-changed')));
+    await page.getByRole('status').filter({ hasText: '100 credits (last known)' }).waitFor();
+    await page.unroute(walletRoute);
+    await page.getByRole('button', { name: 'Retry', exact: true }).click();
+    await page.getByText('100 credits available', { exact: true }).waitFor();
+    await page.route(walletRoute, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ userId: 'test', available: 75, reserved: 25 }) }));
+    await page.evaluate(() => window.dispatchEvent(new Event('foc:wallet-changed')));
+    await page.getByText('75 credits available · 25 reserved', { exact: true }).waitFor();
+    await page.unroute(walletRoute);
+    await page.route(walletRoute, route => route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":{"code":"not_ready","message":"Temporarily unavailable"}}' }));
+    await page.evaluate(() => window.dispatchEvent(new Event('foc:wallet-changed')));
+    await page.getByRole('status').filter({ hasText: '75 credits (last known)' }).waitFor();
+    await page.unroute(walletRoute);
+    await page.getByRole('button', { name: 'Retry', exact: true }).click();
+    await page.getByText('100 credits available', { exact: true }).waitFor();
     assert.equal((await page.goto(base + '/admin')).status(), 404, 'Ordinary user must not receive the admin page');
     await page.goto(base);
     await page.locator('.supplier-card').first().waitFor();
     await page.reload();
     await page.locator('.supplier-card').first().waitFor();
+    await page.getByText('100 credits available', { exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Add supplier', exact: true }).count(), 0);
     assert.equal(await page.getByRole('button', { name: 'Edit supplier', exact: true }).count(), 0);
     const initial = await call(student, 'GET', '/api/v1/suppliers?pageSize=100');
@@ -102,7 +144,7 @@ async function screenshot(page, filename, width) {
     await call(student, 'GET', '/api/v1/admin/users?page=1&pageSize=20', undefined, 403);
     await call(student, 'PATCH', `/api/v1/suppliers/${known}`, { active: false }, 403);
     await call(student, 'DELETE', `/api/v1/suppliers/${known}`, undefined, 403);
-    pass('Signup/verification/login/restore; anonymous gate and ordinary-user API/UI permissions');
+    pass('Lost verification response recovers via login; pending wallet/refresh/retry; anonymous gate and ordinary-user API/UI permissions');
 
     await page.getByLabel('Per page', { exact: true }).selectOption('5');
     await page.getByText('Page 1 of', { exact: false }).waitFor();

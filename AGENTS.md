@@ -17,8 +17,9 @@ sh credit-service/scripts/init-env.sh
 docker compose up --build -d gateway
 ```
 
-The gateway owns `http://localhost:3000` and starts the frontend, User and
-Supplier services; add `docker compose up --build -d credit-service` for Credit.
+The gateway owns `http://localhost:3000` and starts the frontend, User, Credit
+and Supplier services. New verified accounts can log in while Credit Service
+finishes their initial wallet setup in the background.
 Direct development ports are User 8080, Credit 8082 and Supplier 8083; Mailpit is
 on 8025. Internal ports (8081) stay on the Compose network and are rejected by
 the gateway.
@@ -40,6 +41,9 @@ The smoke test generates a verified admin account and a supplier and removes the
 again when it passes. `SMOKE_KEEP=1 sh scripts/smoke.sh` keeps the account for
 browser exploration, and `sh scripts/cleanup-test-data.sh` removes the fixtures
 left by earlier runs of the smoke and browser checks.
+On a freshly reset User database, claim the designated first-admin role before
+running smoke or browser checks: their fixture promotion consumes the one-time
+bootstrap claim, even after fixture cleanup.
 
 Formatting is enforced, not suggested. To reformat a Go service in a container:
 
@@ -57,8 +61,9 @@ push and pull request, so a green local run is a green CI run.
   validate each request through User's internal endpoint.
 - Each service owns its own PostgreSQL database and its own numbered, embedded
   migrations. Add migrations; never edit an applied one.
-- Credits move only through Credit Service escrows; balances are never written
-  directly.
+- Credit Service owns wallet balances and history; other services never write
+  them directly. Initial allocations and admin debits are explicit exceptions
+  to the normal escrow transfer flow.
 - Cross-service calls are internal HTTP with a bearer token, never shared
   database access.
 

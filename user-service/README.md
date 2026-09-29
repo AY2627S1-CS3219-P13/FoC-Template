@@ -14,7 +14,7 @@ PlantUML sequence diagrams: [registration and verification](docs/registration-ve
 - Let a pre-designated, verified school account claim the first admin role once; admins can change another verified user's role.
 - Let other services validate sessions through a separate, authenticated internal API.
 
-**Credit integration is deferred.** Verification does not create a wallet, award credits, call Credit Service or publish an event. There is no broker or outbox dependency. Existing verified accounts will need onboarding when that integration is added.
+Verification commits a durable allocation job with the verified account, then makes a best-effort call to Credit Service's private idempotent endpoint. Verification returns 200 once the email is verified, whether or not the 100-credit wallet is ready. Login issues a session for a verified account without depending on Credit Service. A background worker retries unfinished grants with backoff after outages and restarts. `GET /api/v1/users/me` reports the job state so the frontend can show a temporary setup message for a pending wallet. Previously verified accounts are deliberately not backfilled in this development rollout.
 
 ## Run locally
 
@@ -22,17 +22,38 @@ From the repository root, with Docker Desktop running:
 
 ```sh
 sh user-service/scripts/init-env.sh
-docker compose up --build -d user-service
+sh credit-service/scripts/init-env.sh
+docker compose up --build -d gateway
 ```
 
-The setup script creates a git-ignored `.env` with random local secrets. It preserves existing values and appends Supplier database credentials if missing. For other settings missing from an older `.env`, use `.env.example` as a reference.
+The setup scripts create git-ignored `.env` files with random local secrets and preserve existing values. Credit's script also configures User Service's private Credit credential. For settings missing from an older `.env`, use `.env.example` as a reference.
 
 - Public API: `http://localhost:8080`
 - Local verification inbox: `http://localhost:8025`
 - Ready check: `http://localhost:8080/readyz`
 - Internal API, from another Compose service: `http://user-service:8081`
 
-PostgreSQL data is stored in a named volume and survives container restarts. Database and internal API ports are not published to your computer. Mailpit captures email locally; nothing is sent to a real mailbox. A minimal shared Next.js frontend and gateway are now available through the [Supplier setup](../supplier-service/README.md); `docker compose up --build -d gateway` serves the UI and both public APIs at `http://localhost:3000`. The direct User API defaults to port 8080; change `USER_HTTP_PORT` in `.env` if that host port is occupied.
+PostgreSQL data is stored in named volumes and survives container restarts. Database and internal API ports are not published to your computer. Mailpit captures email locally; nothing is sent to a real mailbox. The shared gateway serves the UI and public APIs at `http://localhost:3000`. The direct User API defaults to port 8080; change `USER_HTTP_PORT` in `.env` if that host port is occupied.
+
+### Fresh local User and Credit data
+
+There are no default User accounts or admins. On a fresh database, migrations create an unused one-time admin claim; `USER_BOOTSTRAP_ADMIN_EMAIL` designates who may claim it, but does **not** create an account or grant a role. The 100-credit grant is triggered when each new account verifies its email, not at service startup. If Credit Service is unavailable, login still works and the allocation worker retries.
+
+To intentionally discard **all local User and Credit data** (accounts, sessions, role history, wallets and credit history) while preserving the Supplier database, run from the repository root:
+
+```sh
+docker volume inspect foc_user-data foc_credit-data --format '{{.Name}} {{index .Labels "com.docker.compose.volume"}}'
+docker compose stop gateway frontend supplier-service user-service credit-service user-db credit-db
+docker compose rm -f user-db credit-db
+docker volume rm foc_user-data foc_credit-data
+sh user-service/scripts/init-env.sh
+sh credit-service/scripts/init-env.sh
+docker compose up --build -d gateway
+```
+
+This is irreversible without a separate backup. The volume names above are for this Compose project's `foc` name; verify them before running the removal command. Do **not** use `docker compose down -v` for this reset: it would also remove Supplier data. Existing `.env` files are preserved, so check that `USER_BOOTSTRAP_ADMIN_EMAIL` names the intended school address before starting User Service. After startup, that person must register, verify, log in, claim access at `http://localhost:3000/admin/setup`, then log in again.
+
+On a freshly reset database, run `scripts/smoke.sh` and `scripts/browser-check.sh` **only after** the designated first admin has claimed access. Those full checks temporarily promote fixture accounts through the operator command; that promotion consumes the one-time bootstrap claim even though their fixtures are later deleted.
 
 Set `USER_APP_ORIGIN` to the frontend's exact origin. The default is `http://localhost:3000`; frontend requests need `credentials: "include"`. Every public POST, PUT or PATCH needs the matching `Origin` header, including command-line requests. This, JSON-only request bodies and SameSite cookies protect browser mutations against CSRF.
 
@@ -84,7 +105,7 @@ Each successful bootstrap, admin role change, and operator grant writes a row to
 docker compose --profile test run --build --rm user-tests
 ```
 
-This checks formatting, runs `go vet`, runs unit and PostgreSQL integration tests with Go's race detector, and builds the binary. The test database is separate from application data and uses temporary storage. Each integration test gets its own schema. Integration tests cover the full account lifecycle, one-time and concurrent admin claims, concurrent verification, display-name conflicts, code expiry/reuse/attempt limits, email failures, session revocation, role permissions, CSRF and internal API authentication.
+This checks formatting, runs `go vet`, runs unit and PostgreSQL integration tests with Go's race detector, and builds the binary. The test database is separate from application data and uses temporary storage. Each integration test gets its own schema. Integration tests cover the full account lifecycle, one-time and concurrent admin claims, concurrent verification, display-name conflicts, code expiry/reuse/attempt limits, email and credit failures, concurrent allocation workers, session revocation, role permissions, CSRF and internal API authentication.
 
 To format after changing Go files without installing Go on the host:
 
@@ -103,9 +124,11 @@ docker compose --profile test run --rm --no-deps --volume ./user-service:/app us
 | `internal/user/crypto.go` | Password hashing and secure token/code generation |
 | `internal/user/store.go` | Migrations, session lookup and housekeeping |
 | `internal/user/mail.go` | SMTP delivery, with STARTTLS for deployment |
+| `internal/user/credits.go` | Private Credit Service client and durable allocation retries |
 | `internal/user/migrations/001_initial.sql` | Users, challenges, sessions and rate limits |
 | `internal/user/migrations/002_admin_bootstrap.sql` | Durable one-time admin setup state |
 | `internal/user/migrations/003_admin_role_events.sql` | Durable role-change audit history |
+| `internal/user/migrations/004_credit_allocations.sql` | New-account allocation jobs (no existing-user backfill) |
 
 SQL is parameterised and kept beside the relevant operation. There is no ORM or extra HTTP framework. Migration files are embedded in the binary and applied once at startup under a database lock; add a new numbered file for future changes instead of editing an applied migration.
 
@@ -114,11 +137,11 @@ SQL is parameterised and kept beside the relevant operation. There is no ORM or 
 The supplied Compose setup is **for local development**. Build the same application image for EC2, then provide deployment configuration:
 
 1. Put the public API behind HTTPS and set `USER_APP_ORIGIN` to the actual frontend origin and `USER_COOKIE_SECURE=true`. Prefer serving frontend and API through the same site.
-2. Keep PostgreSQL and port 8081 private. Do not route `/internal` through the public proxy. Authenticate internal callers with `USER_INTERNAL_TOKEN`; across hosts, also protect transport with TLS.
+2. Keep PostgreSQL and both services' port 8081 private. Do not route `/internal` through the public proxy. Authenticate internal callers with service tokens; across hosts, also protect transport with TLS. Set `USER_CREDIT_SERVICE_URL` and `USER_CREDIT_INTERNAL_TOKEN` to Credit Service's private origin and credential.
 3. Replace Mailpit with the team's email provider. Configure SMTP credentials and `USER_SMTP_TLS=true` (STARTTLS, typically port 587).
 4. Use deployment-specific secrets and database credentials, persistent storage and backups. RDS versus PostgreSQL on EC2 remains open. Use verified database TLS when connecting across hosts; run with a dedicated database account.
 5. Configure proxy-level rate limiting before exposing the app. The application deliberately ignores `X-Forwarded-For`; behind a proxy its IP limit applies to the proxy address. Establish a trusted-proxy policy before changing that behaviour.
 
-The current absolute session lifetime, small concurrency cap and rate limits are starting points, not a claim that the project's 100-user performance target has been verified. Password recovery, email changes, frontend screens, automatic email retries and Credit onboarding remain separate work.
+The current absolute session lifetime, small concurrency cap and rate limits are starting points, not a claim that the project's 100-user performance target has been verified. Password recovery, email changes, automatic email retries and onboarding of users verified before this credit integration remain separate work.
 
 Security references: [OWASP password storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html), [session management](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html), and [CSRF prevention](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html). Toolchain: Go 1.27.1, pgx v5.11.0, x/crypto v0.57.0; local database PostgreSQL 18.

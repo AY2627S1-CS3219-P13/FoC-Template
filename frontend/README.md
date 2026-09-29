@@ -24,6 +24,7 @@ production build; the runtime uses Next standalone output. No host npm install i
 
 - Signup, eight-digit school-email verification, resend, login, session restoration
   and logout use User Service. Local codes are captured in Mailpit on port 8025.
+- Verification activates the account and attempts the initial 100-credit grant, but login does not wait for Credit Service. If verification's response is lost, the dialog treats the result as unknown and offers login rather than claiming the email is unverified. The home-page header reads the wallet through Credit Service and shows available and reserved credits. On a missing wallet, it checks User Service's `creditSetup` state and shows "Setting up your credits…" only while a grant is pending; other missing wallets are errors, never shown as zero. It refreshes every 10 seconds while visible, on focus, and when an in-app balance-changing action dispatches `window.dispatchEvent(new Event("foc:wallet-changed"))`; failed reads offer Retry and mark any displayed balance as last known.
 - Logged-in users browse live records and details. Search submits to the server;
   category, campus location, status, sorting and page controls request filtered pages.
 - All-status browsing includes inactive records with an explicit unavailable notice.

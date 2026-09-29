@@ -10,11 +10,11 @@ For requests with a body, send `Content-Type: application/json`. All POST, PATCH
 | Method and path | Request body | Success | Authentication |
 | --- | --- | --- | --- |
 | `POST /api/v1/auth/register` | `email`, `displayName`, `password` | 202, generic message and `registrationToken` | None |
-| `POST /api/v1/auth/verify-email` | `email`, `code`, `registrationToken`; optional `displayName` | 200, verified message | Code and registration token |
+| `POST /api/v1/auth/verify-email` | `email`, `code`, `registrationToken`; optional `displayName` | 200 once the account is verified; wallet setup may still be pending | Code and registration token |
 | `POST /api/v1/auth/resend-verification` | `email` | 202, generic verification message | None |
 | `POST /api/v1/auth/login` | `email`, `password` | 200, `user` and `expiresAt`; sets session cookie | Credentials |
 | `POST /api/v1/auth/logout` | No body | 204; clears cookie and revokes current session | Cookie, if present; repeat calls are safe |
-| `GET /api/v1/users/me` | No body | 200, `user` | Session cookie |
+| `GET /api/v1/users/me` | No body | 200, `user` and `creditSetup` (`pending`, `ready`, or `not_applicable`) | Session cookie |
 | `PATCH /api/v1/users/me` | `displayName` | 200, updated `user` | Session cookie |
 | `PUT /api/v1/users/me/password` | `currentPassword`, `newPassword` | 200, message; all sessions revoked | Session cookie and current password |
 | `POST /api/v1/admin/bootstrap-claim` | No body | 200, message; all claimant sessions revoked | Designated, verified user's session cookie |
@@ -35,6 +35,10 @@ Role changes require the acting administrator's password for each request and ar
 
 Keep the returned `registrationToken` in the signup flow (for example, browser sessionStorage), pass it alongside the code, and remove it after verification. Losing it requires restarting registration. It binds the email code to the signup attempt that set the password. It grants no login access. On registration's email-delivery 503, the response still includes `registrationToken` so the user can retry delivery.
 
+Verification commits account activation and a durable allocation job together. It then attempts the initial 100-credit grant through Credit Service, but returns 200 once the email is verified even if the grant is still pending. A 200 verification response does **not** promise that the wallet exists yet. Login depends only on valid credentials and verification; it issues a session without waiting for Credit Service. A background worker retries incomplete grants after outages. `GET /api/v1/users/me` exposes User Service's job state as `creditSetup`; this is not a balance: `pending` means the grant has not been confirmed, `ready` means Credit Service confirmed it, and `not_applicable` means no allocation job exists, as with accounts verified before this integration. The frontend uses `pending` only to distinguish a not-yet-created wallet from a genuine missing-wallet error. There is no backfill for older accounts.
+
+If the browser never receives a verification response, it cannot know whether the code was consumed. Present an uncertain result and offer login with the user's credentials; do not claim the account is still unverified or blindly retry the one-time code.
+
 Example profile response:
 
 ```json
@@ -45,7 +49,8 @@ Example profile response:
     "displayName": "Student",
     "roles": ["user"],
     "verifiedAt": "2026-09-18T10:00:00Z"
-  }
+  },
+  "creditSetup": "ready"
 }
 ```
 
@@ -118,4 +123,4 @@ Domain errors have this shape:
 | 500 | `internal_error`; request failed without exposing internal details |
 | 503 | `email_unavailable`, `busy`, `auth_unavailable` or `not_ready` |
 
-Unknown routes/methods use Go's standard 404/405 responses. Registration/resend's 202 does not reveal whether an email already belongs to an account. Login does not distinguish a wrong password from an unknown or unverified account. Credit allocation is not part of any response or endpoint yet.
+Unknown routes/methods use Go's standard 404/405 responses. Registration/resend's 202 does not reveal whether an email already belongs to an account. Login does not distinguish a wrong password from an unknown or unverified account. Existing pre-integration verified accounts are not automatically backfilled.

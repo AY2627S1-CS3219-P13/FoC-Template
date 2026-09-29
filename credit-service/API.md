@@ -193,7 +193,7 @@ Returns 200 with the `Wallet`. A repeat never adds credits, even after some were
 | --- | --- | --- |
 | 400 | `invalid_input` | Malformed `userId` |
 
-User Service does not call this yet; that integration is deferred.
+User Service calls this after committing email verification and retries a durable job if no 200 is confirmed. Repeated requests are safe even if the first response was lost.
 
 ### `PUT /internal/v1/escrows/{orderId}`
 

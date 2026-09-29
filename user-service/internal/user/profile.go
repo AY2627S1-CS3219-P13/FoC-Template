@@ -15,7 +15,11 @@ func (a *App) me(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"user": u})
+	status, err := a.creditSetupStatus(r.Context(), u.ID)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, 200, map[string]any{"user": u, "creditSetup": status})
 	return nil
 }
 
