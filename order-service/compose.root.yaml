@@ -1,0 +1,14 @@
+# Merged only by root Compose; standalone Order keeps its own origin and tokens.
+services:
+  order-service:
+    environment:
+      ORDER_APP_ORIGIN: ${USER_APP_ORIGIN:-http://localhost:3000}
+      ORDER_USER_INTERNAL_TOKEN: ${USER_INTERNAL_TOKEN:?Run sh user-service/scripts/init-env.sh}
+      ORDER_CREDIT_INTERNAL_TOKEN: ${USER_CREDIT_INTERNAL_TOKEN:?Run sh credit-service/scripts/init-env.sh}
+    depends_on:
+      user-service:
+        condition: service_started
+      supplier-service:
+        condition: service_started
+      credit-service:
+        condition: service_started

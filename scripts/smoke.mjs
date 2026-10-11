@@ -105,9 +105,45 @@ if (process.argv[2] === "setup") {
     const frontend = await fetch(base + "/");
     assert.equal(frontend.status, 200);
     assert((await frontend.text()).includes("Friend on Campus"), "Frontend missing");
+    const orderUI = await fetch(base + "/orders");
+    assert.equal(orderUI.status, 200);
+    assert((await orderUI.text()).includes("/orders/app.js"), "Order UI missing");
+    for (const asset of ["app.js", "core.mjs", "style.css"]) {
+      assert.equal((await fetch(base + "/orders/" + asset)).status, 200);
+    }
+    await call("/api/v1/orders/session", "GET", undefined, cookie);
+    const places = await (await call("/api/v1/orders/places", "GET", undefined, cookie)).json();
+    assert(places.places.length > 0, "Order could not resolve Supplier catalogue");
+    const orders = await (await call("/api/v1/orders?scope=mine", "GET", undefined, cookie)).json();
+    assert(Array.isArray(orders.orders), "Order list missing");
+    // Reach Order validation through the trusted origin with a body above the
+    // gateway's default 16 KiB limit, without creating a persistent fixture.
+    const invalidOrder = await (await call("/api/v1/orders", "POST", {
+      padding: "x".repeat(17000),
+    }, cookie, 400)).json();
+    assert.equal(invalidOrder.error.code, "invalid_idempotency_key");
+    // A snapshot must reach the client immediately, before the eight-second
+    // stream rotation; this detects accidental gateway response buffering.
+    const stream = await fetch(base + "/api/v1/orders/stream", {
+      headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(stream.status, 200);
+    assert(stream.headers.get("content-type")?.includes("text/event-stream"));
+    const reader = stream.body.getReader();
+    let received = "";
+    while (!received.includes("event: snapshot")) {
+      const { value, done } = await reader.read();
+      assert(!done, "Order stream closed before snapshot");
+      received += new TextDecoder().decode(value);
+    }
+    await reader.cancel();
   }
   await call("/api/v1/auth/logout", "POST", undefined, cookie, 204);
   await call("/api/v1/suppliers", "GET", undefined, cookie, 401);
+  if (process.env.SMOKE_API_ONLY !== "1") {
+    await call("/api/v1/orders?scope=mine", "GET", undefined, cookie, 401);
+    await call("/api/v1/orders/stream", "GET", undefined, cookie, 401);
+  }
   console.log("Verified persisted CRUD, duplicate rejection, combined queries, inactive reads, deletion, private route isolation and CSRF.");
 } else {
   throw new Error("Use setup or check");

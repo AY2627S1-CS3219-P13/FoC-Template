@@ -10,8 +10,8 @@ concurrency:
   cancel-in-progress: true
 
 # Every job runs the same containerised command a developer runs locally, so a
-# green local check is a green CI check. Both init-env scripts run first because
-# root Compose interpolates Credit's variables even for unrelated services.
+# green local check is a green CI check. Initialize all included services because
+# root Compose loads their environment files even for unrelated test profiles.
 jobs:
   backend:
     name: ${{ matrix.service }}-service
@@ -20,13 +20,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [user, supplier, credit]
+        service: [user, supplier, credit, order]
     steps:
       - uses: actions/checkout@v5
       - name: Generate local environment
         run: |
           sh user-service/scripts/init-env.sh
           sh credit-service/scripts/init-env.sh
+          sh order-service/scripts/init-env.sh
       # gofmt, go vet, go test -race, build.
       - name: Check ${{ matrix.service }} service
         run: docker compose --profile test run --build --rm ${{ matrix.service }}-tests
@@ -41,6 +42,7 @@ jobs:
         run: |
           sh user-service/scripts/init-env.sh
           sh credit-service/scripts/init-env.sh
+          sh order-service/scripts/init-env.sh
       - name: Lint, typecheck and build
         run: docker compose --profile test run --build --rm frontend-checks
 

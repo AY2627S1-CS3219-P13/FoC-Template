@@ -14,6 +14,7 @@ fi
 
 sh user-service/scripts/init-env.sh
 sh credit-service/scripts/init-env.sh
+sh order-service/scripts/init-env.sh
 
 if [ -n "$email" ]; then
   user_filter="email = '$email'"
