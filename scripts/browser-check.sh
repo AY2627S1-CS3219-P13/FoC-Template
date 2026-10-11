@@ -4,6 +4,7 @@ set -eu
 cd "$(dirname "$0")/.."
 sh user-service/scripts/init-env.sh
 sh credit-service/scripts/init-env.sh
+sh order-service/scripts/init-env.sh
 docker compose up --build -d gateway
 export SMOKE_EMAIL="browser-admin-$(date +%s)-$(openssl rand -hex 3)@u.nus.edu"
 export SMOKE_PASSWORD="$(openssl rand -hex 24)"

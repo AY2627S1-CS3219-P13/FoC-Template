@@ -1,0 +1,11 @@
+# Opt in to the existing root stack. Only Order joins its network; Order's DB
+# stays isolated. No sibling configuration, credentials or data are changed.
+services:
+  order-service:
+    networks:
+      - default
+      - foc-dependencies
+networks:
+  foc-dependencies:
+    external: true
+    name: ${ORDER_DEPENDENCY_NETWORK:-foc_default}

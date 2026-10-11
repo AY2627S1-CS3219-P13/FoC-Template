@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Campus errands · Friend on Campus</title>
+    <link rel="stylesheet" href="/orders/style.css" />
+    <script type="module" src="/orders/app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/orders"
+        ><span class="brand-mark">F</span
+        ><span
+          ><strong>Friend on Campus</strong><small>Campus errands</small></span
+        ></a
+      ><div class="account-bar">
+        <span id="account-name" class="account-label"></span>
+        <span id="account-balance" class="account-label" aria-live="polite"></span>
+        <a class="secondary" href="/">Back to catalogue</a>
+      </div>
+    </header>
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">A little help, a little closer</p>
+          <h1>Your campus. A helping hand.</h1>
+          <p>
+            Post an errand or lend a hand along the way. One pickup, one
+            delivery, a friend on campus.
+          </p>
+        </div>
+        <span class="hero-note"
+          >Pick up.<br />Drop off.<br />Make someone's day.</span
+        >
+      </section>
+      <p id="session-notice" class="notice" role="status">
+        Checking your session…
+      </p>
+      <p id="sync-notice" class="warning" role="status" hidden></p>
+      <p id="event-notice" class="notice" role="status" hidden></p>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Campus connections</p>
+          <h2>Your errand desk</h2>
+        </div>
+        <nav aria-label="Errand views" class="tabs">
+          <button data-view="create" aria-current="page">New errand</button
+          ><button data-view="mine">My requests</button
+          ><button data-view="open">Help a friend</button
+          ><button data-view="courier">My deliveries</button
+          ><button id="disputes-tab" data-view="disputes" hidden>Disputes</button>
+        </nav>
+      </div>
+      <section id="create-view" class="editor-grid" aria-label="New errand">
+        <div class="panel">
+          <div class="panel-heading">
+            <span class="step">01</span>
+            <div>
+              <h3>Where are we headed?</h3>
+              <p>Choose a supplier or a campus location for each stop.</p>
+            </div>
+          </div>
+          <form id="create-form">
+            <fieldset id="creation-fields" disabled>
+              <div class="fields">
+                <label
+                  >Pickup <span class="required">*</span
+                  ><select id="pickup" required>
+                    <option value="">Choose pickup</option>
+                  </select></label
+                ><label
+                  >Delivery <span class="required">*</span
+                  ><select id="delivery" required>
+                    <option value="">Choose delivery</option>
+                  </select></label
+                >
+              </div>
+              <div class="route-details">
+                <p id="pickup-detail">Your pickup details will appear here.</p>
+                <p id="delivery-detail">
+                  Your delivery details will appear here.
+                </p>
+              </div>
+              <button id="reload-places" class="text-button" type="button">
+                Refresh places
+              </button>
+              <div class="divider"></div>
+              <div class="panel-heading">
+                <span class="step">02</span>
+                <div>
+                  <h3>What do you need?</h3>
+                  <p>
+                    Add as many items as you need. Quantities are whole numbers.
+                  </p>
+                </div>
+              </div>
+              <div id="items" class="item-list" aria-live="polite"></div>
+              <div class="item-editor">
+                <div class="fields item-fields">
+                  <label
+                    >Item name <span class="required">*</span
+                    ><input
+                      id="item-name"
+                      placeholder="e.g. Iced milk tea" /></label
+                  ><label
+                    >Quantity <span class="required">*</span
+                    ><input
+                      id="item-quantity"
+                      inputmode="numeric"
+                      value="1"
+                      pattern="[0-9]+"
+                  /></label>
+                </div>
+                <label
+                  >Description <span class="optional">optional</span
+                  ><textarea
+                    id="item-description"
+                    rows="2"
+                    placeholder="Less sugar, no ice…"
+                  ></textarea>
+                </label>
+                <button id="add-item" class="secondary" type="button">
+                  + Add item
+                </button>
+                <div id="duplicate" class="warning" role="alert" hidden>
+                  <strong>This item is already on your list.</strong>
+                  <p>
+                    Its name matches an existing item, ignoring spaces and
+                    letter case. Add it anyway?
+                  </p>
+                  <div class="actions">
+                    <button
+                      id="duplicate-proceed"
+                      class="primary"
+                      type="button"
+                    >
+                      Proceed</button
+                    ><button
+                      id="duplicate-decline"
+                      class="secondary"
+                      type="button"
+                    >
+                      Do not proceed
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="divider"></div>
+              <div class="panel-heading">
+                <span class="step">03</span>
+                <div>
+                  <h3>A little thank you</h3>
+                  <p>Your offer is reserved when the errand is created.</p>
+                </div>
+              </div>
+              <div class="fields">
+                <label
+                  >Offered credits <span class="required">*</span
+                  ><input
+                    id="offer"
+                    required
+                    inputmode="numeric"
+                    pattern="[0-9]+"
+                    placeholder="e.g. 10"
+                  /><small
+                    >Positive whole credits, within your available
+                    balance.</small
+                  ></label
+                ><label
+                  >Expiry · Singapore time <span class="required">*</span
+                  ><input id="expiry" type="datetime-local" required /><small
+                    >SGT (UTC+08:00), regardless of your device timezone.</small
+                  ></label
+                >
+              </div>
+            </fieldset>
+            <p id="form-message" role="status" hidden></p>
+            <div class="form-footer">
+              <p>Details stay here if a request fails.</p>
+              <button id="submit" class="primary" disabled>Post errand</button>
+            </div>
+          </form>
+        </div>
+        <aside class="preview">
+          <p class="eyebrow">Before you post</p>
+          <h3>Your errand, at a glance.</h3>
+          <div class="summary">
+            <div class="route-stop">
+              <span class="dot"></span>
+              <div>
+                <small>PICKUP</small
+                ><strong id="preview-pickup">Choose a pickup</strong>
+              </div>
+            </div>
+            <div class="route-stop">
+              <span class="dot orange"></span>
+              <div>
+                <small>DELIVERY</small
+                ><strong id="preview-delivery">Choose a delivery</strong>
+              </div>
+            </div>
+            <dl>
+              <div>
+                <dt>Items</dt>
+                <dd id="preview-count">0</dd>
+              </div>
+              <div>
+                <dt>Offered credits</dt>
+                <dd id="preview-offer">—</dd>
+              </div>
+              <div>
+                <dt>Expiry (SGT)</dt>
+                <dd id="preview-expiry">Not set</dd>
+              </div>
+              <div>
+                <dt>Status after posting</dt>
+                <dd><span class="pill status-open">Open</span></dd>
+              </div>
+            </dl>
+          </div>
+          <p class="preview-note">
+            Credits are held safely by Credit Service. Posting succeeds only
+            after your details are checked and the offer is reserved.
+          </p>
+          <p class="muted">
+            You can keep browsing while an update is being confirmed.
+          </p>
+        </aside>
+      </section>
+      <section id="list-view" hidden aria-label="Errand list">
+        <div class="list-toolbar">
+          <p id="list-label" class="muted"></p>
+          <label id="request-filter-label" hidden>Show requests <select id="request-filter"><option value="all">All requests</option><option value="current">Current requests</option><option value="past">Past requests</option></select></label>
+          <label id="open-sort-label" hidden>Sort errands <select id="open-sort"><option value="expiry">Soonest expiry</option><option value="credits">Highest credits</option></select></label>
+          <button id="reload-list" class="secondary">Refresh</button>
+        </div>
+        <div class="list-grid">
+          <div>
+            <div id="orders"></div>
+            <div id="pagination" class="actions pagination">
+              <button id="previous" class="secondary">Previous</button
+              ><span id="page-label"></span
+              ><button id="next" class="secondary">Next</button>
+            </div>
+          </div>
+          <aside id="order-detail" class="panel detail">
+            <p class="eyebrow">A closer look</p>
+            <h3>Select an errand</h3>
+            <p class="muted">
+              See the exact pickup, delivery and item details here.
+            </p>
+          </aside>
+        </div>
+      </section>
+    </main>
+    <footer>
+      Friend on Campus · Built for the little things that bring us together.
+    </footer>
+  </body>
+</html>

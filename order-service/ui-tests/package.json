@@ -1,0 +1,7 @@
+{
+  "name": "foc-order-ui-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {"test": "node --test core.test.mjs && playwright test"},
+  "devDependencies": {"@playwright/test": "1.58.2"}
+}

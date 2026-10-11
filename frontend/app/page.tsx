@@ -65,6 +65,7 @@ export default function Home() {
         {checking ? <span className="account-label">Checking session…</span> : user ? <>
           <span className="account-label" title={user.displayName}>{user.displayName} · {user.roles.includes("admin") ? "Admin" : "User"}</span>
           <WalletBalance key={user.id} />
+          <a className="secondary-button admin-nav-link" href="/orders">Orders</a>
           {user.roles.includes("admin") && <Link className="secondary-button admin-nav-link" href="/admin">Admin page</Link>}
           <button className="secondary-button" disabled={loggingOut} onClick={logout}>{loggingOut ? "Logging out…" : "Log out"}</button>
         </> : <>

@@ -8,6 +8,12 @@ include:
     env_file:
       - .env
       - credit-service/.env
+  - path:
+      - order-service/compose.yaml
+      - order-service/compose.root.yaml
+    env_file:
+      - .env
+      - order-service/.env
 
 services:
   user-db:
@@ -141,6 +147,8 @@ services:
       frontend:
         condition: service_started
       supplier-service:
+        condition: service_started
+      order-service:
         condition: service_started
     read_only: true
     tmpfs: [/tmp]

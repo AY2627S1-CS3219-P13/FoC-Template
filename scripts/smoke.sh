@@ -6,6 +6,7 @@ set -eu
 cd "$(dirname "$0")/.."
 sh user-service/scripts/init-env.sh
 sh credit-service/scripts/init-env.sh
+sh order-service/scripts/init-env.sh
 export SMOKE_API_ONLY="${SMOKE_API_ONLY:-0}"
 if [ "$SMOKE_API_ONLY" = "1" ]; then
   docker compose up --build -d user-service credit-service supplier-service

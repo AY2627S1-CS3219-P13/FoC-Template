@@ -1,0 +1,100 @@
+name: foc-order
+
+services:
+  order-db:
+    image: postgres:18-bookworm
+    environment:
+      POSTGRES_USER: foc_order
+      POSTGRES_DB: foc_order
+      # Blank is intentionally a PostgreSQL startup error, so runtime fails
+      # closed while the isolated test profile needs no production secrets.
+      POSTGRES_PASSWORD: ${ORDER_POSTGRES_PASSWORD:-}
+    volumes:
+      - order-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foc_order -d foc_order"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  order-service:
+    build: .
+    environment:
+      ORDER_DATABASE_URL: postgres://foc_order:${ORDER_POSTGRES_PASSWORD:-}@order-db:5432/foc_order?sslmode=disable
+      ORDER_APP_ORIGIN: ${ORDER_APP_ORIGIN:-http://localhost:8084}
+      ORDER_SESSION_COOKIE: foc_session
+      ORDER_USER_SERVICE_URL: ${ORDER_USER_SERVICE_URL:-http://user-service:8081}
+      ORDER_USER_INTERNAL_TOKEN: ${ORDER_USER_INTERNAL_TOKEN:-}
+      ORDER_SUPPLIER_SERVICE_URL: ${ORDER_SUPPLIER_SERVICE_URL:-http://supplier-service:8080}
+      ORDER_CREDIT_SERVICE_URL: ${ORDER_CREDIT_SERVICE_URL:-http://credit-service:8081}
+      ORDER_CREDIT_INTERNAL_TOKEN: ${ORDER_CREDIT_INTERNAL_TOKEN:-}
+    ports:
+      - "127.0.0.1:${ORDER_PUBLIC_PORT:-8084}:8080"
+    depends_on:
+      order-db:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  order-test-db:
+    image: postgres:18-bookworm
+    profiles: [test, ui-test]
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: order_service_test
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d order_service_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  order-tests:
+    profiles: [test]
+    build:
+      context: .
+      target: development
+    environment:
+      ORDER_TEST_DATABASE_URL: postgres://test:test@order-test-db:5432/order_service_test?sslmode=disable
+    depends_on:
+      order-test-db:
+        condition: service_healthy
+    command: ["sh", "scripts/check.sh"]
+
+  order-ui-fixture:
+    profiles: [ui-test]
+    build:
+      context: .
+      target: development
+    environment:
+      ORDER_TEST_DATABASE_URL: postgres://test:test@order-test-db:5432/order_service_test?sslmode=disable
+      ORDER_UI_FIXTURE: "1"
+    depends_on:
+      order-test-db:
+        condition: service_healthy
+    command: ["go", "test", "./internal/order", "-run", "^TestBrowserFixture$", "-count=1", "-timeout=30m"]
+    ports:
+      - "127.0.0.1:8085:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/healthz"]
+      interval: 3s
+      timeout: 2s
+      retries: 60
+
+  order-ui-tests:
+    profiles: [ui-test]
+    build:
+      context: .
+      target: ui-tests
+    environment:
+      ORDER_UI_URL: http://order-ui-fixture:8080
+    depends_on:
+      order-ui-fixture:
+        condition: service_healthy
+
+volumes:
+  order-data:
