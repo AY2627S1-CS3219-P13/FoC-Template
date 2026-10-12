@@ -1,0 +1,47 @@
+@startuml
+hide circle
+skinparam linetype polyline
+skinparam nodesep 80
+skinparam ranksep 80
+
+entity "wallets" as wallets {
+  * user_id : uuid <<PK>>
+  --
+  * available : bigint
+  * reserved : bigint = 0
+  * created_at : timestamptz
+  * updated_at : timestamptz
+}
+
+entity "reservations" as reservations {
+  * order_id : text <<PK>>
+  --
+  * user_id : uuid <<FK>>
+  * amount : bigint
+  * status : text = held
+  courier_id : uuid <<FK>>
+  * created_at : timestamptz
+  settled_at : timestamptz
+}
+
+entity "transactions" as transactions {
+  * id : bigint <<PK, identity>>
+  --
+  * user_id : uuid <<FK>>
+  * kind : text
+  * amount : bigint
+  * available_delta : bigint
+  * reserved_delta : bigint
+  * available_after : bigint
+  * reserved_after : bigint
+  order_id : text <<FK>>
+  idempotency_key : text <<UNIQUE>>
+  note : text
+  * created_at : timestamptz
+}
+
+reservations "0..*" --> "1" wallets : user_id
+reservations "0..*" --> "0..1" wallets : courier_id
+transactions "0..*" --> "1" wallets : user_id
+transactions "0..*" --> "0..1" reservations : order_id
+@enduml

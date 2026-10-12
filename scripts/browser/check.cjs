@@ -99,7 +99,49 @@ async function screenshot(page, filename, width) {
     await dialog.getByRole('button', { name: 'Log in', exact: true }).click();
     await page.locator('[aria-label="Supplier results"] .supplier-card').first().waitFor();
     await page.unroute('**/api/v1/auth/verify-email');
-    await page.getByText('100 credits available', { exact: true }).waitFor();
+    await page.getByRole('link', { name: 'Wallet', exact: true }).click();
+    await page.locator('.wallet-available .wallet-balance-value').filter({ hasText: /^100 credits$/ }).waitFor();
+    await page.locator('.wallet-history').getByText('Initial credits', { exact: true }).waitFor();
+    assert.equal(new URL(page.url()).pathname, '/wallet', 'Wallet must open a standalone page');
+    assert.equal(await page.getByRole('dialog').count(), 0, 'Wallet must not use a modal');
+    await screenshot(page, 'wallet-desktop.png', 1440);
+    await screenshot(page, 'wallet-mobile.png', 390);
+    await screenshot(page, 'wallet-small-mobile.png', 320);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const historyRoute = '**/api/v1/wallets/me/transactions?*';
+    let failMore = true;
+    await page.route(historyRoute, async route => {
+      const query = new URL(route.request().url()).searchParams;
+      assert.equal(query.get('limit'), '10');
+      const before = query.get('before');
+      if (before) assert.equal(before, '11');
+      if (before && failMore) {
+        failMore = false;
+        await route.fulfill({ status: 503, json: { error: { code: 'not_ready', message: 'Unavailable' } } });
+        return;
+      }
+      const transactions = Array.from({ length: before ? 2 : 10 }, (_, index) => ({
+        id: (before ? 10 : 20) - index, kind: 'receive', amount: 5,
+        availableDelta: 5, reservedDelta: 0, availableAfter: 100, reservedAfter: 0,
+        createdAt: '2026-09-26T05:30:14.059Z',
+      }));
+      await route.fulfill({ json: { transactions, nextBefore: before ? null : 11 } });
+    });
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await until(async () => await page.locator('.wallet-transactions li').count() === 10, 'Wallet should show ten recent transactions');
+    await screenshot(page, 'wallet-history-desktop.png', 1440);
+    await screenshot(page, 'wallet-history-mobile.png', 390);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole('button', { name: 'Show more', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: 'Could not load transactions' }).waitFor();
+    assert.equal(await page.locator('.wallet-transactions li').count(), 10, 'Failed pagination preserves transactions');
+    await page.getByRole('button', { name: 'Retry', exact: true }).click();
+    await until(async () => await page.locator('.wallet-transactions li').count() === 12, 'Retry should append older transactions');
+    assert.equal(await page.getByRole('button', { name: 'Show more', exact: true }).count(), 0);
+    await page.unroute(historyRoute);
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await page.locator('.wallet-history').getByText('Initial credits', { exact: true }).waitFor();
+    pass('Wallet reads live history; ten-entry pagination, failure preservation and cursor retry');
     const walletRoute = '**/api/v1/wallets/me';
     await page.route('**/api/v1/users/me', async route => {
       const response = await route.fetch();
@@ -108,33 +150,37 @@ async function screenshot(page, filename, width) {
     await page.route(walletRoute, route => route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":{"code":"wallet_not_found","message":"Wallet not found"}}' }));
     await page.evaluate(() => window.dispatchEvent(new Event('foc:wallet-changed')));
     await page.getByText('Setting up your credits…', { exact: true }).waitFor();
-    assert.equal(await page.getByText('0 credits available', { exact: true }).count(), 0);
+    assert.equal(await page.locator('.wallet-balances').count(), 0, 'Pending wallet must not show a zero balance');
     await page.unroute(walletRoute);
     await page.unroute('**/api/v1/users/me');
     await page.evaluate(() => window.dispatchEvent(new Event('foc:wallet-changed')));
-    await page.getByText('100 credits available', { exact: true }).waitFor();
+    await page.locator('.wallet-available .wallet-balance-value').filter({ hasText: /^100 credits$/ }).waitFor();
     await page.route(walletRoute, route => route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":{"code":"wallet_not_found","message":"Wallet not found"}}' }));
     await page.evaluate(() => window.dispatchEvent(new Event('foc:wallet-changed')));
     await page.getByRole('status').filter({ hasText: '100 credits (last known)' }).waitFor();
     await page.unroute(walletRoute);
     await page.getByRole('button', { name: 'Retry', exact: true }).click();
-    await page.getByText('100 credits available', { exact: true }).waitFor();
+    await page.locator('.wallet-available .wallet-balance-value').filter({ hasText: /^100 credits$/ }).waitFor();
     await page.route(walletRoute, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ userId: 'test', available: 75, reserved: 25 }) }));
     await page.evaluate(() => window.dispatchEvent(new Event('foc:wallet-changed')));
-    await page.getByText('75 credits available · 25 reserved', { exact: true }).waitFor();
+    await page.locator('.wallet-available .wallet-balance-value').filter({ hasText: /^75 credits$/ }).waitFor();
+    await page.locator('.wallet-balance-card').nth(1).getByText('25 credits', { exact: true }).waitFor();
     await page.unroute(walletRoute);
     await page.route(walletRoute, route => route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":{"code":"not_ready","message":"Temporarily unavailable"}}' }));
     await page.evaluate(() => window.dispatchEvent(new Event('foc:wallet-changed')));
     await page.getByRole('status').filter({ hasText: '75 credits (last known)' }).waitFor();
     await page.unroute(walletRoute);
     await page.getByRole('button', { name: 'Retry', exact: true }).click();
-    await page.getByText('100 credits available', { exact: true }).waitFor();
+    await page.locator('.wallet-available .wallet-balance-value').filter({ hasText: /^100 credits$/ }).waitFor();
+    await page.getByRole('link', { name: 'Back to suppliers' }).click();
     assert.equal((await page.goto(base + '/admin')).status(), 404, 'Ordinary user must not receive the admin page');
     await page.goto(base);
     await page.locator('.supplier-card').first().waitFor();
     await page.reload();
     await page.locator('.supplier-card').first().waitFor();
-    await page.getByText('100 credits available', { exact: true }).waitFor();
+    await page.getByRole('link', { name: 'Wallet', exact: true }).click();
+    await page.locator('.wallet-available .wallet-balance-value').filter({ hasText: /^100 credits$/ }).waitFor();
+    await page.getByRole('link', { name: 'Back to suppliers' }).click();
     assert.equal(await page.getByRole('button', { name: 'Add supplier', exact: true }).count(), 0);
     assert.equal(await page.getByRole('button', { name: 'Edit supplier', exact: true }).count(), 0);
     const initial = await call(student, 'GET', '/api/v1/suppliers?pageSize=100');

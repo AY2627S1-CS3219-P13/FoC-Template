@@ -2,7 +2,7 @@
 
 Wallets, escrows and credit history for Friend on Campus (backlog `FR4`, `NFR3`), written in Go with PostgreSQL. This page is the overview; [API.md](API.md) is the endpoint-by-endpoint reference.
 
-**Status:** User Service allocates a wallet on email verification and retries failures durably. Order Service does not exist yet.
+**Status:** User Service allocates a wallet on email verification and retries failures durably. Order Service reserves credits before committing an order and durably retries creation cleanup, refunds and payouts. [D3-CREDIT-DESIGN.md](D3-CREDIT-DESIGN.md) answers the D3 design questions and records implementation limits.
 
 ## API
 
