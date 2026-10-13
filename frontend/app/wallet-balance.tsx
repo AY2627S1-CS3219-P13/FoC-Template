@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import WalletHistory from "./wallet-history";
+import { CreditApiError, creditApi, type Wallet } from "@/lib/credit-api";
 
-type Wallet = { userId: string; available: number; reserved: number };
-
-export default function WalletBalance() {
+export default function WalletBalance({ onSessionExpired }: { onSessionExpired: () => void }) {
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [error, setError] = useState(false);
   const [setupPending, setSetupPending] = useState(false);
@@ -15,14 +15,15 @@ export default function WalletBalance() {
     const controller = new AbortController();
     activeRequest.current = controller;
     try {
-      const response = await fetch("/api/v1/wallets/me", {
-        credentials: "include", cache: "no-store", signal: controller.signal,
-      });
-      if (response.status === 404) {
+      let next: Wallet;
+      try { next = await creditApi.wallet(controller.signal); }
+      catch (error: unknown) {
+        if (!(error instanceof CreditApiError) || error.status !== 404) throw error;
         // Only User Service knows whether a missing wallet is still being set up.
         const account = await fetch("/api/v1/users/me", {
           credentials: "include", cache: "no-store", signal: controller.signal,
         });
+        if (account.status === 401) throw new CreditApiError(401, "Session expired");
         if (!account.ok) throw new Error("account status unavailable");
         const { creditSetup } = await account.json() as { creditSetup: string };
         if (creditSetup === "pending") {
@@ -33,23 +34,23 @@ export default function WalletBalance() {
           }
           return;
         }
+        throw error;
       }
-      if (!response.ok) throw new Error("wallet unavailable");
-      const next = await response.json() as Wallet;
       if (!controller.signal.aborted) {
         setWallet(next);
         setSetupPending(false);
         setError(false);
       }
-    } catch {
+    } catch (error: unknown) {
       if (!controller.signal.aborted) {
+        if (error instanceof CreditApiError && error.status === 401) { onSessionExpired(); return; }
         setSetupPending(false);
         setError(true);
       }
     } finally {
       if (activeRequest.current === controller) activeRequest.current = null;
     }
-  }, []);
+  }, [onSessionExpired]);
 
   useEffect(() => {
     const initial = window.setTimeout(() => { void refresh(); }, 0);
@@ -69,11 +70,19 @@ export default function WalletBalance() {
     };
   }, [refresh]);
 
-  if (error) return <span className="account-label" role="status">
+  const balance = error ? <p className="form-error" role="status">
     {wallet ? `${wallet.available} credits (last known)` : "Credits unavailable"}{" "}
     <button type="button" className="text-button" onClick={() => { void refresh(); }}>Retry</button>
-  </span>;
-  if (setupPending) return <span className="account-label" role="status">Setting up your credits…</span>;
-  if (!wallet) return <span className="account-label" role="status">Loading credits…</span>;
-  return <span className="account-label" role="status">{wallet.available} credits available{wallet.reserved ? ` · ${wallet.reserved} reserved` : ""}</span>;
+  </p> : setupPending ? <p className="notice" role="status">Setting up your credits…</p> :
+    !wallet ? <p className="notice" role="status">Loading credits…</p> : null;
+
+  return <div className="wallet-content">
+      {balance}
+      {wallet && <section className={`wallet-balances${error ? " wallet-stale" : ""}`} aria-label={error ? "Last known balances" : "Current balances"}>
+        <div className="wallet-balance-card wallet-available"><p className="eyebrow">Available credits</p><p className="wallet-balance-value">{wallet.available.toLocaleString()} <span>credits</span></p><p>Ready for your next campus errand.</p></div>
+        <div className="wallet-balance-card"><p className="eyebrow">Frozen credits</p><p className="wallet-balance-value">{wallet.reserved.toLocaleString()} <span>credits</span></p><p>Reserved for your open errands. Unavailable to spend until released.</p></div>
+        <div className="wallet-balance-card"><p className="eyebrow">Total balance</p><p className="wallet-balance-value">{(wallet.available + wallet.reserved).toLocaleString()} <span>credits</span></p><p>Your available and frozen credits combined.</p></div>
+      </section>}
+      {wallet && <WalletHistory onSessionExpired={onSessionExpired} onRefreshBalance={refresh} />}
+  </div>;
 }
