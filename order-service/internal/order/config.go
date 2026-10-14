@@ -9,6 +9,7 @@ import (
 )
 
 type Config struct {
+	SupplierInternalURL, SupplierInternalToken               string
 	DatabaseURL, Origin, SessionCookie                       string
 	UserServiceURL, UserServiceToken                         string
 	SupplierServiceURL, CreditServiceURL, CreditServiceToken string
@@ -17,11 +18,18 @@ type Config struct {
 
 func LoadConfig() (Config, error) {
 	c := Config{
+		SupplierInternalURL: os.Getenv("ORDER_SUPPLIER_INTERNAL_URL"), SupplierInternalToken: os.Getenv("ORDER_SUPPLIER_INTERNAL_TOKEN"),
 		DatabaseURL: os.Getenv("ORDER_DATABASE_URL"), Origin: os.Getenv("ORDER_APP_ORIGIN"),
 		SessionCookie: os.Getenv("ORDER_SESSION_COOKIE"), UserServiceURL: os.Getenv("ORDER_USER_SERVICE_URL"),
 		UserServiceToken: os.Getenv("ORDER_USER_INTERNAL_TOKEN"), SupplierServiceURL: os.Getenv("ORDER_SUPPLIER_SERVICE_URL"),
 		CreditServiceURL: os.Getenv("ORDER_CREDIT_SERVICE_URL"), CreditServiceToken: os.Getenv("ORDER_CREDIT_INTERNAL_TOKEN"),
 		DependencyTimeout: 3 * time.Second, RecoveryInterval: 30 * time.Second, RecoveryStaleAfter: time.Minute,
+	}
+	if c.SupplierInternalURL != "" || c.SupplierInternalToken != "" {
+		u, err := url.Parse(c.SupplierInternalURL)
+		if !validSecret(c.SupplierInternalToken) || err != nil || u.Hostname() == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
+			return c, errors.New("configure a valid ORDER_SUPPLIER_INTERNAL_URL and separate service token")
+		}
 	}
 	if c.DatabaseURL == "" {
 		return c, errors.New("ORDER_DATABASE_URL is required")

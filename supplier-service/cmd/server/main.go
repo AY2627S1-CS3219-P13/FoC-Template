@@ -47,7 +47,9 @@ func run(log *slog.Logger) error {
 	}
 	app := supplier.New(db, cfg, log)
 	srv := &http.Server{Addr: ":8080", Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
-	fail := make(chan error, 1)
+	private := &http.Server{Addr: ":8081", Handler: app.InternalHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
+	fail := make(chan error, 2)
+	go func() { fail <- private.ListenAndServe() }()
 	go func() { fail <- srv.ListenAndServe() }()
 	log.Info("HTTP listener started", "port", 8080)
 	select {
@@ -57,6 +59,7 @@ func run(log *slog.Logger) error {
 	shutdown, done := context.WithTimeout(context.Background(), 15*time.Second)
 	defer done()
 	_ = srv.Shutdown(shutdown)
+	_ = private.Shutdown(shutdown)
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return errors.New("HTTP server stopped unexpectedly")
 	}

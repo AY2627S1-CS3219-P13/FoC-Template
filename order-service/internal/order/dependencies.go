@@ -12,6 +12,7 @@ import (
 
 type CatalogueClient struct {
 	BaseURL, CookieName string
+	InternalToken       string
 	Client              *http.Client
 }
 
@@ -41,11 +42,15 @@ func (c *CatalogueClient) Resolve(ctx context.Context, ref PlaceRef, session str
 		}
 		return Place{}, invalidPlace()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/api/v1/suppliers/"+url.PathEscape(ref.ID), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+c.cataloguePrefix()+"/suppliers/"+url.PathEscape(ref.ID), nil)
 	if err != nil {
 		return Place{}, placesUnavailable()
 	}
-	req.AddCookie(&http.Cookie{Name: c.CookieName, Value: session})
+	if c.InternalToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.InternalToken)
+	} else {
+		req.AddCookie(&http.Cookie{Name: c.CookieName, Value: session})
+	}
 	response, err := c.Client.Do(req)
 	if err != nil {
 		return Place{}, placesUnavailable()
@@ -55,6 +60,9 @@ func (c *CatalogueClient) Resolve(ctx context.Context, ref PlaceRef, session str
 		return Place{}, invalidPlace()
 	}
 	if response.StatusCode == http.StatusUnauthorized {
+		if c.InternalToken != "" {
+			return Place{}, placesUnavailable()
+		}
 		return Place{}, problem(401, "invalid_session", "Please log in again.")
 	}
 	if response.StatusCode != http.StatusOK {
@@ -84,17 +92,24 @@ func (c *CatalogueClient) Resolve(ctx context.Context, ref PlaceRef, session str
 
 func (c *CatalogueClient) locations(ctx context.Context, session string) (locationResponse, error) {
 	var body locationResponse
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/api/v1/locations", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+c.cataloguePrefix()+"/locations", nil)
 	if err != nil {
 		return body, placesUnavailable()
 	}
-	req.AddCookie(&http.Cookie{Name: c.CookieName, Value: session})
+	if c.InternalToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.InternalToken)
+	} else {
+		req.AddCookie(&http.Cookie{Name: c.CookieName, Value: session})
+	}
 	response, err := c.Client.Do(req)
 	if err != nil {
 		return body, placesUnavailable()
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusUnauthorized {
+		if c.InternalToken != "" {
+			return body, placesUnavailable()
+		}
 		return body, problem(401, "invalid_session", "Please log in again.")
 	}
 	if response.StatusCode != http.StatusOK {
@@ -230,4 +245,11 @@ func (c *CreditClient) Payout(ctx context.Context, id, courier string) error {
 		return problem(503, "payout_pending", "Credit payout remains pending; it will be retried.")
 	}
 	return nil
+}
+
+func (c *CatalogueClient) cataloguePrefix() string {
+	if c.InternalToken != "" {
+		return "/internal/v1"
+	}
+	return "/api/v1"
 }

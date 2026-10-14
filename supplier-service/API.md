@@ -110,3 +110,5 @@ Every protected call validates its cookie through User's private port 8081, then
 checks permissions. No cached authorization, duplicate user/session tables, broker
 or browser-visible internal credentials. `/readyz` checks only the Supplier database;
 auth outages fail closed per request. Gateway `/healthz` checks only the gateway.
+
+Private port 8081 adds `GET /internal/v1/suppliers/{id}` and `GET /internal/v1/locations`, using the same read JSON as the public catalogue. Require `Authorization: Bearer <SUPPLIER_INTERNAL_TOKEN>`; no writes or session cookies are supported. Deleted suppliers return 404, inactive suppliers remain readable with `active:false`. Incorrect service credentials return 401. No private port is published or routed by the gateway.

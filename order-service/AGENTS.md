@@ -53,9 +53,10 @@ assume gRPC, Redis, RabbitMQ or an external broker exists.
   Invalid backend credentials are a dependency outage, not a user login error.
 - Supplier currently has authenticated public catalogue routes on container
   port 8080, including `GET /api/v1/suppliers/{id}` and `/api/v1/locations`.
-  There is no private Supplier lookup API. Its existing routes require the
-  user's session cookie, not a User/Credit bearer token. Use the documented
-  contract or coordinate a new one before relying on it. Check `supplier.active`
+  Private port 8081 additionally exposes read-only `/internal/v1/suppliers/{id}`
+  and `/internal/v1/locations` with a separate `SUPPLIER_INTERNAL_TOKEN`. The
+  worker uses this documented contract; public routes still require the user's
+  current cookie. Never retain user cookies for background reconciliation. Check `supplier.active`
   for new pickups; inactive records remain readable, deleted records return 404.
 - Call Credit at `http://credit-service:8081` with its separate
   `CREDIT_INTERNAL_TOKEN`. Reserve using `PUT /internal/v1/escrows/{orderId}`

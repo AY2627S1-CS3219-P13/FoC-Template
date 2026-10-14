@@ -106,6 +106,7 @@ services:
   supplier-service:
     build: ./supplier-service
     environment:
+      SUPPLIER_INTERNAL_TOKEN: ${SUPPLIER_INTERNAL_TOKEN:?Run sh user-service/scripts/init-env.sh}
       SUPPLIER_DATABASE_URL: postgres://foc_supplier:${SUPPLIER_POSTGRES_PASSWORD}@supplier-db:5432/foc_supplier?sslmode=disable
       USER_SERVICE_INTERNAL_URL: http://user-service:8081
       USER_INTERNAL_TOKEN: ${USER_INTERNAL_TOKEN:?Run sh user-service/scripts/init-env.sh}
