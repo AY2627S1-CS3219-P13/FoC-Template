@@ -74,7 +74,8 @@ func readJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 
 func (a *App) Handler() http.Handler {
 	m := http.NewServeMux()
-	m.Handle("/internal/", a.InternalHandler())
+	m.HandleFunc("GET /internal/v1/suppliers/{id}", a.endpoint(a.internalCatalogue(a.get)))
+	m.HandleFunc("GET /internal/v1/locations", a.endpoint(a.internalCatalogue(a.locations)))
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	m.HandleFunc("GET /readyz", a.endpoint(func(w http.ResponseWriter, r *http.Request) error {
 		if a.db.Ping(r.Context()) != nil {
