@@ -258,3 +258,5 @@ microservice (`user-service/`, `supplier-service/`, `order-service/`,
   one-service-per-folder skeleton** for core implementation.
 
 ---
+
+Smoke setup waits up to 65 seconds for initial wallet allocation after successful verification/login. Only `404 wallet_not_found` is retried; unexpected failures and incorrect balances still fail. Its immediate and delayed-allocation regression controls run in CI before the live smoke check.
