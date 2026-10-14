@@ -147,3 +147,5 @@ The root gateway smoke test remains separate and creates an admin fixture. Do no
 Required variables are `ORDER_DATABASE_URL`, `ORDER_APP_ORIGIN`, `ORDER_SESSION_COOKIE`, `ORDER_USER_SERVICE_URL`, `ORDER_USER_INTERNAL_TOKEN`, `ORDER_SUPPLIER_SERVICE_URL`, `ORDER_CREDIT_SERVICE_URL`, and `ORDER_CREDIT_INTERNAL_TOKEN`. Tokens must be at least 32 characters. Configuration is validated before startup.
 
 Compose defaults `ORDER_PUBLIC_PORT=8084` and `ORDER_APP_ORIGIN=http://localhost:8084`. Change both together when moving the UI. The optional integration overlay accepts `ORDER_DEPENDENCY_NETWORK` (default `foc_default`). The environment initializer reads User's token from the repository-root `.env` and Credit's separate `.env`, without modifying either.
+
+After acceptance, pickup or delivery, the UI marks delivery capacity unknown and immediately checks `/api/v1/orders/session`. The aggregate server result controls acceptance, including when replaying an older delivery after another tab accepts a newer order. A failed check keeps new acceptance disabled until capacity can be confirmed; existing polling also retries the check.

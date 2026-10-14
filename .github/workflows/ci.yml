@@ -31,6 +31,12 @@ jobs:
       # gofmt, go vet, go test -race, build.
       - name: Check ${{ matrix.service }} service
         run: docker compose --profile test run --build --rm ${{ matrix.service }}-tests
+      - name: Order UI regression suite
+        if: matrix.service == 'order'
+        run: docker compose --profile ui-test run --build --rm order-ui-tests
+      - name: Stop test containers
+        if: always()
+        run: docker compose --profile test --profile ui-test down --volumes --remove-orphans
 
   frontend:
     name: frontend
