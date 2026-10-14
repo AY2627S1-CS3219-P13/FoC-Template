@@ -94,3 +94,5 @@ Runs `gofmt`, `go vet`, race-enabled tests against a throwaway PostgreSQL, and a
 - `http_test.go`: the same cases through the endpoints, checking the status and error codes in [API.md](API.md), plus authentication.
 - `ledger_test.go`: history contents, paging and the 100-concurrent-reads target (`NFR1.2`), plus the database guarantees.
 - `helpers_test.go`: per-test schema, a fake User Service, direct-SQL setup, and the balance-versus-history check run after every test.
+
+Root Compose shares `USER_APP_ORIGIN` with this service. When the session-cookie setting is empty, an HTTP origin selects `foc_session` and an HTTPS origin selects `__Host-foc_session`, matching User. Standalone runs may still set the cookie name explicitly. HTTPS also requires User secure-cookie and deployed SMTP/TLS settings; this change does not configure TLS termination.

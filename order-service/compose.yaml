@@ -22,7 +22,7 @@ services:
     environment:
       ORDER_DATABASE_URL: postgres://foc_order:${ORDER_POSTGRES_PASSWORD:-}@order-db:5432/foc_order?sslmode=disable
       ORDER_APP_ORIGIN: ${ORDER_APP_ORIGIN:-http://localhost:8084}
-      ORDER_SESSION_COOKIE: foc_session
+      ORDER_SESSION_COOKIE: ${ORDER_SESSION_COOKIE:-}
       ORDER_USER_SERVICE_URL: ${ORDER_USER_SERVICE_URL:-http://user-service:8081}
       ORDER_USER_INTERNAL_TOKEN: ${ORDER_USER_INTERNAL_TOKEN:-}
       ORDER_SUPPLIER_SERVICE_URL: ${ORDER_SUPPLIER_SERVICE_URL:-http://supplier-service:8080}

@@ -275,3 +275,5 @@ Request fields are `existingItems`, `item`, and optional `decision`. When the ne
 ## Errors
 
 Errors are `{"error":{"code":"...","message":"..."}}`. Input errors use 400, invalid sessions 401, foreign/missing mutation origins 403, wallet/idempotency conflicts 409, the 1 MiB transport limit 413, unsupported JSON media 415, unexpected errors 500, and dependency outages 503. `wallet_not_ready`, `insufficient_credits`, `auth_unavailable`, `places_unavailable`, and `credit_unavailable` distinguish the principal retry/failure cases. Malformed dependency responses fail closed. No success is returned merely because Credit returned a malformed HTTP 200.
+
+An omitted session-cookie setting derives its name from the application origin: `foc_session` for HTTP and `__Host-foc_session` for HTTPS. The root stack shares User’s origin.
