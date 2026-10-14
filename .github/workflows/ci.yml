@@ -58,6 +58,8 @@ jobs:
         run: sh scripts/smoke.sh
       - name: Funded lifecycle through User, Supplier, Order and Credit
         run: docker compose --profile test run --rm --no-deps --entrypoint node smoke order-lifecycle.mjs
+      - name: Independent gateway client limits and retained account limits
+        run: sh scripts/gateway-rate-check.sh
       - name: Container logs
         if: failure()
         run: docker compose logs --no-color --tail=200
