@@ -52,6 +52,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+      - name: Check delayed wallet allocation handling
+        run: docker run --rm -v "$PWD/scripts:/checks:ro" -w /checks node:22-bookworm-slim node --test smoke-pending.test.mjs
       - name: Signup, verification and supplier flow through the gateway
         run: sh scripts/smoke.sh
       - name: Container logs
