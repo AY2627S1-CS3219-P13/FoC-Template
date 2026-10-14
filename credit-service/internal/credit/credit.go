@@ -106,6 +106,16 @@ func (a *App) Reserve(ctx context.Context, userID, orderID string, amount int64)
 		return Wallet{}, ErrInvalidInput
 	}
 	return inTx(ctx, a, func(tx *ledgerTx) (Wallet, error) {
+		if err := lockEscrowID(ctx, tx, orderID); err != nil {
+			return Wallet{}, err
+		}
+		var aborted bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM escrow_aborts WHERE order_id=$1)", orderID).Scan(&aborted); err != nil {
+			return Wallet{}, err
+		}
+		if aborted {
+			return Wallet{}, ErrReservationSettled
+		}
 		// Lock the wallet first: a concurrent retry of this order then waits
 		// here and sees the committed escrow below.
 		w, err := lockWallet(ctx, tx, userID)
@@ -144,6 +154,9 @@ func (a *App) Release(ctx context.Context, orderID string) (Wallet, error) {
 		return Wallet{}, ErrInvalidInput
 	}
 	return inTx(ctx, a, func(tx *ledgerTx) (Wallet, error) {
+		if err := lockEscrowID(ctx, tx, orderID); err != nil {
+			return Wallet{}, err
+		}
 		r, err := lockReservation(ctx, tx, orderID)
 		if err != nil {
 			return Wallet{}, err
@@ -173,6 +186,9 @@ func (a *App) Transfer(ctx context.Context, orderID, courierID string) error {
 		return ErrInvalidInput
 	}
 	_, err := inTx(ctx, a, func(tx *ledgerTx) (Wallet, error) {
+		if err := lockEscrowID(ctx, tx, orderID); err != nil {
+			return Wallet{}, err
+		}
 		r, err := lockReservation(ctx, tx, orderID)
 		if err != nil {
 			return Wallet{}, err

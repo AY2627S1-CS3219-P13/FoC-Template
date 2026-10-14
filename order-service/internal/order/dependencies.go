@@ -231,3 +231,20 @@ func (c *CreditClient) Payout(ctx context.Context, id, courier string) error {
 	}
 	return nil
 }
+
+func (c *CreditClient) Abort(ctx context.Context, id string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/v1/escrows/"+url.PathEscape(id)+"/abort", nil)
+	if err != nil {
+		return creditUnavailable()
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	response, err := c.Client.Do(req)
+	if err != nil {
+		return creditUnavailable()
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return creditUnavailable()
+	}
+	return nil
+}

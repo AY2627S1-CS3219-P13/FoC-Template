@@ -69,6 +69,7 @@ func (a *App) InternalHandler() http.Handler {
 	m.HandleFunc("POST /internal/v1/wallets/{userId}/initial-allocation", a.endpoint(a.allocate))
 	// PUT because the caller chooses the ID (the order ID) and repeating it is safe.
 	m.HandleFunc("PUT /internal/v1/escrows/{orderId}", a.endpoint(a.reserve))
+	m.HandleFunc("POST /internal/v1/escrows/{orderId}/abort", a.endpoint(a.abort))
 	m.HandleFunc("POST /internal/v1/escrows/{orderId}/release", a.endpoint(a.release))
 	m.HandleFunc("POST /internal/v1/escrows/{orderId}/payout", a.endpoint(a.transfer))
 	return a.middleware(m, false)
@@ -314,4 +315,12 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+func (a *App) abort(w http.ResponseWriter, r *http.Request) error {
+	if err := a.Abort(r.Context(), r.PathValue("orderId")); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
 }

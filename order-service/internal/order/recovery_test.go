@@ -78,13 +78,13 @@ func TestLateReservationCannotEscapeCleanup(t *testing.T) {
 	}}
 	response := request(t, app, http.MethodPost, "/api/v1/orders", "session", "late-credit", validCreateBody(30))
 	close(startLate)
-	if err := <-late; err != nil {
-		t.Fatal(err)
+	if err := <-late; err == nil {
+		t.Fatal("late reserve must be rejected after the durable abort")
 	}
 	assertStatus(t, response, 503)
 	assertFinancialResult(t, app, f, "late-credit", "abandoned", 0, 100)
-	if calls.Load() != 2 {
-		t.Fatal("missing reconciliation reserve")
+	if calls.Load() != 1 {
+		t.Fatal("cleanup must not acquire new funds")
 	}
 }
 

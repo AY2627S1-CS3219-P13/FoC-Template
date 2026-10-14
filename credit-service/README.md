@@ -94,3 +94,5 @@ Runs `gofmt`, `go vet`, race-enabled tests against a throwaway PostgreSQL, and a
 - `http_test.go`: the same cases through the endpoints, checking the status and error codes in [API.md](API.md), plus authentication.
 - `ledger_test.go`: history contents, paging and the 100-concurrent-reads target (`NFR1.2`), plus the database guarantees.
 - `helpers_test.go`: per-test schema, a fake User Service, direct-SQL setup, and the balance-versus-history check run after every test.
+
+Uncertain creation cleanup no longer reserves funds to establish a retry record. Credit supports a durable abort by order ID: missing escrows get a tombstone, held escrows are refunded, and every late reserve is fenced under the same transaction lock. Order marks the attempt abandoned only after a successful release/abort. A lost insufficient-credit refusal needs no refund because no funds moved; it still needs the fence. Credit must be deployed with the new endpoint/migration before Order; older Credit leaves cleanup pending safely.
