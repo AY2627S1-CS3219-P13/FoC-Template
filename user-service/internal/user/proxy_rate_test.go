@@ -7,15 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
-	"net/netip"
 	"net/url"
 	"testing"
 )
 
-// Review 1: distinct clients of one reverse proxy must have independent IP limits.
-func TestReview01ProxyClientsHaveIndependentRateLimits(t *testing.T) {
+// User must not impose a socket-peer quota shared by gateway clients.
+func TestProxyTrafficDoesNotShareUserIPQuota(t *testing.T) {
 	a, _ := testApp(t)
-	a.cfg.TrustedProxyCIDRs = []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}
 	backend := httptest.NewServer(a.PublicHandler())
 	defer backend.Close()
 	target, err := url.Parse(backend.URL)
@@ -41,8 +39,8 @@ func TestReview01ProxyClientsHaveIndependentRateLimits(t *testing.T) {
 		proxy.ServeHTTP(w, r)
 		return w.Code
 	}
-	// Invalid input still consumes the IP quota, without hashing 60 passwords.
-	for i := range 60 {
+	// Invalid bodies exercise more than the former shared quota without password work.
+	for i := range 65 {
 		if got := throughProxy("203.0.113.10:10000", map[string]string{}); got != 400 {
 			t.Fatalf("attacker request %d: got %d, want input rejection 400", i+1, got)
 		}
@@ -51,27 +49,29 @@ func TestReview01ProxyClientsHaveIndependentRateLimits(t *testing.T) {
 		"email": "independent@u.nus.edu", "displayName": "Independent client", "password": testPassword,
 	})
 	if got != 202 {
-		t.Fatalf("a second client was blocked after the first sent 60 requests: got HTTP %d, want 202", got)
+		t.Fatalf("a second client was blocked by User after another proxy client sent 65 requests: got HTTP %d, want 202", got)
 	}
 }
 
-func TestDirectClientCannotSpoofForwardedQuota(t *testing.T) {
-	a, _ := testApp(t)
-	a.cfg.TrustedProxyCIDRs = []netip.Prefix{netip.MustParsePrefix("192.0.2.2/32")}
-	for i := 0; i < 61; i++ {
-		r := httptest.NewRequest("POST", "/api/v1/auth/register", bytes.NewBufferString("{}"))
-		r.RemoteAddr = "203.0.113.10:1234"
-		r.Header.Set("Content-Type", "application/json")
-		r.Header.Set("Origin", a.cfg.Origin)
-		r.Header.Set("X-Forwarded-For", fmt.Sprintf("198.51.100.%d", i))
-		w := httptest.NewRecorder()
-		a.PublicHandler().ServeHTTP(w, r)
-		want := 400
-		if i == 60 {
-			want = 429
-		}
-		if w.Code != want {
-			t.Fatalf("request %d got %d want %d", i, w.Code, want)
-		}
-	}
+// Account limits must apply even when clients change peer/forwarding addresses.
+func TestLoginAccountLimitSurvivesDifferentClientAddresses(t *testing.T) {
+ a,_:=testApp(t)
+ for i:=0;i<11;i++ {
+ data,_:=json.Marshal(map[string]string{"email":"same-account@u.nus.edu","password":testPassword})
+ r:=httptest.NewRequest("POST","/api/v1/auth/login",bytes.NewReader(data))
+ r.RemoteAddr=fmt.Sprintf("203.0.113.%d:1234",i+1)
+ r.Header.Set("X-Forwarded-For",fmt.Sprintf("198.51.100.%d",i+1))
+ r.Header.Set("Origin",a.cfg.Origin);r.Header.Set("Content-Type","application/json")
+ w:=httptest.NewRecorder();a.PublicHandler().ServeHTTP(w,r)
+ want:=401;if i==10 {want=429};if w.Code!=want {t.Fatalf("attempt %d: got %d want %d",i+1,w.Code,want)}
+ }
+}
+
+func TestPasswordWorkCapIsRetained(t *testing.T) {
+ a,_:=testApp(t)
+ for range cap(a.passwordSlots) {a.passwordSlots<-struct{}{}}
+ defer func(){for len(a.passwordSlots)>0 {<-a.passwordSlots}}()
+ r:=httptest.NewRequest("POST","/api/v1/auth/login",bytes.NewBufferString("{}"));r.Header.Set("Origin",a.cfg.Origin);r.Header.Set("Content-Type","application/json")
+ w:=httptest.NewRecorder();a.PublicHandler().ServeHTTP(w,r);status(t,w,503)
+ if !bytes.Contains(w.Body.Bytes(),[]byte("busy")) {t.Fatal(w.Body.String())}
 }

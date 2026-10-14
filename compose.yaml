@@ -36,15 +36,9 @@ services:
       - "127.0.0.1:8025:8025"
 
   user-service:
-    networks:
-      default: {}
-      auth-proxy:
-        aliases: [auth-user]
-        ipv4_address: ${USER_BACKEND_IP:-172.31.249.3}
     build: ./user-service
     env_file: .env
     environment:
-      USER_TRUSTED_PROXY_CIDRS: ${USER_GATEWAY_IP:-172.31.249.2}/32
       USER_CREDIT_SERVICE_URL: http://credit-service:8081
       USER_CREDIT_INTERNAL_TOKEN: ${USER_CREDIT_INTERNAL_TOKEN:?Run sh credit-service/scripts/init-env.sh}
     ports:
@@ -146,10 +140,6 @@ services:
     cap_drop: [ALL]
 
   gateway:
-    networks:
-      default: {}
-      auth-proxy:
-        ipv4_address: ${USER_GATEWAY_IP:-172.31.249.2}
     build: ./gateway
     ports:
       - "127.0.0.1:3000:8080"
@@ -228,9 +218,3 @@ services:
 volumes:
   user-data:
   supplier-data:
-
-networks:
-  auth-proxy:
-    ipam:
-      config:
-        - subnet: ${USER_GATEWAY_SUBNET:-172.31.249.0/24}

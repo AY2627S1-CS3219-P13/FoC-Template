@@ -125,4 +125,14 @@ Domain errors have this shape:
 
 Unknown routes/methods use Go's standard 404/405 responses. Registration/resend's 202 does not reveal whether an email already belongs to an account. Login does not distinguish a wrong password from an unknown or unverified account. Existing pre-integration verified accounts are not automatically backfilled.
 
-Rate limits apply per client IP. Forwarded addresses are accepted only from configured proxy CIDRs, with a single valid IP; User defaults to trusting no proxies. The shared gateway overwrites the forwarding header.
+## Authentication request limits
+
+The shared gateway owns IP-based admission for authentication, password-change and
+role-change requests. User does not interpret forwarded IP headers or enforce a
+quota against the gateway's socket address. User retains the PostgreSQL-backed
+email/account limits (including 10 login attempts per email per 10 minutes) and
+its password-work concurrency cap. Direct development ports bypass gateway IP
+limits; account limits still apply. Gateway rejection returns the normal JSON
+`429 rate_limited` response with `Retry-After: 1`; User's account rejections retain
+their existing response and retry header. Logout and ordinary read/poll routes do
+not consume the gateway authentication quota. See [gateway policy](../gateway/README.md).

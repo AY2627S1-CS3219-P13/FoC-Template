@@ -9,9 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"mime"
-	"net"
 	"net/http"
-	"net/netip"
 	"strings"
 	"time"
 
@@ -188,27 +186,8 @@ func (a *App) middleware(next http.Handler, public bool) http.Handler {
 
 func (a *App) authLimited(next endpoint) endpoint {
 	return func(w http.ResponseWriter, r *http.Request) error {
-		ip, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			ip = r.RemoteAddr
-		}
-		peer, parseErr := netip.ParseAddr(ip)
-		if parseErr == nil {
-			for _, trusted := range a.cfg.TrustedProxyCIDRs {
-				if trusted.Contains(peer.Unmap()) {
-					values := r.Header.Values("X-Forwarded-For")
-					if len(values) == 1 {
-						if forwarded, e := netip.ParseAddr(strings.TrimSpace(values[0])); e == nil {
-							ip = forwarded.Unmap().String()
-						}
-					}
-					break
-				}
-			}
-		}
-		if err = a.limit(r.Context(), "ip:"+ip, 60, time.Minute); err != nil {
-			return err
-		}
+		// The gateway owns per-IP limits. Account limits remain in handlers;
+		// retain this cap to bound expensive password work on every access path.
 		select {
 		case a.passwordSlots <- struct{}{}:
 			defer func() { <-a.passwordSlots }()
