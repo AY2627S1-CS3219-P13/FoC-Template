@@ -140,7 +140,7 @@ The supplied Compose setup is **for local development**. Build the same applicat
 2. Keep PostgreSQL and both services' port 8081 private. Do not route `/internal` through the public proxy. Authenticate internal callers with service tokens; across hosts, also protect transport with TLS. Set `USER_CREDIT_SERVICE_URL` and `USER_CREDIT_INTERNAL_TOKEN` to Credit Service's private origin and credential.
 3. Replace Mailpit with the team's email provider. Configure SMTP credentials and `USER_SMTP_TLS=true` (STARTTLS, typically port 587).
 4. Use deployment-specific secrets and database credentials, persistent storage and backups. RDS versus PostgreSQL on EC2 remains open. Use verified database TLS when connecting across hosts; run with a dedicated database account.
-5. Configure proxy-level rate limiting before exposing the app. The application deliberately ignores `X-Forwarded-For`; behind a proxy its IP limit applies to the proxy address. Establish a trusted-proxy policy before changing that behaviour.
+5. Route public API traffic through the gateway. Nginx enforces per-IP limits for authentication, password-change and role-change routes; User retains per-email/account limits and its four-slot password-work cap. Direct localhost development ports bypass the gateway IP limit, so keep backend public ports private in deployment. See [gateway policy and regression checks](../gateway/README.md).
 
 The current absolute session lifetime, small concurrency cap and rate limits are starting points, not a claim that the project's 100-user performance target has been verified. Password recovery, email changes, automatic email retries and onboarding of users verified before this credit integration remain separate work.
 

@@ -705,7 +705,10 @@ async function act(id, action) {
     remember(data.order);
     if (["accept", "pick_up", "deliver"].includes(action)) {
       capacityVersion++;
-      courierBusy = ["accepted", "picked up"].includes(data.order.status);
+      courierBusy = null;
+      renderDetail();
+      await session();
+      if (generation !== epoch) return;
     }
     void refreshAccount();
     delete pending[id];

@@ -10,6 +10,7 @@ Use Docker with Compose. On Windows, run these commands in WSL if Docker is inst
 cd /mnt/c/Users/cms07/CS3219/FoC-Template # adjust for your checkout
 sh user-service/scripts/init-env.sh
 sh credit-service/scripts/init-env.sh
+sh order-service/scripts/init-env.sh
 docker compose up --build -d gateway
 ```
 

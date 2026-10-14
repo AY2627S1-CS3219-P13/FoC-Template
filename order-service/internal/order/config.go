@@ -34,6 +34,12 @@ func LoadConfig() (Config, error) {
 	if c.DatabaseURL == "" {
 		return c, errors.New("ORDER_DATABASE_URL is required")
 	}
+	if c.SessionCookie == "" {
+		c.SessionCookie = "foc_session"
+		if origin, err := url.Parse(c.Origin); err == nil && origin.Scheme == "https" {
+			c.SessionCookie = "__Host-foc_session"
+		}
+	}
 	if c.SessionCookie != "foc_session" && c.SessionCookie != "__Host-foc_session" {
 		return c, errors.New("ORDER_SESSION_COOKIE must be foc_session or __Host-foc_session")
 	}

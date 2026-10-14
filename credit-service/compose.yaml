@@ -21,8 +21,8 @@ services:
       CREDIT_DATABASE_URL: postgres://foc_credit:${CREDIT_POSTGRES_PASSWORD}@credit-db:5432/foc_credit?sslmode=disable
       # Team's current initial allocation; changing this affects new wallets only.
       CREDIT_INITIAL_CREDITS: "100"
-      CREDIT_APP_ORIGIN: http://localhost:3000
-      CREDIT_SESSION_COOKIE: foc_session
+      CREDIT_APP_ORIGIN: ${USER_APP_ORIGIN:-http://localhost:3000}
+      CREDIT_SESSION_COOKIE: ${CREDIT_SESSION_COOKIE:-}
       CREDIT_USER_SERVICE_URL: http://user-service:8081
       CREDIT_INTERNAL_TOKEN: ${CREDIT_INTERNAL_TOKEN:?Run sh credit-service/scripts/init-env.sh}
       # Run from the root compose, User Service's own token is used; standalone, the one in credit-service/.env.
