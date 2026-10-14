@@ -39,6 +39,7 @@ type fakeDependencies struct {
 	reserveEffects, releases int
 	payouts                  int
 	paid                     map[string]string
+	aborted                  map[string]bool
 }
 
 func newFakeDependencies(t *testing.T) *fakeDependencies {
@@ -88,6 +89,28 @@ func (f *fakeDependencies) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		id := strings.TrimPrefix(r.URL.Path, "/internal/v1/escrows/")
+		if strings.HasSuffix(id, "/abort") {
+			id = strings.TrimSuffix(id, "/abort")
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.paid[id] != "" {
+				w.WriteHeader(409)
+				return
+			}
+			if f.aborted == nil {
+				f.aborted = map[string]bool{}
+			}
+			f.aborted[id] = true
+			if escrow, ok := f.escrows[id]; ok && !escrow.released {
+				escrow.released = true
+				f.escrows[id] = escrow
+				f.available += escrow.amount
+				f.reserved -= escrow.amount
+				f.releases++
+			}
+			w.WriteHeader(204)
+			return
+		}
 		if strings.HasSuffix(id, "/payout") {
 			id = strings.TrimSuffix(id, "/payout")
 			var body struct {
@@ -161,6 +184,10 @@ func (f *fakeDependencies) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if f.aborted[id] {
+			writeJSON(w, 409, map[string]any{"error": map[string]string{"code": "escrow_settled"}})
+			return
+		}
 		if old, ok := f.escrows[id]; ok {
 			if old.user != request.UserID || old.amount != request.Amount {
 				writeJSON(w, 409, map[string]any{"error": map[string]string{"code": "idempotency_conflict"}})

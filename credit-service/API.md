@@ -18,6 +18,7 @@ Every write is **safe to retry** with the same request, e.g. after a timeout:
 | `initial-allocation` | user ID | Returns the wallet; grants nothing | — |
 | `PUT /escrows/{orderId}` | order ID | Returns the wallet; reserves nothing | 409 `idempotency_conflict` (other `userId` or `amount`) |
 | `release` | order ID | Returns the wallet; releases nothing | — |
+| `abort` | order ID | 204; keeps the durable fence and refunds nothing again | — |
 | `payout` | order ID | 204; pays nothing | 409 `escrow_settled` (other `courierId`) |
 | Admin debit | `requestId` | Returns the wallet; debits nothing | 409 `idempotency_conflict` (other user or `amount`) |
 
@@ -25,7 +26,7 @@ Concurrent requests are serialised per wallet and per escrow, so they cannot ove
 
 ## Wallet
 
-Every endpoint except payout returns a wallet:
+Escrow mutations return a wallet except payout and abort, which return 204:
 
 ```json
 {
@@ -274,3 +275,5 @@ Same shape as User Service:
 | 415 | `json_required` |
 | 500 | `internal_error`; details are logged without request data |
 | 503 | `auth_unavailable`, `not_ready` |
+
+`POST /internal/v1/escrows/{orderId}/abort` uses the existing Credit service bearer credential and returns 204. It durably prevents future reservation of that ID, even if no wallet/escrow exists. Held funds are refunded once; repeated abort is a no-op. A transferred escrow returns 409 `escrow_settled` and remains paid. Reserve after abort returns 409 `escrow_settled`. Tombstones are permanent idempotency fences, not ledger movements.
