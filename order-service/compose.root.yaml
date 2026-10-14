@@ -2,6 +2,8 @@
 services:
   order-service:
     environment:
+      ORDER_SUPPLIER_INTERNAL_URL: http://supplier-service:8080
+      ORDER_SUPPLIER_INTERNAL_TOKEN: ${SUPPLIER_INTERNAL_TOKEN:?Run sh order-service/scripts/init-env.sh}
       ORDER_APP_ORIGIN: ${USER_APP_ORIGIN:-http://localhost:3000}
       # Derive from the shared origin instead of the standalone .env cookie.
       ORDER_SESSION_COOKIE: ""

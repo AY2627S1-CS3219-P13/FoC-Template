@@ -16,21 +16,27 @@ import (
 type receivedKey struct{}
 
 type App struct {
-	db         *pgxpool.Pool
-	admissions *pgxpool.Pool
-	cfg        Config
-	auth       sessionValidator
-	catalogue  placeResolver
-	places     placeLister
-	credit     escrowClient
-	log        *slog.Logger
-	now        func() time.Time
+	backgroundCatalogue placeResolver
+	db                  *pgxpool.Pool
+	admissions          *pgxpool.Pool
+	cfg                 Config
+	auth                sessionValidator
+	catalogue           placeResolver
+	places              placeLister
+	credit              escrowClient
+	log                 *slog.Logger
+	now                 func() time.Time
 }
 
 func New(db *pgxpool.Pool, cfg Config, log *slog.Logger) *App {
 	client := &http.Client{Timeout: cfg.DependencyTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	var background placeResolver
+	if cfg.SupplierInternalURL != "" {
+		background = &CatalogueClient{BaseURL: cfg.SupplierInternalURL, InternalToken: cfg.SupplierInternalToken, Client: client}
+	}
 	return &App{
-		db: db, admissions: db, cfg: cfg, log: log, now: time.Now,
+		backgroundCatalogue: background,
+		db:                  db, admissions: db, cfg: cfg, log: log, now: time.Now,
 		auth:      &AuthClient{URL: cfg.UserServiceURL, Token: cfg.UserServiceToken, CookieName: cfg.SessionCookie, Client: client},
 		catalogue: &CatalogueClient{BaseURL: cfg.SupplierServiceURL, CookieName: cfg.SessionCookie, Client: client},
 		places:    &CatalogueClient{BaseURL: cfg.SupplierServiceURL, CookieName: cfg.SessionCookie, Client: client},

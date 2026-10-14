@@ -1,3 +1,22 @@
+# Automatic Supplier reconciliation — 2026-10-14
+
+The recovery worker now uses Supplier’s authenticated internal catalogue to cancel
+pre-delivery orders and queue refunds without a browser. No user cookie is stored.
+Supplier and Order formatting, vet, full race-enabled suites and server builds
+passed, including service credentials, admission deferral, protected states,
+refund retries and isolation of failed place lookups. Shared gateway smoke passed.
+A disposable live four-service check deactivated a supplier for a picked-up
+30-credit order, then queried only Credit while waiting. Order cancelled the
+errand, refunded 30 exactly once and freed courier capacity automatically.
+The existing 30-second worker cadence applies; settlement may follow next tick.
+The catalogue reuses Supplier’s existing port 8080; no extra listener is added.
+Order’s initializer adds the shared Supplier credential without changing existing
+settings. User and Credit files are unchanged relative to main. Credential setup
+was checked for fresh and existing Order environments and repeat invocation.
+Earlier sections below describe historical implementations and checks.
+
+---
+
 # Order usability and participant permissions — 2026-10-11
 
 Order-only changes add the account/balance header and catalogue return link,

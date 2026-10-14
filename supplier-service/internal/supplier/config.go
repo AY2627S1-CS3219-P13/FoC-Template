@@ -10,15 +10,20 @@ import (
 
 type Config struct {
 	DatabaseURL, Origin, UserServiceURL, InternalToken string
+	CatalogueToken                                     string
 	SecureCookies                                      bool
 }
 
 func LoadConfig() (Config, error) {
 	c := Config{
 		DatabaseURL:    os.Getenv("SUPPLIER_DATABASE_URL"),
+		CatalogueToken: os.Getenv("SUPPLIER_INTERNAL_TOKEN"),
 		Origin:         os.Getenv("USER_APP_ORIGIN"),
 		UserServiceURL: os.Getenv("USER_SERVICE_INTERNAL_URL"),
 		InternalToken:  os.Getenv("USER_INTERNAL_TOKEN"),
+	}
+	if c.CatalogueToken != "" && (len(c.CatalogueToken) < 32 || strings.Contains(c.CatalogueToken, "REPLACE") || c.CatalogueToken == c.InternalToken || strings.ContainsAny(c.CatalogueToken, " \t\r\n")) {
+		return c, errors.New("SUPPLIER_INTERNAL_TOKEN must be a separate random credential of at least 32 characters")
 	}
 	var err error
 	if c.SecureCookies, err = strconv.ParseBool(os.Getenv("USER_COOKIE_SECURE")); err != nil {

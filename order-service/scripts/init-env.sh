@@ -3,6 +3,15 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 file="$root/.env"
+# Root Compose shares this read-only Supplier credential with Order. Keep
+# existing credentials intact, including when the Order environment exists.
+shared_env="$root/../.env"
+if [ -f "$shared_env" ] && ! grep -q '^SUPPLIER_INTERNAL_TOKEN=' "$shared_env"; then
+  umask 077
+  supplier_token=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
+  printf '\nSUPPLIER_INTERNAL_TOKEN=%s\n' "$supplier_token" >> "$shared_env"
+  echo 'Added Supplier catalogue credential; existing settings kept.'
+fi
 if [ -e "$file" ]; then
   echo "$file already exists; left unchanged."
   exit 0
