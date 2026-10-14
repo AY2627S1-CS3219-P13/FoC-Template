@@ -58,11 +58,30 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+      - name: Check delayed wallet allocation handling
+        run: docker run --rm -v "$PWD/scripts:/checks:ro" -w /checks node:22-bookworm-slim node --test smoke-pending.test.mjs
       - name: Signup, verification and supplier flow through the gateway
         run: sh scripts/smoke.sh
+      - name: Funded lifecycle through User, Supplier, Order and Credit
+        run: docker compose --profile test run --rm --no-deps --entrypoint node smoke order-lifecycle.mjs
+      - name: Independent gateway client limits and retained account limits
+        run: sh scripts/gateway-rate-check.sh
       - name: Container logs
         if: failure()
         run: docker compose logs --no-color --tail=200
       - name: Stop the stack
         if: always()
         run: docker compose down --volumes --remove-orphans
+
+  session-configuration:
+    name: HTTP and HTTPS session configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Generate environments and check shared session wiring
+        run: |
+          sh user-service/scripts/init-env.sh
+          sh credit-service/scripts/init-env.sh
+          sh order-service/scripts/init-env.sh
+          python3 scripts/check-session-config.py
