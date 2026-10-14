@@ -124,3 +124,5 @@ Domain errors have this shape:
 | 503 | `email_unavailable`, `busy`, `auth_unavailable` or `not_ready` |
 
 Unknown routes/methods use Go's standard 404/405 responses. Registration/resend's 202 does not reveal whether an email already belongs to an account. Login does not distinguish a wrong password from an unknown or unverified account. Existing pre-integration verified accounts are not automatically backfilled.
+
+Rate limits apply per client IP. Forwarded addresses are accepted only from configured proxy CIDRs, with a single valid IP; User defaults to trusting no proxies. The shared gateway overwrites the forwarding header.

@@ -3,6 +3,7 @@ package user
 import (
 	"errors"
 	"net/mail"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 )
 
 type Config struct {
+	TrustedProxyCIDRs                                 []netip.Prefix
 	DatabaseURL, Origin, InternalToken, CodeSecret    string
 	CreditServiceURL, CreditServiceToken              string
 	BootstrapAdminEmail                               string
@@ -30,6 +32,16 @@ func LoadConfig() (Config, error) {
 		AllowedDomains:      strings.Split(strings.ToLower(os.Getenv("USER_ALLOWED_EMAIL_DOMAINS")), ","),
 		SMTPAddress:         os.Getenv("USER_SMTP_ADDRESS"), SMTPFrom: os.Getenv("USER_SMTP_FROM"),
 		SMTPUsername: os.Getenv("USER_SMTP_USERNAME"), SMTPPassword: os.Getenv("USER_SMTP_PASSWORD"),
+	}
+	for _, raw := range strings.Split(os.Getenv("USER_TRUSTED_PROXY_CIDRS"), ",") {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(raw))
+		if err != nil {
+			return c, errors.New("USER_TRUSTED_PROXY_CIDRS must contain IP CIDRs")
+		}
+		c.TrustedProxyCIDRs = append(c.TrustedProxyCIDRs, prefix)
 	}
 	var err error
 	if c.SecureCookies, err = strconv.ParseBool(os.Getenv("USER_COOKIE_SECURE")); err != nil {
