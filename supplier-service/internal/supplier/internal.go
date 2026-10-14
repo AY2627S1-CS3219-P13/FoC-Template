@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// A service credential replaces browser sessions only on the private listener.
+// A service credential replaces browser sessions only on the internal catalogue routes.
 func (a *App) InternalHandler() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /internal/v1/suppliers/{id}", a.endpoint(a.get))

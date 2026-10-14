@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestPrivateCatalogueAuthorizationAndDeletion(t *testing.T) {
+func TestInternalCatalogueAuthorizationAndDeletion(t *testing.T) {
 	a := testApp(t)
 	a.cfg.CatalogueToken = strings.Repeat("s", 32)
 	var id string
@@ -20,12 +20,12 @@ func TestPrivateCatalogueAuthorizationAndDeletion(t *testing.T) {
 			r.Header.Set("Authorization", "Bearer "+token)
 		}
 		w := httptest.NewRecorder()
-		a.InternalHandler().ServeHTTP(w, r)
+		a.Handler().ServeHTTP(w, r)
 		return w.Code
 	}
 	for _, token := range []string{"", a.cfg.InternalToken, "invalid"} {
 		if get("/internal/v1/suppliers/"+id, token) != 401 {
-			t.Fatal("invalid private credential accepted")
+			t.Fatal("invalid service credential accepted")
 		}
 	}
 	if get("/internal/v1/suppliers/"+id, a.cfg.CatalogueToken) != 200 {
@@ -40,7 +40,16 @@ func TestPrivateCatalogueAuthorizationAndDeletion(t *testing.T) {
 		t.Fatal("deleted supplier must be missing")
 	}
 	if get("/internal/v1/locations", a.cfg.CatalogueToken) != 200 {
-		t.Fatal("private location lookup failed")
+		t.Fatal("internal location lookup failed")
 	}
-	status(t, request(t, a, "GET", "/internal/v1/locations", "admin", nil), 404)
+	// A browser session cannot replace the service credential, and the service
+	// credential cannot replace browser authentication on the public catalogue.
+	status(t, request(t, a, "GET", "/internal/v1/locations", "admin", nil), 401)
+	if get("/api/v1/suppliers/"+id, a.cfg.CatalogueToken) != 401 {
+		t.Fatal("service credential bypassed public session validation")
+	}
+	a.cfg.CatalogueToken = ""
+	if get("/internal/v1/locations", strings.Repeat("s", 32)) != 401 {
+		t.Fatal("unconfigured internal catalogue accepted a credential")
+	}
 }
