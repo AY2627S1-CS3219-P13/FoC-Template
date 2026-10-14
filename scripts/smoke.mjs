@@ -57,7 +57,16 @@ if (process.argv[2] === "setup") {
   assert(code, "Verification email not found in local Mailpit");
   await call("/api/v1/auth/verify-email", "POST", { email, code, registrationToken: registration.registrationToken });
   const cookie = await login();
-  const wallet = await (await call("/api/v1/wallets/me", "GET", undefined, cookie)).json();
+  let wallet;
+  const allocationDeadline = Date.now() + 65000;
+  do {
+    const response = await fetch(creditBase + "/api/v1/wallets/me", { headers: { Origin: origin, Cookie: cookie }, signal: AbortSignal.timeout(5000) });
+    const body = await response.json();
+    if (response.status === 200) { wallet = body; break; }
+    assert(response.status === 404 && body.error?.code === "wallet_not_found", "Unexpected wallet failure while awaiting allocation");
+    await pause(500);
+  } while (Date.now() < allocationDeadline);
+  assert(wallet, "Initial allocation did not finish within 65 seconds");
   assert.equal(wallet.available, 100, "Verification must finish with 100 available credits");
   assert.equal(wallet.reserved, 0);
   const history = await (await call("/api/v1/wallets/me/transactions", "GET", undefined, cookie)).json();
