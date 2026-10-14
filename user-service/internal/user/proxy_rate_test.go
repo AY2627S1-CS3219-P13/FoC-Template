@@ -55,23 +55,43 @@ func TestProxyTrafficDoesNotShareUserIPQuota(t *testing.T) {
 
 // Account limits must apply even when clients change peer/forwarding addresses.
 func TestLoginAccountLimitSurvivesDifferentClientAddresses(t *testing.T) {
- a,_:=testApp(t)
- for i:=0;i<11;i++ {
- data,_:=json.Marshal(map[string]string{"email":"same-account@u.nus.edu","password":testPassword})
- r:=httptest.NewRequest("POST","/api/v1/auth/login",bytes.NewReader(data))
- r.RemoteAddr=fmt.Sprintf("203.0.113.%d:1234",i+1)
- r.Header.Set("X-Forwarded-For",fmt.Sprintf("198.51.100.%d",i+1))
- r.Header.Set("Origin",a.cfg.Origin);r.Header.Set("Content-Type","application/json")
- w:=httptest.NewRecorder();a.PublicHandler().ServeHTTP(w,r)
- want:=401;if i==10 {want=429};if w.Code!=want {t.Fatalf("attempt %d: got %d want %d",i+1,w.Code,want)}
- }
+	a, _ := testApp(t)
+	for i := 0; i < 11; i++ {
+		data, _ := json.Marshal(map[string]string{"email": "same-account@u.nus.edu", "password": testPassword})
+		r := httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(data))
+		r.RemoteAddr = fmt.Sprintf("203.0.113.%d:1234", i+1)
+		r.Header.Set("X-Forwarded-For", fmt.Sprintf("198.51.100.%d", i+1))
+		r.Header.Set("Origin", a.cfg.Origin)
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		a.PublicHandler().ServeHTTP(w, r)
+		want := 401
+		if i == 10 {
+			want = 429
+		}
+		if w.Code != want {
+			t.Fatalf("attempt %d: got %d want %d", i+1, w.Code, want)
+		}
+	}
 }
 
 func TestPasswordWorkCapIsRetained(t *testing.T) {
- a,_:=testApp(t)
- for range cap(a.passwordSlots) {a.passwordSlots<-struct{}{}}
- defer func(){for len(a.passwordSlots)>0 {<-a.passwordSlots}}()
- r:=httptest.NewRequest("POST","/api/v1/auth/login",bytes.NewBufferString("{}"));r.Header.Set("Origin",a.cfg.Origin);r.Header.Set("Content-Type","application/json")
- w:=httptest.NewRecorder();a.PublicHandler().ServeHTTP(w,r);status(t,w,503)
- if !bytes.Contains(w.Body.Bytes(),[]byte("busy")) {t.Fatal(w.Body.String())}
+	a, _ := testApp(t)
+	for range cap(a.passwordSlots) {
+		a.passwordSlots <- struct{}{}
+	}
+	defer func() {
+		for len(a.passwordSlots) > 0 {
+			<-a.passwordSlots
+		}
+	}()
+	r := httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewBufferString("{}"))
+	r.Header.Set("Origin", a.cfg.Origin)
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	a.PublicHandler().ServeHTTP(w, r)
+	status(t, w, 503)
+	if !bytes.Contains(w.Body.Bytes(), []byte("busy")) {
+		t.Fatal(w.Body.String())
+	}
 }
