@@ -147,3 +147,5 @@ The root gateway smoke test remains separate and creates an admin fixture. Do no
 Required variables are `ORDER_DATABASE_URL`, `ORDER_APP_ORIGIN`, `ORDER_SESSION_COOKIE`, `ORDER_USER_SERVICE_URL`, `ORDER_USER_INTERNAL_TOKEN`, `ORDER_SUPPLIER_SERVICE_URL`, `ORDER_CREDIT_SERVICE_URL`, and `ORDER_CREDIT_INTERNAL_TOKEN`. Tokens must be at least 32 characters. Configuration is validated before startup.
 
 Compose defaults `ORDER_PUBLIC_PORT=8084` and `ORDER_APP_ORIGIN=http://localhost:8084`. Change both together when moving the UI. The optional integration overlay accepts `ORDER_DEPENDENCY_NETWORK` (default `foc_default`). The environment initializer reads User's token from the repository-root `.env` and Credit's separate `.env`, without modifying either.
+
+Root Compose shares `USER_APP_ORIGIN` with this service. When the session-cookie setting is empty, an HTTP origin selects `foc_session` and an HTTPS origin selects `__Host-foc_session`, matching User. Standalone runs may still set the cookie name explicitly. HTTPS also requires User secure-cookie and deployed SMTP/TLS settings; this change does not configure TLS termination.

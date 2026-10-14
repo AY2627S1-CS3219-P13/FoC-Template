@@ -66,3 +66,16 @@ jobs:
       - name: Stop the stack
         if: always()
         run: docker compose down --volumes --remove-orphans
+
+  session-configuration:
+    name: HTTP and HTTPS session configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Generate environments and check shared session wiring
+        run: |
+          sh user-service/scripts/init-env.sh
+          sh credit-service/scripts/init-env.sh
+          sh order-service/scripts/init-env.sh
+          python3 scripts/check-session-config.py

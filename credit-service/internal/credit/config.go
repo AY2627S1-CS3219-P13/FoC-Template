@@ -35,6 +35,12 @@ func LoadConfig() (Config, error) {
 	if !secret(c.InternalToken) || !secret(c.UserServiceToken) {
 		return c, errors.New("CREDIT_INTERNAL_TOKEN and CREDIT_USER_INTERNAL_TOKEN must be random values of at least 32 characters")
 	}
+	if c.SessionCookie == "" {
+		c.SessionCookie = "foc_session"
+		if origin, err := url.Parse(c.Origin); err == nil && origin.Scheme == "https" {
+			c.SessionCookie = "__Host-foc_session"
+		}
+	}
 	if c.SessionCookie != "foc_session" && c.SessionCookie != "__Host-foc_session" {
 		return c, errors.New("CREDIT_SESSION_COOKIE must match User Service: foc_session or __Host-foc_session")
 	}
