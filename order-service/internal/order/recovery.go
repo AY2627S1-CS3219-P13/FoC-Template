@@ -42,12 +42,14 @@ func (a *App) lockAttempt(ctx context.Context, id string, try bool) (*pgxpool.Co
 	return conn, unlock, nil
 }
 
-func (a *App) cleanupAttempt(conn *pgxpool.Conn, id string) {
+func (a *App) cleanupAttempt(conn *pgxpool.Conn, id string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := a.reconcile(ctx, conn, id); err != nil {
 		a.log.Warn("creation cleanup remains pending", "orderId", id)
+		return err
 	}
+	return nil
 }
 
 // Caller holds the attempt lock. The absence of a Credit escrow is NOT proof

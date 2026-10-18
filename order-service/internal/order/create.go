@@ -107,7 +107,10 @@ func (a *App) create(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		// Commit errors can be ambiguous. Recovery first checks for a completed
 		// local transaction under the same lock and NEVER refunds a saved order.
-		a.cleanupAttempt(conn, id)
+		cleanupErr := a.cleanupAttempt(conn, id)
+		if cleanupErr != nil {
+			return cleanupPending()
+		}
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.ConstraintName == "orders_expiry_after_creation" {
 			return invalidExpiry()

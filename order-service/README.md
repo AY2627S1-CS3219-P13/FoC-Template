@@ -152,5 +152,7 @@ Order’s recovery worker uses Supplier’s authenticated internal read-only cat
 
 The internal catalogue routes reuse Supplier’s existing HTTP listener; there is no additional port or service. The gateway rejects `/internal` paths, and the routes require their service credential even when called directly. Run `sh order-service/scripts/init-env.sh` after initializing User and Credit for the root stack.
 
+Creation can fail after Credit has reserved funds. Pending cleanup is reported as `503 creation_cleanup_pending`, so the UI retains the attempt key until its financial outcome is confirmed; expiry alone does not imply a completed refund.
+
 After acceptance, pickup or delivery, the UI marks delivery capacity unknown and immediately checks `/api/v1/orders/session`. The aggregate server result controls acceptance, including when replaying an older delivery after another tab accepts a newer order. A failed check keeps new acceptance disabled until capacity can be confirmed; existing polling also retries the check.
 Root Compose shares `USER_APP_ORIGIN` with this service. When the session-cookie setting is empty, an HTTP origin selects `foc_session` and an HTTPS origin selects `__Host-foc_session`, matching User. Standalone runs may still set the cookie name explicitly. HTTPS also requires User secure-cookie and deployed SMTP/TLS settings; this change does not configure TLS termination.
