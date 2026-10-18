@@ -258,3 +258,6 @@ microservice (`user-service/`, `supplier-service/`, `order-service/`,
   one-service-per-folder skeleton** for core implementation.
 
 ---
+
+CI smoke additionally runs `scripts/order-lifecycle.mjs` through the real four services and gateway. It creates two verified accounts, waits for their wallets, and asserts exact balances and ledger entries for creation/retry, acceptance, pickup, delivery, confirmation/payout/retry and cancellation/refund/retry. Delivery must free courier capacity before payout; the total across both wallets stays 200. CI destroys its disposable databases afterward. Run this control only against disposable data because it creates account/order/history fixtures.
+Smoke setup waits up to 65 seconds for initial wallet allocation after successful verification/login. Only `404 wallet_not_found` is retried; unexpected failures and incorrect balances still fail. Its immediate and delayed-allocation regression controls run in CI before the live smoke check.

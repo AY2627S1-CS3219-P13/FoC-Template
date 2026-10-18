@@ -274,3 +274,5 @@ Same shape as User Service:
 | 415 | `json_required` |
 | 500 | `internal_error`; details are logged without request data |
 | 503 | `auth_unavailable`, `not_ready` |
+
+An omitted session-cookie setting derives its name from the application origin: `foc_session` for HTTP and `__Host-foc_session` for HTTPS. The root stack shares User’s origin.

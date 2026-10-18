@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"mime"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -187,14 +186,8 @@ func (a *App) middleware(next http.Handler, public bool) http.Handler {
 
 func (a *App) authLimited(next endpoint) endpoint {
 	return func(w http.ResponseWriter, r *http.Request) error {
-		ip, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			ip = r.RemoteAddr
-		}
-		// Deliberately ignore client-supplied X-Forwarded-For.
-		if err = a.limit(r.Context(), "ip:"+ip, 60, time.Minute); err != nil {
-			return err
-		}
+		// The gateway owns per-IP limits. Account limits remain in handlers;
+		// retain this cap to bound expensive password work on every access path.
 		select {
 		case a.passwordSlots <- struct{}{}:
 			defer func() { <-a.passwordSlots }()

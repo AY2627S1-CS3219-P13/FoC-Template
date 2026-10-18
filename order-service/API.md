@@ -277,3 +277,5 @@ Request fields are `existingItems`, `item`, and optional `decision`. When the ne
 Errors are `{"error":{"code":"...","message":"..."}}`. Input errors use 400, invalid sessions 401, foreign/missing mutation origins 403, wallet/idempotency conflicts 409, the 1 MiB transport limit 413, unsupported JSON media 415, unexpected errors 500, and dependency outages 503. `wallet_not_ready`, `insufficient_credits`, `auth_unavailable`, `places_unavailable`, and `credit_unavailable` distinguish the principal retry/failure cases. Malformed dependency responses fail closed. No success is returned merely because Credit returned a malformed HTTP 200.
 
 If persistence fails after reservation, a definitive `400 invalid_expiry` is returned only after cleanup is confirmed. A failed refund returns `503 creation_cleanup_pending`; keep the same idempotency key and retry it. The durable worker continues cleanup after the request ends. A successful refund restores reserved credits exactly once.
+
+An omitted session-cookie setting derives its name from the application origin: `foc_session` for HTTP and `__Host-foc_session` for HTTPS. The root stack shares User’s origin.
