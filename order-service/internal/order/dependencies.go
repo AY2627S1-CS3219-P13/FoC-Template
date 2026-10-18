@@ -199,6 +199,9 @@ func (c *CreditClient) call(ctx context.Context, method, path string, body []byt
 	if decoder.Decode(&failure) != nil || decoder.Decode(new(any)) != io.EOF {
 		return creditUnavailable()
 	}
+	if !reserve && response.StatusCode == 409 {
+		return problem(409, "settlement_conflict", "Credit settlement requires investigation.")
+	}
 	if !reserve && response.StatusCode == 404 && failure.Error.Code == "escrow_not_found" {
 		return errEscrowMissing
 	}
@@ -241,6 +244,9 @@ func (c *CreditClient) Payout(ctx context.Context, id, courier string) error {
 		return creditUnavailable()
 	}
 	defer response.Body.Close()
+	if response.StatusCode == 409 {
+		return problem(409, "settlement_conflict", "Credit settlement requires investigation.")
+	}
 	if response.StatusCode != http.StatusNoContent {
 		return problem(503, "payout_pending", "Credit payout remains pending; it will be retried.")
 	}

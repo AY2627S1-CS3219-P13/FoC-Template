@@ -67,6 +67,10 @@ func TestHistorySnapshotsReconcileEveryDisplayedOrder(t *testing.T) {
 					t.Fatal(got.Body.String())
 				}
 			}
+			assertSettlementIntents(t, a)
+			if err := a.ConsumeWorkflow(context.Background(), settlementConsumer); err != nil {
+				t.Fatal(err)
+			}
 			for _, before := range body.Orders {
 				after := readStored(t, a, before.ID)
 				want, refunds := before.Status, 0
@@ -113,7 +117,7 @@ func TestSlowRefundCannotStarvePayoutRecovery(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- a.Recover(ctx) }()
+	go func() { done <- recoverForTest(a, ctx) }()
 	select {
 	case <-paid:
 		cancel()

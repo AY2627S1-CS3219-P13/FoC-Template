@@ -158,7 +158,7 @@ func (a *App) refreshHistory(ctx context.Context, observed Order, session string
 			// lock, just as explicit detail refresh does.
 			if supplierCancellable(before.Status) && !(observed.Status == "accepted" && before.Status == "picked up") {
 				after.Status = "cancelled"
-				after.CancellationReason = "A selected place was deactivated or deleted. Credit refund is queued."
+				after.CancellationReason = "A selected place was deactivated or deleted. Credit refund is pending."
 			}
 			continue
 		}
@@ -198,9 +198,7 @@ type orderEvent struct {
 }
 
 func recordEvent(ctx context.Context, tx pgx.Tx, o Order, kind string) error {
-	_, err := tx.Exec(ctx, `INSERT INTO order_events(event_id,order_id,order_version,event_type)
-        VALUES($1,$2,$3,$4)`, o.ID+":"+strconv.FormatInt(o.Version, 10), o.ID, o.Version, kind)
-	return err
+	return recordDomainEvent(ctx, tx, nil, o, kind)
 }
 
 func (a *App) events(w http.ResponseWriter, r *http.Request) error {
@@ -349,7 +347,7 @@ func (a *App) refreshListed(ctx context.Context, observed Order, session string,
 		}
 		if missing[ref] {
 			after.Status = "cancelled"
-			after.CancellationReason = "A selected place was deactivated or deleted. Credit refund is queued."
+			after.CancellationReason = "A selected place was deactivated or deleted. Credit refund is pending."
 			break
 		}
 		*target = fresh

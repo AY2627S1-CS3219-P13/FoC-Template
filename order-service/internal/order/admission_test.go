@@ -100,17 +100,18 @@ func TestAdmissionProtectsPreDeadlineCommandsDuringAuthentication(t *testing.T) 
 		t.Run(action, func(t *testing.T) {
 			a, f := testApp(t)
 			a.auth = actorAuth{}
-			o := createdForTest(t, a, "admission-deadline")
+			o := createdForTest(t, a, "admission-deadline", time.Now().Add(time.Minute))
 			if action == "deliver" {
 				mustAction(t, a, o.ID, "courier", "accept", "accepted")
 				mustAction(t, a, o.ID, "courier", "pick_up", "picked up")
 			}
-			// Keep the simulated expiry inside the five-minute confirmation
-			// window measured from the database's real delivery timestamp.
-			o.ExpiresAt = time.Now().Add(time.Minute)
-			if _, err := a.db.Exec(context.Background(), "UPDATE orders SET expires_at=$2 WHERE id=$1", o.ID, o.ExpiresAt); err != nil {
-				t.Fatal(err)
+			// The deadline is part of the committed event, not a later test-only
+			// SQL edit. Materialize it before admission so this exercises due work.
+			consume(t, a, timerConsumer)
+			if !timerAt(t, a, o.ID, "expiry").Equal(o.ExpiresAt) {
+				t.Fatal("wrong original expiry schedule")
 			}
+
 			var clock atomic.Int64
 			clock.Store(o.ExpiresAt.Add(-time.Second).UnixNano())
 			a.now = func() time.Time { return time.Unix(0, clock.Load()) }
@@ -120,7 +121,7 @@ func TestAdmissionProtectsPreDeadlineCommandsDuringAuthentication(t *testing.T) 
 			go func() { result <- actionForTest(t, a, o.ID, "courier", action).Code }()
 			awaitSignal(t, entered)
 			clock.Store(o.ExpiresAt.Add(time.Second).UnixNano())
-			if err := b.Advance(context.Background()); err != nil {
+			if err := advanceForTest(b, context.Background()); err != nil {
 				t.Fatal(err)
 			}
 			if readStored(t, b, o.ID).Status == "expired" {
@@ -136,7 +137,25 @@ func TestAdmissionProtectsPreDeadlineCommandsDuringAuthentication(t *testing.T) 
 			if after.Status != want || after.CourierID == nil {
 				t.Fatal("wrong receipt deadline outcome", after)
 			}
-			if err := b.Recover(context.Background()); err != nil {
+			if action == "accept" {
+				var types []string
+				rows, err := a.db.Query(context.Background(), "SELECT domain_type FROM order_events WHERE order_id=$1 ORDER BY order_version", o.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for rows.Next() {
+					var kind string
+					if err = rows.Scan(&kind); err != nil {
+						t.Fatal(err)
+					}
+					types = append(types, kind)
+				}
+				rows.Close()
+				if len(types) != 3 || types[0] != "OrderCreated" || types[1] != "OrderAccepted" || types[2] != "OrderExpired" {
+					t.Fatal("acceptance-then-expiry lost ordered facts", types)
+				}
+			}
+			if err := recoverForTest(b, context.Background()); err != nil {
 				t.Fatal(err)
 			}
 			f.mu.Lock()
@@ -219,7 +238,7 @@ func TestAdmissionSurvivesTransactionPoolContention(t *testing.T) {
 	awaitSignal(t, entered)
 	finish()
 	clock.Store(o.ExpiresAt.Add(time.Second).UnixNano())
-	if err = b.Advance(context.Background()); err != nil {
+	if err = advanceForTest(b, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if readStored(t, b, o.ID).Status != "picked up" {
@@ -249,7 +268,7 @@ func TestAbandonedAdmissionsExpireAndFenceOldHandlers(t *testing.T) {
 		t.Fatal(err)
 	}
 	clock.Store(o.ExpiresAt.Add(time.Second).UnixNano())
-	if err := b.Advance(context.Background()); err != nil {
+	if err := advanceForTest(b, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	finish()
@@ -277,7 +296,7 @@ func TestInvalidAdmissionCannotProtectOrderAfterRejection(t *testing.T) {
 	clock.Store(o.ExpiresAt.Add(time.Second).UnixNano())
 	finish()
 	awaitCode(t, result, 401)
-	if err := b.Advance(context.Background()); err != nil {
+	if err := advanceForTest(b, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if readStored(t, b, o.ID).Status != "expired" {
@@ -297,7 +316,7 @@ func TestAdmittedDisputeBlocksCompletionWhileAuthenticating(t *testing.T) {
 	result := make(chan int, 1)
 	go func() { result <- actionForTest(t, a, o.ID, "requester", "dispute").Code }()
 	awaitSignal(t, entered)
-	if err := b.Advance(context.Background()); err != nil {
+	if err := advanceForTest(b, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if readStored(t, b, o.ID).Status != "delivered" {
@@ -305,7 +324,7 @@ func TestAdmittedDisputeBlocksCompletionWhileAuthenticating(t *testing.T) {
 	}
 	finish()
 	awaitCode(t, result, 200)
-	if err := b.Recover(context.Background()); err != nil {
+	if err := recoverForTest(b, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if readStored(t, b, o.ID).Status != "dispute" {
@@ -341,14 +360,14 @@ func TestAdmissionRemainsVisibleWhileWaitingForOrderRow(t *testing.T) {
 	awaitSignal(t, entered)
 	finish()
 	clock.Store(o.ExpiresAt.Add(time.Second).UnixNano())
-	if err = b.Advance(context.Background()); err != nil {
+	if err = advanceForTest(b, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	// Release the external blocker, then let another worker compete for the row.
 	if err = tx.Commit(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err = b.Advance(context.Background()); err != nil {
+	if err = advanceForTest(b, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	awaitCode(t, result, 200)

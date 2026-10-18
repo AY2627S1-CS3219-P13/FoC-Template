@@ -61,7 +61,7 @@ func TestLifecycleEveryStateAndSettlement(t *testing.T) {
 				mustAction(t, a, o.ID, "admin", outcome, want)
 			}
 			for range 2 {
-				if err := a.Recover(ctx); err != nil {
+				if err := recoverForTest(a, ctx); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -147,7 +147,7 @@ func TestDisputeBeatsPendingConfirmationAndTimer(t *testing.T) {
 			}
 			mustAction(t, a, o.ID, "requester", "dispute", "dispute")
 			a.now = func() time.Time { return o.DeliveredAt.Add(time.Hour) }
-			if err := a.Recover(context.Background()); err != nil {
+			if err := recoverForTest(a, context.Background()); err != nil {
 				t.Fatal(err)
 			}
 			if readStored(t, a, o.ID).Status != "dispute" {
@@ -190,7 +190,7 @@ func TestCompetingAdminResolutionsOneSettlement(t *testing.T) {
 	if ok != 1 || conflict != 1 {
 		t.Fatal(ok, conflict)
 	}
-	if err := a.Recover(context.Background()); err != nil {
+	if err := recoverForTest(a, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	f.mu.Lock()

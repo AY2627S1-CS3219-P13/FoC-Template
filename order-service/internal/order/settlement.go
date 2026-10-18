@@ -65,7 +65,7 @@ func (a *App) settleAction(w http.ResponseWriter, r *http.Request, action string
 			return statusConflict()
 		}
 		after.Status = "cancelled"
-		after.CancellationReason = "Cancelled by the requester. Credit refund is queued."
+		after.CancellationReason = "Cancelled by the requester. Credit refund is pending."
 	case "confirm":
 		if before.Status != "delivered" {
 			return statusConflict()
@@ -110,80 +110,6 @@ func statusConflict() error {
 	return problem(409, "status_conflict", "This action is not allowed in the errand's confirmed state.")
 }
 
-// Advance is independent of potentially slow Credit retries. Original delivery
-// timestamps survive downtime; dispute removes eligibility rather than resetting
-// a timer. The same row lock serializes expiry, courier actions and completion.
-func (a *App) Advance(ctx context.Context) error {
-	if _, err := a.db.Exec(ctx, "DELETE FROM order_admissions WHERE valid_until<=clock_timestamp()"); err != nil {
-		return err
-	}
-	if err := a.expireUncollected(ctx, ""); err != nil {
-		return err
-	}
-	rows, err := a.db.Query(ctx, `SELECT id FROM orders WHERE status='delivered'
- AND LEAST(delivered_at+interval '5 minutes',completion_requested_at)<=$1
- ORDER BY id`, a.now().Add(-completionArbitration))
-	if err != nil {
-		return err
-	}
-	var due []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return err
-		}
-		due = append(due, id)
-	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
-		return err
-	}
-	for _, id := range due {
-		if err := a.completeDue(ctx, id); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// Prepare each decision in its own transaction, without closing admission while
-// row/event/payout writes run. The final gate is the decision's linearization
-// point: every live admission committed before it vetoes the entire transaction,
-// including its payout and event. No speculative decision is externally visible.
-func (a *App) completeDue(ctx context.Context, id string) error {
-	tx, err := a.db.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollback(tx)
-	before, err := scanOrder(tx.QueryRow(ctx, "SELECT "+orderColumns+` FROM orders
- WHERE id=$1 AND status='delivered'
- AND LEAST(delivered_at+interval '5 minutes',completion_requested_at)<=$2
- FOR UPDATE SKIP LOCKED`, id, a.now().Add(-completionArbitration)))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	// Avoid unnecessary writes while an earlier request is authenticating.
-	var pending bool
-	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM order_admissions WHERE order_id=$1 AND valid_until>clock_timestamp())", id).Scan(&pending); err != nil || pending {
-		return err
-	}
-	after := before
-	after.Status = "completed"
-	after.CompletionRequestedAt = nil
-	if _, err = saveChange(ctx, tx, before, after); err != nil {
-		return err
-	}
-	if allowed, err := a.guardAdmission(ctx, tx, id); err != nil || !allowed {
-		return err // rollback speculative completion; let the admitted request run
-	}
-	return tx.Commit(ctx)
-}
-
 func (a *App) payoutCompleted(ctx context.Context) error {
 	rows, err := a.db.Query(ctx, "SELECT order_id,courier_id::text FROM order_payouts ORDER BY last_attempt_at,created_at LIMIT 100")
 	if err != nil {
@@ -205,11 +131,12 @@ func (a *App) payoutCompleted(ctx context.Context) error {
 	}
 	var failures error
 	for _, job := range jobs {
-		if _, err = a.db.Exec(ctx, "UPDATE order_payouts SET last_attempt_at=clock_timestamp() WHERE order_id=$1", job.id); err != nil {
+		if _, err = a.db.Exec(ctx, "UPDATE order_payouts SET last_attempt_at=clock_timestamp(),attempts=attempts+1 WHERE order_id=$1", job.id); err != nil {
 			return errors.Join(failures, err)
 		}
 		if err = a.credit.Payout(ctx, job.id, job.courier); err != nil {
-			failures = errors.Join(failures, err)
+			_, diagnostic := a.db.Exec(ctx, "UPDATE order_payouts SET error_category=$2 WHERE order_id=$1", job.id, financialCategory(err))
+			failures = errors.Join(failures, err, diagnostic)
 			continue
 		}
 		_, err = a.db.Exec(ctx, "DELETE FROM order_payouts WHERE order_id=$1", job.id)

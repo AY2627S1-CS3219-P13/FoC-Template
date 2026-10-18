@@ -33,7 +33,7 @@ func (a *App) refreshPlaces(ctx context.Context, o Order, session string) (Order
 			if errors.As(err, &api) && api.code == "invalid_place" {
 				if supplierCancellable(o.Status) {
 					o.Status = "cancelled"
-					o.CancellationReason = "A selected place was deactivated or deleted. Credit refund is queued."
+					o.CancellationReason = "A selected place was deactivated or deleted. Credit refund is pending."
 					return o, nil
 				}
 				// Historical delivered/disputed/terminal orders cannot be
@@ -68,16 +68,10 @@ func saveChange(ctx context.Context, tx pgx.Tx, before, after Order) (Order, err
 	if before.Status != updated.Status {
 		kind = "OrderStatusChanged"
 	}
-	if err = recordEvent(ctx, tx, updated, kind); err != nil {
+	if err = recordDomainEvent(ctx, tx, &before, updated, kind); err != nil {
 		return Order{}, err
 	}
-	if (updated.Status == "cancelled" || updated.Status == "expired" || updated.Status == "not completed") && before.Status != updated.Status {
-		_, err = tx.Exec(ctx, "INSERT INTO order_refunds(order_id) VALUES($1) ON CONFLICT DO NOTHING", updated.ID)
-	}
-	if err == nil && updated.Status == "completed" && before.Status != "completed" {
-		_, err = tx.Exec(ctx, "INSERT INTO order_payouts(order_id,courier_id) VALUES($1,$2) ON CONFLICT DO NOTHING", updated.ID, updated.CourierID)
-	}
-	return updated, err
+	return updated, nil
 }
 
 func sameCourier(a, b *string) bool {
@@ -298,12 +292,13 @@ func (a *App) refundCancelled(ctx context.Context) error {
 	for _, id := range ids {
 		// Rotate attempted work before remote I/O. A repeatedly failing escrow
 		// must not consume every worker deadline and starve newer refunds.
-		if _, err = a.db.Exec(ctx, "UPDATE order_refunds SET last_attempt_at=clock_timestamp() WHERE order_id=$1", id); err != nil {
+		if _, err = a.db.Exec(ctx, "UPDATE order_refunds SET last_attempt_at=clock_timestamp(),attempts=attempts+1 WHERE order_id=$1", id); err != nil {
 			return errors.Join(failures, err)
 		}
 		// Duplicate worker delivery is safe under Credit's release contract.
 		if err = a.credit.Release(ctx, id); err != nil {
-			failures = errors.Join(failures, err)
+			_, diagnostic := a.db.Exec(ctx, "UPDATE order_refunds SET error_category=$2 WHERE order_id=$1", id, financialCategory(err))
+			failures = errors.Join(failures, err, diagnostic)
 			continue
 		}
 		_, err = a.db.Exec(ctx, "DELETE FROM order_refunds WHERE order_id=$1", id)

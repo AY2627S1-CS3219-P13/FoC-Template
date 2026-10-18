@@ -32,6 +32,7 @@ func TestPublicationRetryRestartAndConcurrentPublishers(t *testing.T) {
 	if _, err := a.db.Exec(ctx, "DROP TRIGGER fail_publication ON order_publications"); err != nil {
 		t.Fatal(err)
 	}
+	workflowSQL(t, a, "UPDATE workflow_retries SET next_attempt_at='-infinity'")
 	// Reconstruct the app: publication is recovered from SQL, not memory.
 	restarted := New(a.db, a.cfg, a.log)
 	var wg sync.WaitGroup
@@ -80,6 +81,11 @@ func TestPublicationCursorDoesNotSkipLateCommit(t *testing.T) {
 	if err = a.PublishEvents(ctx); err != nil {
 		t.Fatal(err)
 	}
+	consume(t, a, timerConsumer)
+	consume(t, a, settlementConsumer)
+	if workflowCount(t, a, "SELECT count(*) FROM workflow_receipts WHERE event_id=$1", late.ID+":1") != 0 {
+		t.Fatal("uncommitted event was consumed")
+	}
 	before, err := a.publicationBatch(ctx, 0, courierUser)
 	if err != nil || len(before) != 2 {
 		t.Fatal("published an uncommitted creation", before, err)
@@ -89,6 +95,11 @@ func TestPublicationCursorDoesNotSkipLateCommit(t *testing.T) {
 	}
 	if err = a.PublishEvents(ctx); err != nil {
 		t.Fatal(err)
+	}
+	consume(t, a, timerConsumer)
+	consume(t, a, settlementConsumer)
+	if workflowCount(t, a, "SELECT count(*) FROM workflow_receipts WHERE event_id=$1", late.ID+":1") != 3 {
+		t.Fatal("late commit skipped by a consumer")
 	}
 	after, err := a.publicationBatch(ctx, before[1].position, courierUser)
 	if err != nil || len(after) != 1 || after[0].event.OrderID != late.ID {
@@ -191,14 +202,25 @@ func TestCreationStreamAuthorizationFilteringAndReplay(t *testing.T) {
 					break
 				}
 				var event orderEvent
-				if frame.kind != "OrderCreated" || json.Unmarshal([]byte(frame.data), &event) != nil || event.OrderID != eligible.ID || event.Version != 1 || event.SchemaVersion != 1 {
-					t.Fatal("wrong or unauthorized event", frame)
+				if json.Unmarshal([]byte(frame.data), &event) != nil || event.SchemaVersion != 1 {
+					t.Fatal(frame)
+				}
+				if frame.kind == "OrderCreated" {
+					if token != "courier" || event.OrderID != eligible.ID || event.Version != 1 {
+						t.Fatal("wrong creation audience", frame)
+					}
+				} else if frame.kind == "OrderStatusChanged" {
+					if (event.OrderID != accepted.ID && event.OrderID != cancelled.ID) || event.Version != 2 {
+						t.Fatal("wrong removal invalidation", frame)
+					}
+				} else {
+					t.Fatal("unexpected public event", frame)
 				}
 				count++
 			}
-			want := 1
+			want := 3
 			if token == "requester" {
-				want = 0
+				want = 2
 			}
 			if count != want {
 				t.Fatal("wrong audience", count)

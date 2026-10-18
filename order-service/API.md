@@ -12,8 +12,8 @@ Public base: `http://localhost:8084` when run standalone. Browser requests use t
 | `GET /api/v1/orders/places?page=1` | 200 | Active suppliers plus campus locations for selectors |
 | `GET /api/v1/orders?scope=mine&page=1` | 200 | Paginated mine or courier history; unpaginated open view |
 | `GET /api/v1/orders?scope=disputes&page=1` | 200 | Admin-only dispute queue |
-| `GET /api/v1/orders/stream` | 200 | Authenticated SSE feed of other users' new open errands |
-| `GET /api/v1/orders/publication-status` | 200 | Admin-only publication backlog monitoring |
+| `GET /api/v1/orders/stream` | 200 | Authenticated creation and eligible lifecycle SSE invalidations |
+| `GET /api/v1/orders/publication-status` | 200 | Admin-only publication/workflow backlog monitoring |
 | `GET /api/v1/orders/{id}` | 200 | Authorized detail snapshot |
 | `POST /api/v1/orders/{id}/refresh` | 200 | Reconcile current Supplier details/cancellation |
 | `POST /api/v1/orders/{id}/actions` | 200; 202 for pending confirmation | Authorized courier, requester and dispute-resolution actions |
@@ -77,19 +77,19 @@ Every data route validates the current session through User. Mine/courier listin
 
 Mine/courier/dispute snapshots reconcile every displayed entry against Supplier
 using the current session, with per-request lookup reuse. Renames update details;
-inactivity/deletion cancels only open/accepted/picked-up entries and queues one
-refund. Protected statuses retain their last known details for missing places.
+inactivity/deletion cancels only open/accepted/picked-up entries and records durable
+refund intent. Protected statuses retain their last known details for missing places.
 Catalogue outages return 503 rather than a falsely synchronized list. History
 on other pages is not refreshed. A dispute resolved concurrently is omitted
 from the admin snapshot.
 
-`scope=open` returns all eligible orders as `{orders: [], hasMore: false}` without pagination (`page` is ignored). Sort with `sort=expiry` (default) or `sort=credits` (highest first); ties use expiry, creation time ascending, then ID. Unsupported sort values return `400 invalid_sort`. Each snapshot refreshes every listed order’s places using the current session, sharing lookups only within that request. Inactive/deleted places remove orders and queue refunds; Supplier outages fail the snapshot with 503.
+`scope=open` returns all eligible orders as `{orders: [], hasMore: false}` without pagination (`page` is ignored). Sort with `sort=expiry` (default) or `sort=credits` (highest first); ties use expiry, creation time ascending, then ID. Unsupported sort values return `400 invalid_sort`. Each snapshot refreshes every listed order’s places using the current session, sharing lookups only within that request. Inactive/deleted places remove orders and record refund-intent events; Supplier outages fail the snapshot with 503.
 
 An open order is readable by authenticated users. Administrators can also inspect disputed orders and their events. Otherwise only its requester or assigned courier may read it, its events or refresh it; other users receive the same `404 order_not_found` as an unknown ID. No arbitrary requester/courier IDs are accepted from the browser. Reads do not contact Credit.
 
 Places return `{places: [Place], hasMore: boolean}`; Supplier pages are 100 records, and campus records appear on page 1. Fetch successive pages until `hasMore` is false. Each place retains its entity type and record ID. A failed/malformed catalogue response returns 503, not an empty catalogue.
 
-Refresh accepts `{}`. It uses the current session to check both selected records through Supplier, then commits changed details, an incremented order version and an event together. Confirmed disappearance/inactivity cancels open/accepted/picked-up orders and commits a durable Credit release intent; no cancellation occurs on Supplier 503/malformed responses. The response may include `cancellationReason`, which describes the queued refund, not completed settlement. A worker retries releases independently. Refresh never changes delivered/dispute/terminal status; active renamed/relocated places may still update those details. Failed refresh preserves the last committed snapshot.
+Refresh accepts `{}`. It uses the current session to check both selected records through Supplier, then commits changed details, an incremented order version and an event together. Confirmed disappearance/inactivity cancels open/accepted/picked-up orders and commits a durable Credit release intent; no cancellation occurs on Supplier 503/malformed responses. The response may include `cancellationReason`, which describes the pending refund, not completed settlement. A worker retries releases independently. Refresh never changes delivered/dispute/terminal status; active renamed/relocated places may still update those details. Failed refresh preserves the last committed snapshot.
 
 The recovery worker also reconciles pre-delivery orders through Supplier’s private service-authenticated catalogue. It never stores or reuses browser credentials. Displayed lists poll independently every two seconds while visible, including when the session UI check is slow. List reads and explicit detail refresh have a two-second server budget including authentication and database waits; deadline failures return `503 snapshot_timeout`. The browser abandons refreshes after 2.5 seconds. Failed, offline or overdue snapshots display “List is not updated” and disable actions until synchronization succeeds. Freshness is measured from the request start, never the arrival time of a delayed response; the 500ms watchdog marks a snapshot stale at age 4.5 seconds (by five seconds with normal foreground scheduling).
 
@@ -182,8 +182,8 @@ acceptance then immediate expiry. Admitted disputes prevent final completion
 while they authenticate, beyond the existing one-second arbitration interval.
 A dispute arriving after final completion cannot reopen it.
 
-Completion uses a separate transaction per order. It prepares status, event and
-payout writes while admission remains open, then checks admissions under the
+Completion uses a separate transaction per order. It prepares status and event
+writes while admission remains open, then checks admissions under the
 gate immediately before commit. Any live admission registered during those
 writes vetoes the entire speculative transaction. Thus a valid overlapping
 dispute still wins when completion's database writes stall or its own validation
@@ -202,8 +202,10 @@ background command queue: after a crash, no saved command is executed. Deadlines
 are not reset, and overdue lifecycle work resumes when the stale admission
 expires. Retry the same action to reconcile an uncertain result.
 
-Completion and its durable payout job commit together. Cancelled, expired and not
-completed outcomes instead commit a release job. The financial worker retries
+Completion and its actionable event commit together. Cancelled, expired and not
+completed outcomes instead commit a release-intent event. The independent
+settlement consumer atomically inserts the existing financial job and its own
+receipt later; committed intent can precede queue materialization. The financial worker retries
 Credit's existing idempotent endpoints with the same order ID/courier after failure
 or lost responses; only Credit changes balances. A completed status does not claim
 that payout has already finished. Delivery and dispute perform no settlement.
@@ -220,14 +222,19 @@ Events return `{events: [{eventId, orderId, orderVersion, type, schemaVersion, c
 
 Order and event insertions commit atomically. Failure to write the creation event rolls back the order and triggers reservation cleanup. Repeated commands do not insert duplicate events. A restarted consumer can replay this durable journal, deduplicate by `eventId`, and fetch an authoritative detail snapshot; never replace a newer snapshot with an older `version`. Existing orders predating migration 003 may have no version-1 event, so always start/reconnect with a snapshot. Status/detail events remain available through this per-order journal. Creation events also use the live publication contract below.
 
-### Creation event publication
+### Lifecycle event publication
 
 `GET /api/v1/orders/stream` uses the current session cookie and responds with
 `text/event-stream`, `Cache-Control: no-store, no-transform` and
 `X-Accel-Buffering: no`. User validation runs at connection time and before every
 batch (normally once per second); invalid/unavailable authentication or changed
-identity stops delivery. The stream only announces other requesters' currently
-open, unexpired orders. Eligibility is checked when reading the batch; a later
+identity stops delivery. Creation announcements reach other requesters' currently
+open, unexpired orders. Status/detail invalidations reach the current requester,
+assigned courier, and admins while the order is currently disputed. Unrelated
+viewers may receive metadata-only updates while an order is open or removals
+from its open state; later private progress is filtered. Admins lose private
+dispute visibility after resolution unless they are a participant. Eligibility
+is checked when reading the batch; a later
 transition can still occur before the browser receives it, so fetch a snapshot
 before displaying or acting on it. No item contents, identity details or secrets
 are broadcast.
@@ -243,7 +250,7 @@ The SSE `id` is a decimal publication position, separate from `eventId` and
 after that position. A nonnumeric, negative or future cursor returns
 `400 invalid_event_cursor`; discard it and open a fresh connection/snapshot.
 Publication positions are assigned under a shared database row lock and committed
-with each batch, rather than allocated at creation time. Concurrent publishers,
+with each effect and receipt, rather than allocated at creation time. Concurrent publishers,
 late commits, rollback and restart cannot leave an acknowledged cursor ahead of
 an unpublished earlier allocation. Each event is published once in the feed;
 network replay may deliver it more than once, so consumers must deduplicate.
@@ -259,14 +266,17 @@ and fit the normal request/write deadlines. Errors after streaming starts close
 the connection instead of appending a JSON error response.
 
 The independent publisher runs at startup and every second, in batches of at most
-100 creations. It reads only committed journal entries; retrying publication
+100 events. It reads only committed journal entries; retrying publication
 does not create another order or reserve credits again. No browser connection is
 required for publication. A database failure leaves entries pending for retry.
 `GET /api/v1/orders/publication-status` requires an admin and returns
-`{ "published": 42, "pending": 0, "oldestPendingAt": null }`. A published event
+the existing `published`, `pending`, `oldestPendingAt` fields plus the workflow
+section documented below. A published event
 is durably available, not necessarily read by any particular user. No retention
 pruning, external broker or per-user inbox is configured. The browser keeps
-snapshot polling for status changes and Supplier refresh alongside creation SSE.
+snapshot polling for status changes and Supplier refresh alongside lifecycle SSE.
+`OrderStatusChanged` and `OrderDetailsChanged` listeners coalesce authoritative
+snapshot refreshes. Notifications never directly overwrite cached order state.
 
 ### Add item
 
@@ -276,7 +286,53 @@ Request fields are `existingItems`, `item`, and optional `decision`. When the ne
 
 Errors are `{"error":{"code":"...","message":"..."}}`. Input errors use 400, invalid sessions 401, foreign/missing mutation origins 403, wallet/idempotency conflicts 409, the 1 MiB transport limit 413, unsupported JSON media 415, unexpected errors 500, and dependency outages 503. `wallet_not_ready`, `insufficient_credits`, `auth_unavailable`, `places_unavailable`, and `credit_unavailable` distinguish the principal retry/failure cases. Malformed dependency responses fail closed. No success is returned merely because Credit returned a malformed HTTP 200.
 
-Automatic Supplier reconciliation uses authenticated internal catalogue reads on Supplier’s existing port 8080, without a browser. A confirmed inactive/deleted place cancels open/accepted/picked-up orders and queues a refund atomically with status/events. Admission and version guards protect competing transitions. Dependency errors leave orders unchanged for a later sweep. Refunds retry independently and may complete after cancellation.
+Automatic Supplier reconciliation uses authenticated internal catalogue reads on Supplier’s existing port 8080, without a browser. A confirmed inactive/deleted place cancels open/accepted/picked-up orders and records refund intent atomically in the cancellation event. Admission and version guards protect competing transitions. Dependency errors leave orders unchanged for a later sweep. Refunds retry independently and may complete after cancellation.
 If persistence fails after reservation, a definitive `400 invalid_expiry` is returned only after cleanup is confirmed. A failed refund returns `503 creation_cleanup_pending`; keep the same idempotency key and retry it. The durable worker continues cleanup after the request ends. A successful refund restores reserved credits exactly once.
 
 An omitted session-cookie setting derives its name from the application origin: `foc_session` for HTTP and `__Host-foc_session` for HTTPS. The root stack shares User’s origin.
+
+### Internal lifecycle processing and diagnostics
+
+The public journal remains schema 1 with the same three generic event types.
+Private `domain_type`, `domain_schema_version` and `domain_payload` are nullable
+only for legacy events. New events carry schema 1 with explicit nullable
+`previousStatus`, `courierId`, `deliveredAt`, `completionRequestedAt` and
+`cancellationReason`, plus `status`, `requesterId`, `expiresAt`. Their envelope
+uses the journal's persisted `created_at` as occurrence time and the existing
+`<orderId>:<version>` identity. No extra journal row is inserted per version.
+Items, credentials and financial amounts are excluded. Private payloads never
+appear in public journal or SSE responses.
+
+| Private domain type | Additional durable effect |
+| --- | --- |
+| OrderCreated, OrderAccepted, OrderPickedUp | Original expiry schedule |
+| OrderDelivered | Replace expiry with original delivery completion deadline |
+| OrderCompletionRequested | Advance completion using persisted confirmation time |
+| OrderDisputed | Remove timers; keep escrow reserved |
+| OrderCompleted | Remove timers; materialize payout to recorded courier |
+| OrderCancelled, OrderExpired, OrderNotCompleted | Remove timers; materialize refund |
+| OrderDetailsChanged | Preserve applicable deadline and advance projection version |
+
+`workflow-timers`, `workflow-settlement` and `workflow-publication` process
+missing receipts in ascending order version per consumer/order. Their effects
+and `(consumer_name,event_id)` receipt commit together; retry failure does not
+acknowledge an event. Retries retain attempts, next eligibility and sanitized
+`invalid_domain_event`/`effect_failed` categories, with backoff capped at 60s.
+Legacy null-domain rows are not consumed. Financial job failures retain
+`credit_conflict` or `credit_unavailable` categories and remain pending.
+
+The existing admin status response preserves `published`, `pending` and
+`oldestPendingAt` for the publication feed, now covering lifecycle publication.
+It adds a `workflow` object with `consumers` (each has `consumer`, `pending`,
+`failed`, `oldestPendingAt`), `timers`, `dueTimers`, `overdueTimers`,
+`failedTimers`, `pendingRefunds`, `pendingPayouts`, `failedRefunds`,
+`failedPayouts` and `legacyUninitialized`. Due and overdue count schedules at or
+before the current clock boundary. A failure count indicates retained work;
+failed financial jobs are also included in pending counts. Monitoring conveys
+lag and investigation needs, never a promise that credits already moved.
+
+At-least-once retries depend on recovery of the database, workers and dependencies.
+Credit owns duplicate-safe financial effects. No unconditional completion timing
+or exactly-once transport guarantee is made. See README for the stop-old-instances
+upgrade procedure and resumable legacy bootstrap; no new public replay endpoint
+or additional configuration is introduced.

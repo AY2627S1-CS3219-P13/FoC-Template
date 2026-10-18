@@ -112,7 +112,7 @@ func TestRestartRetriesLostReleaseResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	restarted := New(app.db, app.cfg, app.log)
-	if err := restarted.Recover(context.Background()); err != nil {
+	if err := recoverForTest(restarted, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	assertFinancialResult(t, app, f, "lost-release", "abandoned", 0, 100)
@@ -165,14 +165,14 @@ func TestRecoverySkipsActiveCreationAndNeverRefundsSavedOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	err := app.Recover(ctx)
+	err := recoverForTest(app, ctx)
 	cancel()
 	close(proceed)
 	code := <-result
 	if err != nil || code != 201 {
 		t.Fatalf("recovery=%v create=%d", err, code)
 	}
-	if err := app.Recover(context.Background()); err != nil {
+	if err := recoverForTest(app, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	assertFinancialResult(t, app, f, "active", "completed", 1, 70)

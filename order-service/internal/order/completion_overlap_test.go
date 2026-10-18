@@ -26,15 +26,15 @@ func TestDisputeDuringCompletionWritesVetoesDecisionAcrossReplicas(t *testing.T)
 				t.Fatal(err)
 			}
 			defer rollback(blocker)
-			// Pause after the speculative status/event write, before payout insert.
-			if _, err = blocker.Exec(ctx, "LOCK TABLE order_payouts IN ACCESS EXCLUSIVE MODE"); err != nil {
+			// Pause the speculative completion domain-event write, before the final guard.
+			if _, err = blocker.Exec(ctx, "LOCK TABLE order_events IN SHARE MODE"); err != nil {
 				t.Fatal(err)
 			}
 			done := make(chan error, 1)
-			go func() { done <- a.Advance(ctx) }()
+			go func() { done <- advanceForTest(a, ctx) }()
 			for {
 				var waiting bool
-				if err = a.db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_locks WHERE relation='order_payouts'::regclass AND NOT granted)").Scan(&waiting); err != nil {
+				if err = a.db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_locks WHERE relation='order_events'::regclass AND NOT granted)").Scan(&waiting); err != nil {
 					t.Fatal(err)
 				}
 				if waiting {
@@ -42,7 +42,7 @@ func TestDisputeDuringCompletionWritesVetoesDecisionAcrossReplicas(t *testing.T)
 				}
 				select {
 				case <-ctx.Done():
-					t.Fatal("completion never reached payout write")
+					t.Fatal("completion never reached domain-event write")
 				case <-time.After(10 * time.Millisecond):
 				}
 			}
@@ -59,15 +59,26 @@ func TestDisputeDuringCompletionWritesVetoesDecisionAcrossReplicas(t *testing.T)
 			if readStored(t, a, o.ID).Status != "delivered" {
 				t.Fatal("speculative completion escaped rollback")
 			}
+			var retained int
+			if err = a.db.QueryRow(ctx, "SELECT count(*) FROM workflow_timers WHERE order_id=$1", o.ID).Scan(&retained); err != nil || retained != 1 {
+				t.Fatal("veto consumed retryable timer", retained, err)
+			}
 			// Authentication may outlast the old one-second overlap interval.
 			time.Sleep(1100 * time.Millisecond)
-			if err = a.Advance(ctx); err != nil {
+			if err = advanceForTest(a, ctx); err != nil {
 				t.Fatal(err)
 			}
 			finish()
 			awaitCode(t, result, 200)
-			if err = a.Recover(ctx); err != nil {
+			if err = recoverForTest(a, ctx); err != nil {
 				t.Fatal(err)
+			}
+			if err = a.ConsumeWorkflow(ctx, timerConsumer); err != nil {
+				t.Fatal(err)
+			}
+			var timers int
+			if err = a.db.QueryRow(ctx, "SELECT count(*) FROM workflow_timers WHERE order_id=$1", o.ID).Scan(&timers); err != nil || timers != 0 {
+				t.Fatal("dispute retained completion timer", timers, err)
 			}
 			stored := readStored(t, a, o.ID)
 			var events, payouts int
