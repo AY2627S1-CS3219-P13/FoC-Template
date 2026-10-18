@@ -466,7 +466,7 @@ func TestRecoveryReleasesStaleAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = app.Recover(context.Background()); err != nil {
+	if err = recoverForTest(app, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	fakes.mu.Lock()

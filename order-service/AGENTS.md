@@ -3,22 +3,21 @@
 ## Scope and current status
 
 Order Service owns the lifecycle of an errand: creation, open-request listings,
-acceptance and courier assignment, pickup, completion, cancellation, and expiry
-before acceptance. User owns identity; Supplier owns the campus catalogue;
+acceptance and courier assignment, pickup, completion, cancellation, and pre-delivery expiry. User owns identity; Supplier owns the campus catalogue;
 Credit owns wallets, escrow and credit history.
 
 This folder now contains a Go application, embedded UI, numbered migrations,
 isolated backend/browser tests, environment initializer and standalone Compose
-setup. Read the current audit at the top of `VALIDATION.md` for implemented and
-unfinished requirements; historical sections describe earlier checkouts.
-Root `../compose.yaml` and `../.github/workflows/ci.yml` still do not define Order
-or `order-tests`. Use the service-local commands in `README.md` for current runs.
+setup. Read `README.md` for operation and recovery behavior and `API.md` for
+current service contracts.
+Root Compose and CI include Order and its test profiles. Use the service-local
+commands in `README.md` for isolated runs.
 
 Read `../AGENTS.md` first. Keep changes inside `order-service/` unless explicitly
 asked to change shared wiring or another service. The root Compose filename is
 `compose.yaml`. Preserve existing work and read another service's `AGENTS.md`
-but DO NOT change implementation of that service. Use `BACKLOG.md` and requirements supplied in the
-task for feature rules; do not invent status names, expiry durations,
+but DO NOT change implementation of that service. Use `API.md`, `README.md` and
+requirements supplied in the task for feature rules; do not invent status names, expiry durations,
 cancellation penalties or new API contracts beyond those requirements.
 
 ## Context to read before implementation
@@ -33,10 +32,11 @@ cancellation penalties or new API contracts beyond those requirements.
   semantics. Its `compose.yaml`, `Dockerfile`, `scripts/check.sh` and
   `internal/credit/helpers_test.go` provide the standalone service/test pattern.
 - `../compose.yaml`, `../gateway/default.conf` and `../.github/workflows/ci.yml`:
-  existing ports, routing, dependencies and container checks. Existing smoke
-  scripts cover implemented services; they do not verify an Order lifecycle.
+  existing ports, routing, dependencies and container checks. The shared smoke
+  scripts include an Order lifecycle; isolated tests remain mandatory.
 
-Existing dependencies use HTTP/JSON. Creation events use a durable PostgreSQL
+Existing dependencies use HTTP/JSON. Lifecycle domain events drive independent
+timer, settlement and publication consumers. Events use a durable PostgreSQL
 publication feed and authenticated browser SSE, documented in `API.md`. Do not
 assume gRPC, Redis, RabbitMQ or an external broker exists.
 
@@ -105,7 +105,7 @@ assume gRPC, Redis, RabbitMQ or an external broker exists.
   cached authentication; preserve fencing, cleanup and cross-replica tests when
   adding new state transitions.
   Completion alone prepares speculative writes before its final guard, in one
-  transaction per order; a failed guard must roll back status, event and payout
+  transaction per order; a failed guard must roll back status, event and timer acknowledgement
   together. Never hold the admission gate through those preparatory writes.
   List snapshots resolve distinct places before row locks with bounded parallelism
   and version fencing; keep their two-second end-to-end request budget.
@@ -190,3 +190,32 @@ isolated automated suite and document both in README/API as they are added.
 Changes to shared wiring require explicit scope and the root smoke test in
 addition to affected service checks. Root CI currently checks only User,
 Supplier and Credit backends; passing it is not evidence that Order was tested.
+
+## Event-driven workflow invariants
+
+Migration 009 adds private schema-1 domain data alongside the unchanged public
+journal. Every committed version must carry one event; commands and creation
+reservation remain synchronous. `workflow-timers`, `workflow-settlement` and
+`workflow-publication` each commit effects and their own receipts atomically.
+Missing-receipt discovery, per-consumer/order locks and retry records must be
+preserved; sequence watermarks cannot safely replace discovery.
+
+Normal lifecycle writers never insert refund/payout jobs: the terminal event is
+settlement intent, and the settlement consumer materializes the existing queues.
+Creation cleanup remains independent. Financial HTTP runs outside event/timer
+transactions. `Recover` handles financial/creation/Supplier work; it deliberately
+does not invoke consumers or autonomous order scans. `Advance` executes durable
+timers only. Command-time deadline enforcement remains synchronous.
+
+Timer projections retain version tombstones after timers are deleted. Preserve
+original expiry/delivery/confirmation deadlines, authoritative state rechecks,
+nonblocking work selection and the final completion admission guard. Completion
+overlap tests stall the domain-event write; they must continue to prove rollback
+of the event/status, preservation of retryable timer work and no eventual payout.
+Tests drive independent workers explicitly through their test harness.
+
+Stop old instances before migrating; mixed writers are unsupported. Run resumable
+legacy bootstrap before ordinary workers, without reemitting legacy creation or
+inventing historical payloads/courier identities. Never prune unprocessed work.
+See `API.md` and `README.md` for visibility, diagnostics and verification commands;
+keep the backend and browser regression suites aligned with those contracts.

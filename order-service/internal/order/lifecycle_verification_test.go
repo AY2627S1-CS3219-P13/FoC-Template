@@ -30,7 +30,7 @@ func TestVerificationLostPayoutRestartAndOldOrderIsolation(t *testing.T) {
 	a.now = func() time.Time { return time.Now().Add(2 * time.Second) }
 	real := a.credit
 	a.credit = lostPayout{real}
-	if err := a.Recover(ctx); err == nil {
+	if err := recoverForTest(a, ctx); err == nil {
 		t.Fatal("lost payout not retained")
 	}
 	if readStored(t, a, old.ID).Status != "completed" {
@@ -43,7 +43,7 @@ func TestVerificationLostPayoutRestartAndOldOrderIsolation(t *testing.T) {
 	restarted := New(a.db, a.cfg, a.log)
 	restarted.auth = actorAuth{}
 	for range 2 {
-		if err := restarted.Recover(ctx); err != nil {
+		if err := recoverForTest(restarted, ctx); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -84,7 +84,7 @@ func TestVerificationConcurrentDisputeAndConfirmation(t *testing.T) {
 	close(start)
 	wg.Wait()
 	a.now = func() time.Time { return time.Now().Add(time.Hour) }
-	if err := a.Recover(context.Background()); err != nil {
+	if err := recoverForTest(a, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if readStored(t, a, o.ID).Status != "dispute" {
@@ -104,7 +104,7 @@ func TestVerificationFinalExpiryCannotBeReopened(t *testing.T) {
 	mustAction(t, a, o.ID, "courier", "accept", "accepted")
 	mustAction(t, a, o.ID, "courier", "pick_up", "picked up")
 	a.now = func() time.Time { return o.ExpiresAt }
-	if err := a.Advance(context.Background()); err != nil {
+	if err := advanceForTest(a, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	a.now = func() time.Time { return o.ExpiresAt.Add(-time.Second) }
@@ -146,6 +146,7 @@ func TestVerificationExpiryWorkerCannotOvertakeDelivery(t *testing.T) {
 	o := createdForTest(t, a, "verify-worker")
 	mustAction(t, a, o.ID, "courier", "accept", "accepted")
 	mustAction(t, a, o.ID, "courier", "pick_up", "picked up")
+	consume(t, a, timerConsumer)
 	var mu sync.Mutex
 	now := o.ExpiresAt.Add(-time.Second)
 	a.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
@@ -166,7 +167,7 @@ func TestVerificationExpiryWorkerCannotOvertakeDelivery(t *testing.T) {
 	mu.Lock()
 	now = o.ExpiresAt.Add(time.Second)
 	mu.Unlock()
-	err := a.Advance(context.Background())
+	err := advanceForTest(a, context.Background())
 	close(finish)
 	if code := <-result; code != 200 {
 		t.Fatal("delivery lost", code)

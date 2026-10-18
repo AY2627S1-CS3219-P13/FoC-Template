@@ -28,7 +28,7 @@ func TestBrowserFixture(t *testing.T) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				_ = a.Advance(ctx)
+				_ = advanceForTest(a, ctx)
 				_ = a.PublishEvents(ctx)
 			}
 		}
@@ -45,7 +45,7 @@ func TestBrowserFixture(t *testing.T) {
 			return
 		}
 		if r.Method == "POST" && r.URL.Path == "/__test/reset" {
-			if _, err := a.db.Exec(r.Context(), "TRUNCATE order_admissions,order_publications,order_payouts,order_actions,order_refunds,order_events,orders,creation_attempts"); err != nil {
+			if _, err := a.db.Exec(r.Context(), "TRUNCATE workflow_receipts,workflow_retries,workflow_timers,workflow_projections,order_admissions,order_publications,order_payouts,order_actions,order_refunds,order_events,orders,creation_attempts"); err != nil {
 				w.WriteHeader(500)
 				return
 			}

@@ -91,6 +91,10 @@ func TestOpenSnapshotAllRowsSortingAndSupplierChanges(t *testing.T) {
 	if len(openForTest(t, a, "", "courier")) != 0 {
 		t.Fatal("deactivated entries remain")
 	}
+	assertSettlementIntents(t, a)
+	if err := a.ConsumeWorkflow(ctx, settlementConsumer); err != nil {
+		t.Fatal(err)
+	}
 	var refunds int
 	if err := a.db.QueryRow(ctx, "SELECT count(*) FROM order_refunds").Scan(&refunds); err != nil || refunds != 25 {
 		t.Fatal(refunds, err)
@@ -172,10 +176,10 @@ func TestAcceptanceReceiptDeadlineAndRecovery(t *testing.T) {
 			} else if got.Code != 409 || readStored(t, a, o.ID).CourierID != nil {
 				t.Fatal("late acceptance assigned", got.Code)
 			}
-			if err := a.Recover(context.Background()); err != nil {
+			if err := recoverForTest(a, context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if err := a.Recover(context.Background()); err != nil {
+			if err := recoverForTest(a, context.Background()); err != nil {
 				t.Fatal(err)
 			}
 			if readStored(t, a, o.ID).Status != "expired" {

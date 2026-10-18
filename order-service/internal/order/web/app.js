@@ -265,6 +265,25 @@ function connectEvents() {
       void loadList();
     }
   });
+  let refreshQueued = false;
+  const invalidate = (event) => {
+    if (!current()) return;
+    const position = BigInt(event.lastEventId);
+    if (position <= lastEventPosition) return;
+    lastEventPosition = position;
+    if (refreshQueued) return;
+    refreshQueued = true;
+    // Coalesce a batch into one authoritative refresh. Existing snapshot
+    // generation/version and request-age fences still decide what may render.
+    queueMicrotask(() => {
+      refreshQueued = false;
+      if (!current()) return;
+      listGeneration++;
+      void loadList();
+    });
+  };
+  source.addEventListener("OrderStatusChanged", invalidate);
+  source.addEventListener("OrderDetailsChanged", invalidate);
   source.addEventListener("session_invalidated", () => {
     if (!current()) return;
     source.close();

@@ -53,7 +53,14 @@ func run(log *slog.Logger) error {
 	}
 	defer admissions.Close()
 	app := order.NewWithAdmissionPool(db, admissions, cfg, log)
+	// Old instances must be stopped before this resumable upgrade pass.
+	if err := app.BootstrapWorkflow(ctx); err != nil {
+		return errors.New("workflow bootstrap failed; legacy repair remains pending")
+	}
 	go recoveryLoop(ctx, app, cfg.RecoveryInterval, log)
+	for _, consumer := range []string{"workflow-timers", "workflow-settlement"} {
+		go workflowLoop(ctx, app, consumer, log)
+	}
 	go lifecycleLoop(ctx, app, log)
 	go publicationLoop(ctx, app, log)
 	server := &http.Server{Addr: ":8080", Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second}
@@ -79,7 +86,7 @@ func publicationLoop(ctx context.Context, app *order.App, log *slog.Logger) {
 	for {
 		work, cancel := context.WithTimeout(ctx, 5*time.Second)
 		if err := app.PublishEvents(work); err != nil {
-			log.Warn("creation event publication pending; retrying")
+			log.Warn("event publication pending; retrying")
 		}
 		cancel()
 		select {
@@ -114,6 +121,23 @@ func lifecycleLoop(ctx context.Context, app *order.App, log *slog.Logger) {
 		work, cancel := context.WithTimeout(ctx, 5*time.Second)
 		if err := app.Advance(work); err != nil {
 			log.Warn("lifecycle recovery failed")
+		}
+		cancel()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func workflowLoop(ctx context.Context, app *order.App, consumer string, log *slog.Logger) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		work, cancel := context.WithTimeout(ctx, 5*time.Second)
+		if err := app.ConsumeWorkflow(work, consumer); err != nil {
+			log.Warn("workflow consumption pending; retrying", "consumer", consumer)
 		}
 		cancel()
 		select {

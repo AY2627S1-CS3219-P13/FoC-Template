@@ -42,9 +42,13 @@ func (f resolverFunc) Resolve(ctx context.Context, ref PlaceRef, token string) (
 	return f(ctx, ref, token)
 }
 
-func createdForTest(t *testing.T, a *App, key string) Order {
+func createdForTest(t *testing.T, a *App, key string, expiry ...time.Time) Order {
 	t.Helper()
-	response := request(t, a, "POST", "/api/v1/orders", "requester", key, validCreateBody(10))
+	bodyRequest := validCreateBody(10)
+	if len(expiry) > 0 {
+		bodyRequest["expiresAt"] = expiry[0].Format(time.RFC3339Nano)
+	}
+	response := request(t, a, "POST", "/api/v1/orders", "requester", key, bodyRequest)
 	if response.Code != 201 {
 		t.Fatalf("create: %d %s", response.Code, response.Body.String())
 	}
@@ -151,10 +155,10 @@ func TestSupplierChangeCancellationAndRefund(t *testing.T) {
 			if updated.CourierID == nil || *updated.CourierID != courierUser {
 				t.Fatal("lost courier history")
 			}
-			if err = a.Recover(context.Background()); err != nil {
+			if err = recoverForTest(a, context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if err = a.Recover(context.Background()); err != nil {
+			if err = recoverForTest(a, context.Background()); err != nil {
 				t.Fatal(err)
 			}
 			f.mu.Lock()
@@ -205,7 +209,7 @@ func TestRenameRelocationOutageAndRefundRetry(t *testing.T) {
 	}
 	credit := a.credit
 	a.credit = unavailableRelease{credit}
-	if err := a.Recover(context.Background()); err == nil {
+	if err := recoverForTest(a, context.Background()); err == nil {
 		t.Fatal("expected pending refund")
 	}
 	var count int
@@ -214,7 +218,7 @@ func TestRenameRelocationOutageAndRefundRetry(t *testing.T) {
 		t.Fatal("lost durable refund")
 	}
 	a.credit = credit
-	if err := a.Recover(context.Background()); err != nil {
+	if err := recoverForTest(a, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	_ = a.db.QueryRow(context.Background(), "SELECT count(*) FROM order_refunds").Scan(&count)

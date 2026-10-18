@@ -92,9 +92,6 @@ func (a *App) reconcile(ctx context.Context, conn *pgxpool.Conn, id string) erro
 }
 
 func (a *App) Recover(ctx context.Context) error {
-	if err := a.Advance(ctx); err != nil {
-		return err
-	}
 	// Each queue gets the worker's deadline concurrently. A slow refund or
 	// uncertain reservation must not consume the entire payout retry budget.
 	jobs := []func(context.Context) error{a.recoverCreations, a.refundCancelled, a.payoutCompleted, a.cancelInactiveSuppliers}

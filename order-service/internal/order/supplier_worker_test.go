@@ -32,13 +32,13 @@ func TestReview03SupplierCancellationWithoutBrowserReads(t *testing.T) {
 			// Only the real worker entry points run: no list, refresh, or action request.
 			deadline := time.Now().Add(300 * time.Millisecond)
 			for time.Now().Before(deadline) {
-				if err := a.Recover(context.Background()); err != nil {
+				if err := recoverForTest(a, context.Background()); err != nil {
 					t.Fatal(err)
 				}
 				time.Sleep(100 * time.Millisecond)
 			}
 			// Cancellation and refund queues run concurrently; the next worker tick delivers the queued refund.
-			if err := a.Recover(context.Background()); err != nil {
+			if err := recoverForTest(a, context.Background()); err != nil {
 				t.Fatal(err)
 			}
 			observed := readStored(t, a, o.ID)
@@ -76,19 +76,19 @@ func TestSupplierWorkerOutageAndProtectedStates(t *testing.T) {
 			}
 			if state == "completed" {
 				assertStatus(t, actionForTest(t, a, o.ID, "requester", "confirm"), 202)
-				if err := a.Advance(context.Background()); err != nil {
+				if err := advanceForTest(a, context.Background()); err != nil {
 					t.Fatal(err)
 				}
 			}
 			before := readStored(t, a, o.ID)
 			a.backgroundCatalogue = resolverFunc(func(context.Context, PlaceRef, string) (Place, error) { return Place{}, placesUnavailable() })
-			_ = a.Recover(context.Background())
+			_ = recoverForTest(a, context.Background())
 			if readStored(t, a, o.ID).Status != before.Status {
 				t.Fatal("dependency outage changed status")
 			}
 			if state != "open" {
 				a.backgroundCatalogue = resolverFunc(func(context.Context, PlaceRef, string) (Place, error) { return Place{}, invalidPlace() })
-				_ = a.Recover(context.Background())
+				_ = recoverForTest(a, context.Background())
 				if readStored(t, a, o.ID).Status != before.Status {
 					t.Fatal("supplier change cancelled protected state")
 				}

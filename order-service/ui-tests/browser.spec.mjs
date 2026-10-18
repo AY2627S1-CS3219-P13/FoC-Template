@@ -498,3 +498,44 @@ test("dispute is visible to admins and both resolution controls are available", 
   await page.getByRole("button", { name: "Resolve as not completed", exact: true }).click();
   await expect(page.locator("#order-detail .pill")).toHaveText("not completed");
 });
+
+test("lifecycle invalidations coalesce into authoritative refreshes and retain version fences", async ({ page }) => {
+  await page.addInitScript(() => {
+    const interval = window.setInterval;
+    // Isolate event-driven refresh from the independent two-second poll.
+    window.setInterval = (fn, ms, ...args) => ms === 2000 ? 0 : interval(fn, ms, ...args);
+    window.EventSource = class extends EventTarget {
+      static CLOSED = 2;
+      readyState = 1;
+      constructor() { super(); window.__workflowEvents = this; }
+      close() { this.readyState = 2; }
+    };
+  });
+  await start(page);
+  const order = await seed(page, "workflow-browser");
+  await page.getByRole("button", { name: "My requests", exact: true }).click();
+  await expect(page.locator(".order-card .pill")).toHaveText("open");
+  await page.locator(".order-card").click();
+  let snapshots = 0;
+  await page.route("**/api/v1/orders?**", async route => { snapshots++; await route.continue(); });
+  const result = await page.request.post(`/api/v1/orders/${order.id}/actions`, {
+    headers: { Origin: new URL(page.url()).origin }, data: { action: "cancel" },
+  });
+  expect(result.status()).toBe(200);
+  await page.evaluate(() => {
+    const source = window.__workflowEvents;
+    // Metadata is intentionally insufficient to paint the new state.
+    source.dispatchEvent(new MessageEvent("OrderStatusChanged", { lastEventId: "100", data: "{}" }));
+    source.dispatchEvent(new MessageEvent("OrderDetailsChanged", { lastEventId: "101", data: "{}" }));
+  });
+  await expect(page.locator(".order-card .pill")).toHaveText("cancelled");
+  expect(snapshots).toBe(1);
+  const before = snapshots;
+  await page.evaluate(() => {
+    window.__workflowEvents.dispatchEvent(new MessageEvent("OrderStatusChanged", {
+      lastEventId: "99", data: JSON.stringify({ status: "open", orderVersion: 1 }),
+    }));
+  });
+  await expect(page.locator(".order-card .pill")).toHaveText("cancelled");
+  expect(snapshots).toBe(before);
+});

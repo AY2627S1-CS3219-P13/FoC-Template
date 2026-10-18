@@ -8,51 +8,28 @@ import (
 	"slices"
 	"strconv"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
-// PublishEvents delivers committed creation facts to the durable browser feed.
+// PublishEvents delivers committed lifecycle facts to the durable browser feed.
 // The head lock serializes publishers across replicas. A crash rolls back the
-// whole batch, so retries cannot duplicate or skip a committed publication.
+// whole event effect and receipt, so retries cannot duplicate or skip a committed publication.
 func (a *App) PublishEvents(ctx context.Context) error {
-	tx, err := a.db.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollback(tx)
+	return a.ConsumeWorkflow(ctx, publicationConsumer)
+}
+
+func publishEvent(ctx context.Context, tx pgx.Tx, id string) error {
 	var head int64
-	if err = tx.QueryRow(ctx, "SELECT position FROM order_publication_head WHERE singleton FOR UPDATE").Scan(&head); err != nil {
+	if err := tx.QueryRow(ctx, "SELECT position FROM order_publication_head WHERE singleton FOR UPDATE").Scan(&head); err != nil {
 		return err
 	}
-	rows, err := tx.Query(ctx, `SELECT e.event_id FROM order_events e
- WHERE e.event_type='OrderCreated' AND NOT EXISTS
- (SELECT 1 FROM order_publications p WHERE p.event_id=e.event_id)
- ORDER BY e.created_at,e.event_id LIMIT 100`)
-	if err != nil {
+	tag, err := tx.Exec(ctx, "INSERT INTO order_publications(position,event_id) VALUES($1,$2) ON CONFLICT(event_id) DO NOTHING", head+1, id)
+	if err != nil || tag.RowsAffected() == 0 {
 		return err
 	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id); err != nil {
-			rows.Close()
-			return err
-		}
-		ids = append(ids, id)
-	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
-		return err
-	}
-	for _, id := range ids {
-		head++
-		if _, err = tx.Exec(ctx, "INSERT INTO order_publications(position,event_id) VALUES($1,$2)", head, id); err != nil {
-			return err
-		}
-	}
-	if _, err = tx.Exec(ctx, "UPDATE order_publication_head SET position=$1 WHERE singleton", head); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	_, err = tx.Exec(ctx, "UPDATE order_publication_head SET position=$1 WHERE singleton", head+1)
+	return err
 }
 
 type publishedEvent struct {
@@ -61,12 +38,15 @@ type publishedEvent struct {
 	event    orderEvent
 }
 
-func (a *App) publicationBatch(ctx context.Context, after int64, user string) ([]publishedEvent, error) {
+func (a *App) publicationBatch(ctx context.Context, after int64, user string, admin ...bool) ([]publishedEvent, error) {
 	rows, err := a.db.Query(ctx, `SELECT p.position,
- o.requester_id<>$2 AND o.status='open' AND o.expires_at>clock_timestamp(),
+ CASE WHEN e.event_type='OrderCreated' THEN o.requester_id<>$2 AND o.status='open' AND o.expires_at>clock_timestamp()
+ ELSE o.requester_id=$2 OR o.courier_id=$2 OR ($3 AND o.status='dispute')
+ OR (o.status='open' AND o.expires_at>clock_timestamp())
+ OR e.domain_payload->>'previousStatus'='open' END,
  e.event_id,e.order_id,e.order_version,e.event_type,e.schema_version,e.created_at
  FROM order_publications p JOIN order_events e ON e.event_id=p.event_id
- JOIN orders o ON o.id=e.order_id WHERE p.position>$1 ORDER BY p.position LIMIT 100`, after, user)
+ JOIN orders o ON o.id=e.order_id WHERE p.position>$1 ORDER BY p.position LIMIT 100`, after, user, len(admin) > 0 && admin[0])
 	if err != nil {
 		return nil, err
 	}
@@ -131,13 +111,13 @@ func (a *App) streamOrders(w http.ResponseWriter, r *http.Request) error {
 			send("session_invalidated", cursor, struct{}{})
 			return nil
 		}
-		batch, err := a.publicationBatch(r.Context(), cursor, identity.UserID)
+		batch, err := a.publicationBatch(r.Context(), cursor, identity.UserID, slices.Contains(identity.Roles, "admin"))
 		if err != nil {
 			a.log.Warn("event stream unavailable")
 			return nil // Never append JSON errors to a started SSE response.
 		}
 		for _, p := range batch {
-			if p.eligible && !send("OrderCreated", p.position, p.event) {
+			if p.eligible && !send(p.event.Type, p.position, p.event) {
 				return nil
 			}
 			cursor = p.position
@@ -163,11 +143,15 @@ func (a *App) publicationStatus(w http.ResponseWriter, r *http.Request) error {
 	var oldest *time.Time
 	err := a.db.QueryRow(r.Context(), `SELECT
  (SELECT count(*) FROM order_publications),count(*),min(e.created_at)
- FROM order_events e WHERE e.event_type='OrderCreated' AND NOT EXISTS
+ FROM order_events e WHERE e.domain_type IS NOT NULL AND NOT EXISTS
  (SELECT 1 FROM order_publications p WHERE p.event_id=e.event_id)`).Scan(&published, &pending, &oldest)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"published": published, "pending": pending, "oldestPendingAt": oldest})
+	workflow, err := a.workflowStatus(r.Context())
+	if err != nil {
+		return err
+	}
+	writeJSON(w, 200, map[string]any{"published": published, "pending": pending, "oldestPendingAt": oldest, "workflow": workflow})
 	return nil
 }
