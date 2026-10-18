@@ -97,7 +97,7 @@ func (a *App) Recover(ctx context.Context) error {
 	}
 	// Each queue gets the worker's deadline concurrently. A slow refund or
 	// uncertain reservation must not consume the entire payout retry budget.
-	jobs := []func(context.Context) error{a.recoverCreations, a.refundCancelled, a.payoutCompleted}
+	jobs := []func(context.Context) error{a.recoverCreations, a.refundCancelled, a.payoutCompleted, a.cancelInactiveSuppliers}
 	failures := make([]error, len(jobs))
 	var wg sync.WaitGroup
 	for i, job := range jobs {
