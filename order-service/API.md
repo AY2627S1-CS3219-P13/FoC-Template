@@ -336,3 +336,5 @@ Credit owns duplicate-safe financial effects. No unconditional completion timing
 or exactly-once transport guarantee is made. See README for the stop-old-instances
 upgrade procedure and resumable legacy bootstrap; no new public replay endpoint
 or additional configuration is introduced.
+
+Creation reconciliation releases visible escrows or aborts missing ones through Credit’s durable `/abort` endpoint. It does not retry reservation merely to obtain a cleanup record. Terminal abandonment requires Credit confirmation that no late request can freeze funds; dependency failures keep `release_pending` retryable.

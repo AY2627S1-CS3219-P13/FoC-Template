@@ -96,3 +96,5 @@ Runs `gofmt`, `go vet`, race-enabled tests against a throwaway PostgreSQL, and a
 - `helpers_test.go`: per-test schema, a fake User Service, direct-SQL setup, and the balance-versus-history check run after every test.
 
 Root Compose shares `USER_APP_ORIGIN` with this service. When the session-cookie setting is empty, an HTTP origin selects `foc_session` and an HTTPS origin selects `__Host-foc_session`, matching User. Standalone runs may still set the cookie name explicitly. HTTPS also requires User secure-cookie and deployed SMTP/TLS settings; this change does not configure TLS termination.
+
+Uncertain creation cleanup no longer reserves funds to establish a retry record. Credit supports a durable abort by order ID: missing escrows get a tombstone, held escrows are refunded, and every late reserve is fenced under the same transaction lock. Order marks the attempt abandoned only after a successful release/abort. A lost insufficient-credit refusal needs no refund because no funds moved; it still needs the fence. Credit must be deployed with the new endpoint/migration before Order; older Credit leaves cleanup pending safely.

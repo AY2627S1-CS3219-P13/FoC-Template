@@ -52,16 +52,14 @@ func (a *App) cleanupAttempt(conn *pgxpool.Conn, id string) error {
 	return nil
 }
 
-// Caller holds the attempt lock. The absence of a Credit escrow is NOT proof
-// that a timed-out reserve failed: it may still be running. Repeating that
-// exact reservation creates/observes its durable idempotency record before
-// release; a late original request then cannot reserve again.
+// Caller holds the attempt lock. Abort records a durable fence in Credit even
+// when no escrow exists, so late requests cannot reserve after cleanup succeeds.
 func (a *App) reconcile(ctx context.Context, conn *pgxpool.Conn, id string) error {
-	var state, userID string
+	var state string
 	var amount *int64
 	var saved bool
-	err := conn.QueryRow(ctx, `SELECT state,requester_id::text,offered_credits,
-        EXISTS(SELECT 1 FROM orders WHERE id=$1) FROM creation_attempts WHERE order_id=$1`, id).Scan(&state, &userID, &amount, &saved)
+	err := conn.QueryRow(ctx, `SELECT state,offered_credits,
+        EXISTS(SELECT 1 FROM orders WHERE id=$1) FROM creation_attempts WHERE order_id=$1`, id).Scan(&state, &amount, &saved)
 	if err != nil || saved || state == "completed" || state == "abandoned" {
 		return err
 	}
@@ -73,17 +71,12 @@ func (a *App) reconcile(ctx context.Context, conn *pgxpool.Conn, id string) erro
 	if _, err = conn.Exec(ctx, "UPDATE creation_attempts SET state='release_pending',updated_at=clock_timestamp() WHERE order_id=$1", id); err != nil {
 		return err
 	}
-	// First release if the reservation is already visible. This also supports
-	// old attempts created before migration 002, which lack the reserve payload.
+	// Release visible escrows; fence missing ones independently of their payload.
 	err = a.credit.Release(ctx, id)
-	if errors.Is(err, errEscrowMissing) && amount != nil {
-		err = a.credit.Reserve(ctx, id, userID, *amount)
-		if err == nil {
-			err = a.credit.Release(ctx, id)
-		}
+	if errors.Is(err, errEscrowMissing) {
+		err = a.credit.Abort(ctx, id)
 	}
-	// A missing legacy escrow cannot be reconciled safely without its payload.
-	// Leave it visible for an operator rather than falsely declaring a refund.
+	// Abandon only after Credit confirms release or a durable abort.
 	if err != nil {
 		return err
 	}

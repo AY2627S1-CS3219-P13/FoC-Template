@@ -23,5 +23,6 @@ type placeLister interface {
 type escrowClient interface {
 	Reserve(context.Context, string, string, int64) error
 	Release(context.Context, string) error
+	Abort(context.Context, string) error
 	Payout(context.Context, string, string) error
 }
