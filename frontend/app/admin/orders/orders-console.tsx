@@ -4,22 +4,31 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { UserApiError, userApi, type User } from "@/lib/user-api";
 
+type Place = { type: string; name: string; locationName?: string; description?: string; openingHours?: string };
 type Order = {
   id: string;
   requesterId: string;
   courierId: string | null;
-  pickup: { name: string };
-  delivery: { name: string };
+  pickup: Place;
+  delivery: Place;
+  items: { name: string; quantity: number; description?: string }[];
   offeredCredits: number;
+  expiresAt: string;
   status: string;
-  createdAt: string;
+  cancellationReason?: string;
 };
+
+const sgt = (value: string) => new Intl.DateTimeFormat("en-SG", { timeZone: "Asia/Singapore", dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+const placeLabel = (p: Place) => (p.type === "supplier" ? `Supplier: ${p.name} · ${p.locationName}` : `Campus: ${p.name}`);
+const placeDetails = (p: Place) => [placeLabel(p), p.description, p.openingHours && `Hours: ${p.openingHours}`].filter(Boolean).join("\n");
+const Pill = ({ status }: { status: string }) => <span className={`pill status-${status.replaceAll(" ", "-")}`}>{status}</span>;
 
 export default function OrdersConsole({ admin }: { admin: User }) {
   const [query, setQuery] = useState("");
   const [matches, setMatches] = useState<User[] | null>(null);
   const [target, setTarget] = useState<User | null>(null);
   const [orders, setOrders] = useState<Order[] | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -31,6 +40,7 @@ export default function OrdersConsole({ admin }: { admin: User }) {
     setError("");
     setTarget(null);
     setOrders(null);
+    setSelected(null);
     try {
       setMatches(await userApi.searchUsers(query));
     } catch (e) {
@@ -49,6 +59,7 @@ export default function OrdersConsole({ admin }: { admin: User }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error?.message);
       setOrders(data.orders);
+      setSelected(data.orders[0]?.id ?? null);
       setHasMore(data.hasMore);
       setPage(next);
     } catch (e) {
@@ -57,6 +68,8 @@ export default function OrdersConsole({ admin }: { admin: User }) {
       setBusy(false);
     }
   }
+
+  const detail = orders?.find(order => order.id === selected);
 
   return <div className="site-shell">
     <header className="topbar">
@@ -75,15 +88,34 @@ export default function OrdersConsole({ admin }: { admin: User }) {
         {matches && (matches.length ? <ul className="admin-event-list">{matches.map(user => <li key={user.id}>
           <strong>{user.displayName}</strong> <span>{user.email}</span> <button className="secondary-button" disabled={busy} onClick={() => void load(user)}>View orders</button>
         </li>)}</ul> : <p>No matching users.</p>)}
-        {target && orders && <div className="admin-user-result">
-          <strong>Orders for {target.displayName} ({target.email})</strong>
-          {orders.length ? <ul className="admin-event-list">{orders.map(order => <li key={order.id}>
-            <strong>{order.status}</strong> · {order.pickup.name} → {order.delivery.name} · {order.offeredCredits} credits · {order.requesterId === target.id ? "requester" : "courier"}
-            <span> {new Date(order.createdAt).toLocaleString()}</span>
-          </li>)}</ul> : <p>No orders.</p>}
-          {(page > 1 || hasMore) && <div className="admin-pagination"><button className="secondary-button" disabled={busy || page === 1} onClick={() => void load(target, page - 1)}>Previous</button><span>Page {page}</span><button className="secondary-button" disabled={busy || !hasMore} onClick={() => void load(target, page + 1)}>Next</button></div>}
-        </div>}
       </section>
+      {target && orders && <section className="lookup-results" aria-label={`Orders for ${target.displayName}`}>
+        <p className="muted">Orders for <strong>{target.displayName}</strong> ({target.email})</p>
+        <div className="lookup-grid">
+          <div>
+            {orders.length ? orders.map(order => <button key={order.id} className={`order-card${selected === order.id ? " selected" : ""}`} onClick={() => setSelected(order.id)}>
+              <h3>{order.pickup.name} → {order.delivery.name}</h3>
+              <p>{order.items.length} item{order.items.length === 1 ? "" : "s"} · {order.offeredCredits} credits</p>
+              <Pill status={order.status} /><small>Expires {sgt(order.expiresAt)} SGT</small>
+            </button>) : <div className="lookup-empty">No errands here yet.</div>}
+            {(page > 1 || hasMore) && <div className="admin-pagination"><button className="secondary-button" disabled={busy || page === 1} onClick={() => void load(target, page - 1)}>Previous</button><span>Page {page}</span><button className="secondary-button" disabled={busy || !hasMore} onClick={() => void load(target, page + 1)}>Next</button></div>}
+          </div>
+          <aside className="admin-panel lookup-detail">{detail ? <>
+            <p className="eyebrow">Errand details</p>
+            <h3>{detail.pickup.name} → {detail.delivery.name}</h3>
+            <Pill status={detail.status} />
+            {[
+              ["Pickup", placeDetails(detail.pickup)],
+              ["Delivery", placeDetails(detail.delivery)],
+              ["Items", detail.items.map(i => `${i.quantity} × ${i.name}${i.description ? `\n${i.description}` : ""}`).join("\n\n")],
+              ["Offer", `${detail.offeredCredits} credits`],
+              ["Expiry · Singapore time", `${sgt(detail.expiresAt)} SGT`],
+              ["Role", [detail.requesterId === target.id && "Requester", detail.courierId === target.id && "Courier"].filter(Boolean).join(" and ")],
+            ].map(([label, text]) => <div key={label}><h4>{label}</h4><p>{text}</p></div>)}
+            {detail.cancellationReason && <p className="form-error">{detail.cancellationReason}</p>}
+          </> : <><h3>Select an errand</h3><p className="muted">See the exact pickup, delivery and item details here.</p></>}</aside>
+        </div>
+      </section>}
     </main>
   </div>;
 }

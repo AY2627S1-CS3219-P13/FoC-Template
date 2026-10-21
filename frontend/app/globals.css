@@ -342,3 +342,26 @@ dialog.native-dialog.auth-dialog { padding: 32px; }
   .auth-code-grid { gap: 4px; }
   .auth-code-grid input { height: 43px; font-size: 18px; }
 }
+
+.lookup-results { margin-top: 24px; }
+.lookup-results > p { margin: 0 0 14px; color: var(--muted); font-size: 12px; }
+.lookup-grid { display: grid; grid-template-columns: 1fr minmax(300px, .9fr); gap: 24px; align-items: start; }
+.lookup-grid .order-card { display: block; width: 100%; margin-bottom: 12px; padding: 20px; text-align: left; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); }
+.lookup-grid .order-card:hover, .lookup-grid .order-card.selected { border-color: #8fb4d3; background: #fbfdff; }
+.lookup-grid .order-card h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.lookup-grid .order-card p { margin: 8px 0; color: var(--muted); font-size: 12px; }
+.lookup-grid .order-card .pill { margin-right: 10px; }
+.lookup-empty { padding: 42px 24px; border: 1px dashed #cbd9e5; border-radius: 12px; text-align: center; color: var(--muted); }
+.lookup-detail { position: sticky; top: 24px; }
+.lookup-detail h4 { margin: 24px 0 6px; color: var(--muted); font-size: 11px; text-transform: uppercase; }
+.lookup-detail p { white-space: pre-wrap; font-size: 13px; }
+.pill { display: inline-block; padding: 4px 9px; border-radius: 20px; background: #e8f6ec; color: #28744d; font-size: 11px; text-transform: capitalize; }
+.pill.status-open { background: #e4f1ff; color: #17548b; }
+.pill.status-accepted { background: #eee8ff; color: #59409a; }
+.pill.status-picked-up { background: #fff0d5; color: #815000; }
+.pill.status-delivered { background: #dcf5f4; color: #146b6b; }
+.pill.status-dispute { background: #ffe4ef; color: #9c2455; }
+.pill.status-not-completed { background: #ffe5e2; color: #9c3028; }
+.pill.status-cancelled { background: #e9edf2; color: #4e5b6c; }
+.pill.status-expired { background: #eee8df; color: #715738; }
+@media (max-width: 850px) { .lookup-grid { grid-template-columns: 1fr; } .lookup-detail { position: static; } }
