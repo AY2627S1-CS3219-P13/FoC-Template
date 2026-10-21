@@ -53,9 +53,24 @@ async function request<T>(path: string, body?: object, method?: string): Promise
   return data as T;
 }
 
+// User Service has no name search, so page through the admin list and filter here.
+async function searchUsers(query: string): Promise<User[]> {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  const matches: User[] = [];
+  let totalPages = 1;
+  for (let page = 1; page <= totalPages; page++) {
+    const result = await request<{ users: User[]; totalPages: number }>(`/api/v1/admin/users?pageSize=100&page=${page}`);
+    totalPages = result.totalPages;
+    matches.push(...result.users.filter(user => user.displayName.toLowerCase().includes(needle) || user.email.toLowerCase().includes(needle)));
+  }
+  return matches;
+}
+
 export const userApi = {
   me: () => request<{ user: User }>("/api/v1/users/me"),
   findUserByEmail: (email: string) => request<{ user: User }>(`/api/v1/admin/users?${new URLSearchParams({ email })}`),
+  searchUsers,
   changeUserRole: (id: string, role: "user" | "admin", currentPassword: string) =>
     request<{ userId: string; roles: string[] }>(`/api/v1/admin/users/${encodeURIComponent(id)}/role`, { role, currentPassword }, "PUT"),
   roleEvents: () => request<{ events: RoleEvent[]; total: number }>("/api/v1/admin/role-events?pageSize=20"),
