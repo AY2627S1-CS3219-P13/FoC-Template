@@ -8,6 +8,12 @@ import {
   creationKey,
 } from "/orders/core.mjs";
 
+// The server rotates the event stream every 8s, so a stream error alone is not
+// staleness; the list is stale only when no list sync landed within this window.
+const STALE_AFTER_MS = 4500;
+const POLL_INTERVAL_MS = 2000;
+const STALE_CHECK_INTERVAL_MS = 500;
+
 const $ = (id) => document.getElementById(id);
 const emptyDraft = () => ({
   pickup: "",
@@ -294,9 +300,8 @@ function connectEvents() {
   });
   source.onerror = () => {
     if (!current()) return;
-    stale = true;
-    show("sync-notice", "List is not updated. Reconnecting to live events…", "warning");
-    renderDetail();
+    // CONNECTING is the native reconnect after a planned rotation. Staleness is
+    // reported by the freshness watchdog below, not by the stream state.
     if (source.readyState === EventSource.CLOSED) {
       // A rejected cursor or expired session cannot use native auto-reconnect.
       // The next validated session starts fresh and reconciles a snapshot.
@@ -891,7 +896,7 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("focus", () => void tick());
 void tick();
-setInterval(() => void tick(), 2000);
+setInterval(() => void tick(), POLL_INTERVAL_MS);
 $("open-sort").addEventListener("change", () => {
   listGeneration++;
   void loadList();
@@ -905,9 +910,9 @@ window.addEventListener("offline", () => {
 window.addEventListener("online", () => void tick());
 
 setInterval(() => {
-  if (view !== "create" && Date.now() - lastListSync >= 4500) {
+  if (view !== "create" && Date.now() - lastListSync >= STALE_AFTER_MS) {
     stale = true;
     show("sync-notice", "List is not updated", "warning");
     renderDetail();
   }
-}, 500);
+}, STALE_CHECK_INTERVAL_MS);
