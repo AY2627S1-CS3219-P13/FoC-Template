@@ -104,6 +104,7 @@ Those checks promote temporary admin fixtures and consume the one-time claim.
   and again in the browser. A non-admin receives no admin page. Admins can look up
   one verified user by exact school email and promote or demote them after entering
   their own current password; the target's sessions are revoked, so they must log in again. The operator-only recovery command remains available as an alternative.
+- `/admin/orders` is admin-only. Admins search users by email or display name and list the orders each placed or delivered, via `GET /api/v1/orders?scope=user`.
 - The admin page also shows recent durable role-change audit events, including bootstrap and operator grants.
 - The admin page has preset, read-only GET checks for the gateway, current user,
   suppliers and paginated User Service account summaries. It shows the actual
