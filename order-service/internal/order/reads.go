@@ -7,9 +7,11 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func actor(r *http.Request) string { return r.Context().Value(identityKey{}).(Identity).UserID }
@@ -33,7 +35,7 @@ func (a *App) session(w http.ResponseWriter, r *http.Request) error {
 func (a *App) listOrders(w http.ResponseWriter, r *http.Request) error {
 	scope := r.URL.Query().Get("scope")
 	// Only hard-coded SQL predicates may be selected by browser input.
-	predicate := "requester_id=$1"
+	predicate, subject := "requester_id=$1", actor(r)
 	switch scope {
 	case "", "mine":
 	case "open":
@@ -45,6 +47,15 @@ func (a *App) listOrders(w http.ResponseWriter, r *http.Request) error {
 			return problem(403, "admin_required", "An administrator is required.")
 		}
 		predicate = "status='dispute' AND $1::uuid IS NOT NULL"
+	case "user":
+		if !slices.Contains(r.Context().Value(identityKey{}).(Identity).Roles, "admin") {
+			return problem(403, "admin_required", "An administrator is required.")
+		}
+		var id pgtype.UUID
+		if id.Scan(r.URL.Query().Get("userId")) != nil || !id.Valid {
+			return problem(400, "invalid_user", "Provide a valid userId.")
+		}
+		predicate, subject = "(requester_id=$1 OR courier_id=$1)", strings.ToLower(r.URL.Query().Get("userId"))
 	default:
 		return problem(400, "invalid_scope", "Choose mine, open or courier.")
 	}
@@ -70,7 +81,7 @@ func (a *App) listOrders(w http.ResponseWriter, r *http.Request) error {
 		}
 		page = n
 	}
-	rows, err := a.db.Query(r.Context(), "SELECT "+orderColumns+" FROM orders WHERE "+predicate+" ORDER BY created_at DESC,id LIMIT 21 OFFSET $2", actor(r), (page-1)*20)
+	rows, err := a.db.Query(r.Context(), "SELECT "+orderColumns+" FROM orders WHERE "+predicate+" ORDER BY created_at DESC,id LIMIT 21 OFFSET $2", subject, (page-1)*20)
 	if err != nil {
 		return err
 	}
