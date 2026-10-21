@@ -12,6 +12,7 @@ Public base: `http://localhost:8084` when run standalone. Browser requests use t
 | `GET /api/v1/orders/places?page=1` | 200 | Active suppliers plus campus locations for selectors |
 | `GET /api/v1/orders?scope=mine&page=1` | 200 | Paginated mine or courier history; unpaginated open view |
 | `GET /api/v1/orders?scope=disputes&page=1` | 200 | Admin-only dispute queue |
+| `GET /api/v1/orders?scope=user&userId={id}&page=1` | 200 | Admin-only orders where the user is requester or courier |
 | `GET /api/v1/orders/stream` | 200 | Authenticated creation and eligible lifecycle SSE invalidations |
 | `GET /api/v1/orders/publication-status` | 200 | Admin-only publication/workflow backlog monitoring |
 | `GET /api/v1/orders/{id}` | 200 | Authorized detail snapshot |

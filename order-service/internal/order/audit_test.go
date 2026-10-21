@@ -158,3 +158,35 @@ func TestLifecycleTimestampsUseSingaporeOffset(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminListsOrdersByUser(t *testing.T) {
+	a, _ := testApp(t)
+	a.auth = actorAuth{}
+	asRequester := createdForTest(t, a, "user-scope-requester")
+	asCourier := createdForTest(t, a, "user-scope-courier")
+	if _, err := a.db.Exec(context.Background(), "UPDATE orders SET requester_id=$2 WHERE id=$1", asCourier.ID, otherUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec(context.Background(), "UPDATE orders SET status='accepted',courier_id=$2 WHERE id=$1", asCourier.ID, testUserID); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/orders?scope=user&userId=" + strings.ToUpper(testUserID)
+	if got := request(t, a, "GET", path, "requester", "", nil); got.Code != 403 {
+		t.Fatalf("non-admin: %d %s", got.Code, got.Body.String())
+	}
+	if got := request(t, a, "GET", "/api/v1/orders?scope=user&userId=nope", "admin", "", nil); got.Code != 400 {
+		t.Fatalf("bad id: %d %s", got.Code, got.Body.String())
+	}
+	got := request(t, a, "GET", path, "admin", "", nil)
+	var body struct{ Orders []Order }
+	if got.Code != 200 || json.Unmarshal(got.Body.Bytes(), &body) != nil {
+		t.Fatalf("admin: %d %s", got.Code, got.Body.String())
+	}
+	found := map[string]bool{}
+	for _, o := range body.Orders {
+		found[o.ID] = true
+	}
+	if !found[asRequester.ID] || !found[asCourier.ID] {
+		t.Fatalf("missing requester or courier order: %v", found)
+	}
+}

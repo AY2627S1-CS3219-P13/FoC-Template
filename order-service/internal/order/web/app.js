@@ -194,6 +194,7 @@ async function session() {
     void refreshAccount();
     renderDetail();
     $("disputes-tab").hidden = !admin;
+    $("user-orders-link").hidden = !admin;
     show(
       "session-notice",
       "You’re signed in. Your session is checked for every request.",
