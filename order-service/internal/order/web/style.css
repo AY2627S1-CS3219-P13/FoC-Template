@@ -226,7 +226,8 @@ h1 {
   border-radius: 10px;
   flex-wrap: wrap;
 }
-.tabs button {
+.tabs button,
+.tabs a {
   border: 0;
   border-radius: 7px;
   padding: 9px 12px;
@@ -234,6 +235,7 @@ h1 {
   background: transparent;
   font-size: 12px;
   font-weight: 700;
+  text-decoration: none;
 }
 .tabs button[aria-current] {
   background: white;
@@ -664,7 +666,8 @@ footer {
   .tabs {
     width: 100%;
   }
-  .tabs button {
+  .tabs button,
+  .tabs a {
     flex: 1;
     padding: 8px;
   }
