@@ -78,3 +78,40 @@ workflow with branch `main`, and inspect each step. Success verifies AWS
 authentication, ECR login and repository reads, SSM command execution, and current
 backend readiness. Image upload and EC2 image download permissions still need
 to be exercised by the subsequent image build and deployment workflow.
+
+The connection check passed on 24 October 2026, including GitHub OIDC login,
+ECR authentication and repository reads, and all backend readiness requests
+through SSM.
+
+## Publish application images
+
+`Publish AWS images` is a manual workflow on `main`. It first requires the latest
+push or manual CI run for the selected commit to have completed successfully.
+The selected commit is the `main` revision captured when the publisher starts;
+later changes to `main` do not change the source being built. If CI did not run
+because Actions was disabled, run CI manually on `main` before publishing.
+
+The publisher builds the four Go backends, frontend and gateway using their
+existing Dockerfiles on GitHub runners. It builds Linux amd64 images for the
+current EC2 architecture and pushes them to the corresponding `foc/` ECR
+repositories. Every image uses the full Git commit SHA as its immutable tag.
+Runtime secrets are not supplied to the build; application `.env` files stay on
+EC2. PostgreSQL and Mailpit continue using upstream images.
+
+To publish:
+
+1. Merge the workflow into `main` and wait for that commit's CI run to pass.
+2. Open Actions, select Publish AWS images, and choose Run workflow on `main`.
+3. Check all six matrix jobs complete successfully. Their summaries contain the
+   image references; the same commit tag should appear in all six ECR repositories.
+
+The publisher reuses tags that already exist, allowing a failed release to be
+retried without overwriting immutable images. Permission errors and missing
+repositories fail the workflow. A partial failure may leave only some images
+uploaded; do not deploy a commit until all six jobs succeed. Concurrent publisher
+runs are serialized, and at most two images build in parallel within a run.
+
+Publishing only stores images. It does not connect to EC2 or change the running
+application. The next deployment checkpoint must configure EC2 image downloads,
+use the versioned restart settings, verify all four backends after deployment,
+and retain the existing database volumes and credentials.
