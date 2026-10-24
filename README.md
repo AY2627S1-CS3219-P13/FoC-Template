@@ -12,6 +12,10 @@ withdrawn, or exchanged for money, and only circulate within the platform.
 
 ## Run locally
 
+For the current private EC2 deployment, restart verification, pending startup
+issue and manual GitHub AWS connection check, see the
+[AWS deployment notes](docs/aws-deployment-notes.md).
+
 Run the following commands from the repository root. You need Docker running,
 Docker Compose with support for `include` and `up --wait`, a POSIX shell and
 OpenSSL. Go, Node.js and PostgreSQL run in containers; no host package install

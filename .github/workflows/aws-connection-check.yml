@@ -1,0 +1,96 @@
+name: AWS connection check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+
+concurrency:
+  group: aws-connection-check
+  cancel-in-progress: true
+
+jobs:
+  connection:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+      EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+    steps:
+      - name: Check configuration
+        shell: bash
+        run: |
+          : "${AWS_REGION:?Set the AWS_REGION repository variable}"
+          : "${AWS_ROLE_ARN:?Set the AWS_ROLE_ARN repository variable}"
+          : "${ECR_REGISTRY:?Set the ECR_REGISTRY repository variable}"
+          : "${EC2_INSTANCE_ID:?Set the EC2_INSTANCE_ID repository variable}"
+
+      - name: Authenticate to AWS through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          allowed-account-ids: '291723765178'
+          role-session-name: foc-connection-${{ github.run_id }}
+          role-duration-seconds: 900
+
+      - name: Show authenticated AWS identity
+        run: aws sts get-caller-identity
+
+      - name: Check registry login and repository read access
+        shell: bash
+        run: |
+          aws ecr get-login-password --region "$AWS_REGION" |
+            docker login --username AWS --password-stdin "$ECR_REGISTRY"
+          for service in user-service supplier-service credit-service order-service frontend gateway; do
+            printf 'Checking foc/%s\n' "$service"
+            aws ecr describe-images --repository-name "foc/$service" \
+              --query 'imageDetails[].imageTags' --output json
+          done
+
+      - name: Check backend readiness through SSM
+        shell: bash
+        run: |
+          parameters=$(cat <<'JSON'
+          {
+            "commands": [
+              "set -eu",
+              "curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8080/readyz",
+              "curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8082/readyz",
+              "curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8083/readyz",
+              "curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8084/readyz",
+              "curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/healthz"
+            ],
+            "executionTimeout": ["60"]
+          }
+          JSON
+          )
+          command_id=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment 'GitHub AWS connection check; read-only application readiness' \
+            --timeout-seconds 60 \
+            --parameters "$parameters" \
+            --query 'Command.CommandId' --output text)
+          printf 'SSM command: %s\n' "$command_id"
+
+          wait_status=0
+          aws ssm wait command-executed \
+            --command-id "$command_id" --instance-id "$EC2_INSTANCE_ID" || wait_status=$?
+          aws ssm get-command-invocation \
+            --command-id "$command_id" --instance-id "$EC2_INSTANCE_ID" \
+            --query '{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}' \
+            --output json
+          exit "$wait_status"
+
+      - name: Log out of the registry
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "$ECR_REGISTRY" ]; then
+            docker logout "$ECR_REGISTRY"
+          fi
