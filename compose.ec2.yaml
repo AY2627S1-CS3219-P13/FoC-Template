@@ -1,0 +1,45 @@
+# Applied explicitly by scripts/deploy-ec2.sh; local development is unchanged.
+services:
+  user-db:
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U foc_user -d foc_user"]
+  supplier-db:
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U foc_supplier -d foc_supplier"]
+  credit-db:
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U foc_credit -d foc_credit"]
+  order-db:
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U foc_order -d foc_order"]
+  mailpit:
+    restart: unless-stopped
+
+  user-service:
+    build: !reset null
+    image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/user-service:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
+    restart: unless-stopped
+  supplier-service:
+    build: !reset null
+    image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/supplier-service:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
+    restart: unless-stopped
+  credit-service:
+    build: !reset null
+    image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/credit-service:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
+    restart: unless-stopped
+  order-service:
+    build: !reset null
+    image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/order-service:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
+    restart: unless-stopped
+  frontend:
+    build: !reset null
+    image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/frontend:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
+    restart: unless-stopped
+  gateway:
+    build: !reset null
+    image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/gateway:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
+    restart: unless-stopped

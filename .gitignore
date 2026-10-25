@@ -21,3 +21,4 @@ Thumbs.db
 .agent/tmp/
 playwright-report/
 test-results/
+.ec2-deploy.lock
