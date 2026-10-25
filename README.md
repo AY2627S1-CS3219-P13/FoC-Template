@@ -13,7 +13,7 @@ withdrawn, or exchanged for money, and only circulate within the platform.
 ## Run locally
 
 For the current private EC2 deployment, restart verification, pending startup
-issue, manual GitHub AWS connection check and image publisher, see the
+issue, GitHub AWS checks, image publishing and EC2 image deployment, see the
 [AWS deployment notes](docs/aws-deployment-notes.md).
 
 Run the following commands from the repository root. You need Docker running,
