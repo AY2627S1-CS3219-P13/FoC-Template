@@ -46,8 +46,8 @@ services were stopped.
 
 ## Next infrastructure work
 
-- Verify a manual deployment of published images with `scripts/deploy-ec2.sh`.
-- Connect the deployment command to GitHub Actions, then add public HTTPS through an ALB.
+- Verify the first automatic release after merging the CI/CD workflow.
+- Add public HTTPS through an ALB after the release workflow is confirmed.
 - Measure runtime memory before attempting to downsize to `t3a.small`.
 
 ## GitHub AWS connection check
@@ -87,13 +87,24 @@ The connection check passed on 24 October 2026, including GitHub OIDC login,
 ECR authentication and repository reads, and all backend readiness requests
 through SSM.
 
-## Publish application images
+## Automatic CI/CD releases
 
-`Publish AWS images` is a manual workflow on `main`. It first requires the latest
-push or manual CI run for the selected commit to have completed successfully.
-The selected commit is the `main` revision captured when the publisher starts;
-later changes to `main` do not change the source being built. If CI did not run
-because Actions was disabled, run CI manually on `main` before publishing.
+`Release to AWS` (the earlier `Publish AWS images` workflow) runs when CI finishes
+successfully for a push or manual run on this repository's `main` branch. PR and
+fork runs cannot release. It takes the commit from the completed CI run, checks
+that the latest push/manual CI run for that exact commit succeeded, then publishes
+and deploys it. A manual Run workflow on `main` remains available for retries.
+If CI did not run because Actions was disabled, run CI manually on `main` first.
+
+```text
+Merge/push main → CI checks → six ECR images → SSM command → EC2 readiness checks
+```
+
+The release uses one full commit SHA for checkout, all six image tags and the EC2
+checkout. It rejects releases superseded by a newer `main` commit, including a
+second check on EC2 after image publishing. If a newer change arrives during a
+release, that older release may fail as outdated; wait for the newer commit's CI
+and release instead. Only one release workflow runs at a time.
 
 The publisher builds the four Go backends, frontend and gateway using their
 existing Dockerfiles on GitHub runners. It builds Linux amd64 images for the
@@ -102,12 +113,13 @@ repositories. Every image uses the full Git commit SHA as its immutable tag.
 Runtime secrets are not supplied to the build; application `.env` files stay on
 EC2. PostgreSQL and Mailpit continue using upstream images.
 
-To publish:
+To release:
 
-1. Merge the workflow into `main` and wait for that commit's CI run to pass.
-2. Open Actions, select Publish AWS images, and choose Run workflow on `main`.
-3. Check all six matrix jobs complete successfully. Their summaries contain the
-   image references; the same commit tag should appear in all six ECR repositories.
+1. Start EC2 manually and ensure it is reachable through SSM.
+2. Merge changes into `main` and wait for CI to pass.
+3. Open Actions, select Release to AWS, and inspect the six `publish` jobs followed
+   by `deploy`. The final summary identifies the deployed commit and instance.
+4. Check the application through the existing SSM browser tunnel.
 
 The publisher reuses tags that already exist, allowing a failed release to be
 retried without overwriting immutable images. Permission errors and missing
@@ -115,10 +127,27 @@ repositories fail the workflow. A partial failure may leave only some images
 uploaded; do not deploy a commit until all six jobs succeed. Concurrent publisher
 runs are serialized, and at most two images build in parallel within a run.
 
-Publishing only stores images. It does not connect to EC2 or change the running
-application. The next deployment checkpoint must configure EC2 image downloads,
-use the versioned restart settings, verify all four backends after deployment,
-and retain the existing database volumes and credentials.
+The `deploy` job runs only after all six publishers succeed. GitHub assumes the
+existing deployment role through OIDC and uses SSM to execute the command as root
+on the configured instance. `scripts/release-ec2.py` runs on GitHub, where the AWS
+CLI is available; EC2 only needs Git, Docker, curl, flock and its ECR credential
+helper. No SSH access, inbound security group rule, new IAM role, or application
+secret in GitHub is needed.
+
+The remote command requires a clean tracked checkout on branch `main` at
+`/opt/foc`, fetches `main`, and fast-forwards to the tested commit. It refuses
+divergent/local commits or a different remote head, without resetting files.
+Untracked `.env` files are retained. It then runs `scripts/deploy-ec2.sh` using
+that commit's deployment configuration and image tag.
+
+SSM gets 60 seconds for delivery and 15 minutes for execution; GitHub polls for
+the result and requires both SSM success and exit code zero. A stopped or
+unreachable instance fails deployment; the workflow never starts EC2. Start it
+manually when needed, then retry Release to AWS on the current `main` commit.
+If a release fails after reaching EC2, inspect its SSM output before retrying.
+Cancelling GitHub's workflow does not cancel an already submitted SSM command.
+The existing IAM policy needs only SendCommand to this instance and document,
+plus GetCommandInvocation; no additional AWS permissions are required.
 
 ## Deploy published images to EC2
 
@@ -129,6 +158,11 @@ private registry hostname to `ecr-login`. The root configuration applies because
 Docker commands run with `sudo`. The AWS CLI and personal AWS credentials are
 not needed on EC2. The gateway image pull was confirmed working before this
 deployment checkpoint.
+
+The first manual image deployment was confirmed successful on 25 October 2026:
+all six application containers used ECR tag
+`ac4c2d0349e79d51069e92033bcfab69106cf16e`, all four databases were healthy,
+and the deployment helper's backend and gateway checks passed.
 
 The image deployment command combines `compose.yaml` with `compose.ec2.yaml`.
 The latter removes runtime build definitions, references the six ECR images by
@@ -175,3 +209,7 @@ stack that uses locally tagged images with the EC2 override. It runs the same
 deployment command, the existing smoke check and the funded four-service lifecycle
 without private ECR access. This CI check removes only its own disposable volumes;
 do not run `scripts/check-ec2-images.sh` on the application server.
+
+`scripts/check-ec2-release.py` separately tests SSM propagation, failures and
+timeouts, command targeting, and refusal of dirty/stale/different-branch server
+checkouts without calling AWS or touching the application stack.

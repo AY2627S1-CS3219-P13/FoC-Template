@@ -63,6 +63,8 @@ jobs:
         run: docker run --rm -v "$PWD/scripts:/checks:ro" -w /checks node:22-bookworm-slim node --test smoke-pending.test.mjs
       - name: Check EC2 deployment failures and ordering
         run: docker run --rm --network none -v "$PWD/scripts:/checks:ro" -w /checks python:3.13-slim-bookworm python3 check-ec2-deploy.py
+      - name: Check automatic release failures and stale checkout protection
+        run: docker run --rm --network none -v "$PWD/scripts:/checks:ro" -w /checks python:3.13-slim-bookworm python3 check-ec2-release.py
       - name: Signup, verification and supplier flow through the gateway
         run: sh scripts/smoke.sh
       - name: Funded lifecycle through User, Supplier, Order and Credit
