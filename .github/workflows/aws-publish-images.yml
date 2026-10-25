@@ -1,7 +1,11 @@
-name: Publish AWS images
+name: Release to AWS
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
 
 permissions: {}
 
@@ -11,26 +15,47 @@ concurrency:
 
 jobs:
   verify-ci:
-    if: github.ref == 'refs/heads/main'
+    # workflow_run has AWS privileges: never release a PR or fork's code.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        contains(fromJSON('["push", "workflow_dispatch"]'), github.event.workflow_run.event)))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       actions: read
+      contents: read
+    outputs:
+      sha: ${{ steps.ci.outputs.sha }}
     env:
       GH_TOKEN: ${{ github.token }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
       ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+      EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+      # github.sha on workflow_run is the default branch head, not the tested SHA.
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - name: Require successful CI for this commit
+        id: ci
         shell: bash
         run: |
           : "${AWS_REGION:?Set the AWS_REGION repository variable}"
           : "${AWS_ROLE_ARN:?Set the AWS_ROLE_ARN repository variable}"
           : "${ECR_REGISTRY:?Set the ECR_REGISTRY repository variable}"
+          : "${EC2_INSTANCE_ID:?Set the EC2_INSTANCE_ID repository variable}"
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [ "$latest" != "$RELEASE_SHA" ]; then
+            echo 'This release is outdated. Release the current main commit after its CI passes.' >&2
+            exit 1
+          fi
           ci_run=$(gh api --method GET \
             "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
-            -f branch=main -f head_sha="$GITHUB_SHA" -f per_page=20 \
+            -f branch=main -f head_sha="$RELEASE_SHA" -f per_page=20 \
             --jq '.workflow_runs | map(select(.event == "push" or .event == "workflow_dispatch")) | .[0] // {}')
           printf '%s\n' "$ci_run" | jq '{id, status, conclusion, html_url}'
           if ! printf '%s\n' "$ci_run" | jq -e '.status == "completed" and .conclusion == "success"' > /dev/null; then
@@ -38,6 +63,7 @@ jobs:
             echo 'Run the CI workflow on main if needed, wait for success, then retry this workflow.' >&2
             exit 1
           fi
+          echo "sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
 
   publish:
     needs: verify-ci
@@ -55,11 +81,12 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION }}
       ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
       SERVICE: ${{ matrix.service }}
+      RELEASE_SHA: ${{ needs.verify-ci.outputs.sha }}
     steps:
       - name: Check out the selected commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.verify-ci.outputs.sha }}
           persist-credentials: false
 
       - name: Authenticate to AWS through GitHub OIDC
@@ -76,7 +103,7 @@ jobs:
         run: |
           error_file="$RUNNER_TEMP/ecr-lookup-error.txt"
           if aws ecr describe-images --repository-name "foc/$SERVICE" \
-            --image-ids "imageTag=$GITHUB_SHA" \
+            --image-ids "imageTag=$RELEASE_SHA" \
             --query 'imageDetails[0].imageDigest' --output text 2> "$error_file"; then
             echo 'exists=true' >> "$GITHUB_OUTPUT"
             echo 'This commit image already exists; reusing it.'
@@ -99,21 +126,50 @@ jobs:
         shell: bash
         run: |
           docker build --platform linux/amd64 \
-            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.revision=$RELEASE_SHA" \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-            --tag "$ECR_REGISTRY/foc/$SERVICE:$GITHUB_SHA" "./$SERVICE"
+            --tag "$ECR_REGISTRY/foc/$SERVICE:$RELEASE_SHA" "./$SERVICE"
 
       - name: Publish the image
         if: steps.image.outputs.exists == 'false'
         shell: bash
-        run: docker push "$ECR_REGISTRY/foc/$SERVICE:$GITHUB_SHA"
+        run: docker push "$ECR_REGISTRY/foc/$SERVICE:$RELEASE_SHA"
 
       - name: Record the published image
         shell: bash
         run: |
           printf 'Available image: %s/foc/%s:%s\n' \
-            "$ECR_REGISTRY" "$SERVICE" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+            "$ECR_REGISTRY" "$SERVICE" "$RELEASE_SHA" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Log out of the registry
         if: always()
         run: docker logout "$ECR_REGISTRY"
+
+  deploy:
+    needs: [verify-ci, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_SHA: ${{ needs.verify-ci.outputs.sha }}
+      ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+      EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+    steps:
+      - name: Check out the tested release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify-ci.outputs.sha }}
+          persist-credentials: false
+
+      - name: Authenticate to AWS through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          allowed-account-ids: '291723765178'
+          role-session-name: foc-deploy-${{ github.run_id }}
+
+      - name: Deploy through SSM and wait for readiness checks
+        run: python3 scripts/release-ec2.py
