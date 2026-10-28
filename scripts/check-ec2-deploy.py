@@ -37,7 +37,8 @@ if action == os.environ.get("FAIL_ACTION"):
 if action == "port":
     ports = {"user-service": 8080, "supplier-service": 8083, "credit-service": 8082,
              "order-service": 8084, "gateway": 3000}
-    print("127.0.0.1:" + str(ports[args[6]]))
+    host = "0.0.0.0" if args[6] == "gateway" and os.environ.get("PUBLIC_BIND") == "1" else "127.0.0.1"
+    print(host + ":" + str(ports[args[6]]))
 elif action == "ps" and "-q" in args:
     print("container-" + args[-1])
 '''
@@ -98,6 +99,13 @@ class DeployTests(unittest.TestCase):
         result = self.run_deploy(FAIL_ACTION="pull")
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(any(self.action(c) in ["stop", "up"] for c in self.calls()))
+
+    def test_wildcard_listener_is_checked_through_loopback(self):
+        result = self.run_deploy(PUBLIC_BIND="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        urls = [c[-1] for c in self.calls() if c[0] == "curl"]
+        self.assertIn("http://127.0.0.1:3000/", urls)
+        self.assertFalse(any("0.0.0.0" in url for url in urls))
 
     def test_invalid_configuration_does_not_download_or_stop(self):
         result = self.run_deploy(FAIL_ACTION="config")

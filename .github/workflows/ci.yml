@@ -71,6 +71,8 @@ jobs:
         run: docker compose --profile test run --rm --no-deps --entrypoint node smoke order-lifecycle.mjs
       - name: Independent gateway client limits and retained account limits
         run: sh scripts/gateway-rate-check.sh
+      - name: CloudFront proxy trust, protocol and viewer rate limits
+        run: sh scripts/check-cloudfront-ingress.sh
       - name: Fresh database startup and image-only EC2 deployment
         run: sh scripts/check-ec2-images.sh
       - name: Container logs
