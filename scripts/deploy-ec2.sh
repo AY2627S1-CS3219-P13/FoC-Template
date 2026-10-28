@@ -49,6 +49,10 @@ compose config --quiet
 # A missing image or failed download aborts before any running service is stopped.
 compose pull --policy missing user-service supplier-service credit-service order-service frontend gateway
 
+# Catch origin/cookie/SMTP mismatches before changing any running service.
+# This command validates settings only; it does not contact or migrate databases.
+compose run --rm --no-deps user-service check-config
+
 # Order upgrades prohibit old writers and require the new Credit endpoint first.
 compose stop order-service
 compose up --no-build --pull never -d --wait --wait-timeout 120 user-service supplier-service credit-service

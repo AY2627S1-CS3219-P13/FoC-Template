@@ -89,6 +89,12 @@ flat-rate plans do not support private VPC origins. No WAF is currently attached
 
 ### Activate application ingress
 
+First configure and test a real STARTTLS SMTP provider using `USER_SMTP_ADDRESS`,
+`USER_SMTP_FROM`, `USER_SMTP_TLS=true` and the provider's SMTP credentials. The
+default Mailpit setup uses plain SMTP and cannot be retained unchanged in public
+HTTPS mode: User Service intentionally refuses secure cookies with SMTP TLS
+disabled. Do not turn on the TLS flag against plain Mailpit as a workaround.
+
 Start EC2 manually, wait for SSM access, and edit the existing `/opt/foc/.env`
 as root. Set each of these keys once, replacing an existing entry if present:
 
@@ -115,8 +121,8 @@ After deployment succeeds, register instance `i-0ceabdd31ee0f7594` in the target
 group on port 3000, wait for healthy status, and test the public hostname without
 an SSM browser tunnel. Check login/logout, secure session cookies, supplier/wallet
 and order flows. The ALB `/healthz` checks only the gateway, so it does not replace
-the deployment helper's backend checks. Real email is still a separate step;
-verification messages currently remain in private Mailpit.
+the deployment helper's backend checks. Verify registration email delivery with
+the configured provider; Mailpit's web UI remains private.
 
 The gateway trusts forwarding peers only in the two private ingress subnets.
 Recursive real-IP parsing rejects forged header prefixes and preserves independent
@@ -130,6 +136,32 @@ checks both Compose bindings and policy mounts, and retains the normal applicati
 smoke and fresh-database image deployment tests. AWS routing and public browser
 behavior require the activation checks above; isolated CI does not prove the
 actual CloudFront/ALB path.
+
+### SMTP preflight failure and recovery
+
+The first ingress rollout on 28 October failed because secure cookies were
+enabled while `USER_SMTP_TLS=false` still selected plain Mailpit. User Service
+rejected startup with `deployed email must use SMTP STARTTLS`; Order had already
+been stopped by the deployment helper. The initial activation instructions
+incorrectly treated real SMTP as a later independent step.
+
+Recovery saved a root-only copy of `.env` outside the Git checkout, restored
+localhost origin, insecure local cookies, loopback gateway binding and the local
+ingress policy, then successfully deployed the same immutable release
+`d96cb4ac75ee62f0d63ebff200d89c8d05a917d2`. All backend readiness checks and the
+gateway passed. Data and credentials were preserved; no ALB target was registered.
+
+Deployment now runs `user-service check-config` after downloading images and
+before stopping Order. A configuration failure therefore aborts before changing
+running services. The check validates configuration without database/network
+side effects; it does not establish SMTP connectivity or prove mail delivery.
+
+SES account reads in Singapore succeeded. The account is in the sandbox with
+200 messages/day, one message/second and no verified identities. Sandbox sending
+requires verified recipient identities. `u.nus.edu` publishes DMARC `p=reject`;
+do not use an NUS sender with SES without domain-owner authorization and aligned
+authentication. Choose a domain the team controls for SES, or use the owning
+mail provider's supported authenticated SMTP service.
 
 ## GitHub AWS connection check
 

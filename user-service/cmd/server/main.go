@@ -34,6 +34,12 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return errors.New("invalid database configuration")
 	}
+	// Validate deployment settings without connecting to a database, migrating,
+	// sending mail, or opening listeners. Rollouts run this before stopping writers.
+	if len(os.Args) == 2 && os.Args[1] == "check-config" {
+		log.Info("configuration validated")
+		return nil
+	}
 	poolConfig.MaxConns = 10
 	db, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
