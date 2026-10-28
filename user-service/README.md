@@ -134,6 +134,18 @@ SQL is parameterised and kept beside the relevant operation. There is no ORM or 
 
 ## Moving to EC2 later
 
+The runtime command `user-service check-config` validates environment settings
+and database URL syntax, then exits before database connections, migrations,
+listeners or email delivery. The EC2 deployment helper runs it from the selected
+release image before stopping Order or replacing application services. It catches
+configuration mismatches; it does not test SMTP credentials, network reachability
+or actual mail delivery.
+
+Public HTTPS with secure cookies requires `USER_SMTP_TLS=true` and a working
+STARTTLS-capable provider. The default plain SMTP Mailpit configuration is only
+compatible with local HTTP mode. Merely changing the TLS flag does not add TLS
+support to Mailpit; configure the provider and verify delivery before activation.
+
 The supplied Compose setup is **for local development**. Build the same application image for EC2, then provide deployment configuration:
 
 1. Put the public API behind HTTPS and set `USER_APP_ORIGIN` to the actual frontend origin and `USER_COOKIE_SECURE=true`. Prefer serving frontend and API through the same site.

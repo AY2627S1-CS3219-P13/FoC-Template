@@ -82,9 +82,12 @@ class DeployTests(unittest.TestCase):
         calls = self.calls()
         pull = next(i for i, c in enumerate(calls) if self.action(c) == "pull")
         stop = next(i for i, c in enumerate(calls) if self.action(c) == "stop")
+        preflight = next(i for i, c in enumerate(calls) if self.action(c) == "run")
         gateway = next(i for i, c in enumerate(calls) if self.action(c) == "up" and c[-1] == "gateway")
         credit = next(i for i, c in enumerate(calls) if c[0] == "curl" and ":8082/readyz" in c[-1])
-        self.assertLess(pull, stop)
+        self.assertLess(pull, preflight)
+        self.assertLess(preflight, stop)
+        self.assertEqual(calls[preflight][-4:], ["--rm", "--no-deps", "user-service", "check-config"])
         self.assertLess(stop, credit)
         self.assertLess(credit, gateway)
         self.assertEqual(calls[pull][-6:], SERVICES)
@@ -97,6 +100,11 @@ class DeployTests(unittest.TestCase):
 
     def test_failed_download_does_not_stop_running_services(self):
         result = self.run_deploy(FAIL_ACTION="pull")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(self.action(c) in ["stop", "up"] for c in self.calls()))
+
+    def test_failed_service_configuration_does_not_stop_running_services(self):
+        result = self.run_deploy(FAIL_ACTION="run")
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(any(self.action(c) in ["stop", "up"] for c in self.calls()))
 
