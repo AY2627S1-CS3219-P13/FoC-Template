@@ -12,9 +12,24 @@ if (mode === 'server') {
   http.createServer(handler).listen(8080, '0.0.0.0');
   http.createServer(handler).listen(3000, '0.0.0.0');
 } else {
-  const request = (path, headers = {}) => fetch(`http://gateway:8080${path}`, {
-    headers: { Host: 'demo.cloudfront.net', ...headers },
-    signal: AbortSignal.timeout(5000),
+  // Node fetch can replace a custom Host header. Use the raw HTTP client so the
+  // fixture really exercises preservation of CloudFront's viewer hostname.
+  const request = (path, headers = {}) => new Promise((resolve, reject) => {
+    const call = http.get({ hostname: 'gateway', port: 8080, path,
+      headers: { Host: 'demo.cloudfront.net', ...headers } }, response => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => { body += chunk; });
+      response.on('end', () => resolve({
+        status: response.statusCode,
+        ok: response.statusCode >= 200 && response.statusCode < 300,
+        text: async () => body,
+        json: async () => JSON.parse(body),
+      }));
+      response.on('error', reject);
+    });
+    call.setTimeout(5000, () => call.destroy(new Error('HTTP fixture timeout')));
+    call.on('error', reject);
   });
   let ready = false;
   for (let attempt = 0; attempt < 30; attempt++) {

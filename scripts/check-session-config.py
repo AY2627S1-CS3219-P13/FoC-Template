@@ -46,5 +46,6 @@ for bind, ingress in [('127.0.0.1', './gateway/local-ingress.conf'),
     mount = next(v for v in gateway['volumes'] if v['target'] == '/etc/nginx/foc/ingress.conf')
     assert mount['source'] == str(root / ingress.removeprefix('./'))
     assert mount['read_only']
-    assert not mount['bind']['create_host_path']
+    # Compose omits false booleans from its normalized JSON output.
+    assert not mount.get('bind', {}).get('create_host_path', False)
     print('PASS: single gateway binding and read-only ingress policy for ' + bind)
