@@ -59,6 +59,9 @@ compose up --no-build --pull never -d --wait --wait-timeout 120 gateway
 ready order-service
 
 address=$(compose port gateway 8080)
+case "$address" in
+  0.0.0.0:*) address="127.0.0.1:${address##*:}" ;;
+esac
 curl --fail --silent --show-error --output /dev/null --retry 10 --retry-delay 2 \
   --retry-all-errors --connect-timeout 3 --max-time 5 "http://$address/"
 

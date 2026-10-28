@@ -43,3 +43,12 @@ services:
     build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/gateway:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
     restart: unless-stopped
+    ports: !override
+      - "${GATEWAY_BIND_ADDRESS:-127.0.0.1}:3000:8080"
+    volumes:
+      - type: bind
+        source: ${GATEWAY_INGRESS_CONFIG:-./gateway/local-ingress.conf}
+        target: /etc/nginx/foc/ingress.conf
+        read_only: true
+        bind:
+          create_host_path: false

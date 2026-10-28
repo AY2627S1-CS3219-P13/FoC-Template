@@ -46,9 +46,90 @@ services were stopped.
 
 ## Next infrastructure work
 
-- Verify the first automatic release after merging the CI/CD workflow.
-- Add public HTTPS through an ALB after the release workflow is confirmed.
+- Complete gateway configuration and target registration for the CloudFront
+  distribution below, then verify browser access through its HTTPS hostname.
+- Configure real email delivery for independent registration, and database backups.
 - Measure runtime memory before attempting to downsize to `t3a.small`.
+
+## Public HTTPS through CloudFront and an internal ALB
+
+On 28 October 2026, the team configured the following infrastructure in Singapore.
+The existing release workflow had successfully deployed commit
+`2af78aeb6c882d36e478fe8c66f94d1244d1325d` before this ingress setup.
+
+```text
+Browser --HTTPS--> CloudFront --private HTTP:80--> internal ALB
+  --HTTP:3000--> EC2 gateway --> frontend and four services
+```
+
+| Resource | Current value |
+| --- | --- |
+| Public hostname | `https://d5ovr1dbnwrxo.cloudfront.net` |
+| CloudFront distribution | `E29RB28L8JY07Q` |
+| VPC origin | `vo_J7xwQ1gJlUwGPZdQTK46AM` (`foc-demo-vpc-origin`) |
+| Internal ALB | `foc-demo-alb`, HTTP listener 80 |
+| Target group | `foc-demo-gateway-tg`, instance targets on HTTP 3000, health `/healthz` |
+| Private subnet 1a | `subnet-088c19995eb49969a`, `10.20.16.0/24` |
+| Private subnet 1b | `subnet-07a413d65a178bd7a`, `10.20.17.0/24` |
+| Private route table | `rtb-0fe307ee2e09dfb94`, local VPC route only |
+| ALB security group | `sg-0e5d9a0585b72a4ad` |
+| CloudFront managed source group | `sg-0a4ad2d1614445701` |
+
+The ALB security group permits inbound HTTP 80 only from the CloudFront managed
+source group and outbound TCP 3000 only to `foc-demo-ec2-sg`. EC2 permits inbound
+TCP 3000 only from the ALB group. Its existing public-subnet placement supports
+outbound SSM/ECR access; the ALB connects using its private IP. Neither database
+ports nor Mailpit are publicly exposed.
+
+The distribution uses the CloudFront certificate for its assigned hostname,
+redirects HTTP viewers to HTTPS, and allows all seven HTTP methods. Its single
+default behavior uses `CachingDisabled` and
+`AllViewerAndCloudFrontHeaders-2022-06`. Use pay-as-you-go billing: the Free and Pro
+flat-rate plans do not support private VPC origins. No WAF is currently attached.
+
+### Activate application ingress
+
+Start EC2 manually, wait for SSM access, and edit the existing `/opt/foc/.env`
+as root. Set each of these keys once, replacing an existing entry if present:
+
+```dotenv
+USER_APP_ORIGIN=https://d5ovr1dbnwrxo.cloudfront.net
+USER_COOKIE_SECURE=true
+GATEWAY_BIND_ADDRESS=0.0.0.0
+GATEWAY_INGRESS_CONFIG=./gateway/cloudfront-ingress.conf
+```
+
+Preserve all other settings and credentials. The included services derive their
+shared origin and secure session-cookie name from this root configuration; do
+not hard-code a different cookie name in the child service environments. Keep
+the browser API URL same-origin (the default empty `NEXT_PUBLIC_USER_API_URL`).
+
+Merge the ingress PR after CI passes and run Release to AWS on `main` if the
+automatic attempt occurred while EC2 was stopped. The release fast-forwards the
+server checkout before loading Compose, so the ingress file exists when mounted.
+The EC2 override replaces the gateway's loopback-only port with the configured
+binding and mounts the policy read-only. The helper checks a wildcard listener
+through `127.0.0.1` and continues checking all backend readiness endpoints.
+
+After deployment succeeds, register instance `i-0ceabdd31ee0f7594` in the target
+group on port 3000, wait for healthy status, and test the public hostname without
+an SSM browser tunnel. Check login/logout, secure session cookies, supplier/wallet
+and order flows. The ALB `/healthz` checks only the gateway, so it does not replace
+the deployment helper's backend checks. Real email is still a separate step;
+verification messages currently remain in private Mailpit.
+
+The gateway trusts forwarding peers only in the two private ingress subnets.
+Recursive real-IP parsing rejects forged header prefixes and preserves independent
+viewer limits. It accepts the CloudFront viewer scheme only from these trusted
+peers. Keep these trust ranges aligned with the ALB/CloudFront ENI subnet layout
+and retain the security-group restrictions. Local development and an EC2 `.env`
+without these ingress keys retain loopback binding and no proxy trust.
+
+CI exercises trusted/untrusted proxy behavior with a disposable echo upstream,
+checks both Compose bindings and policy mounts, and retains the normal application
+smoke and fresh-database image deployment tests. AWS routing and public browser
+behavior require the activation checks above; isolated CI does not prove the
+actual CloudFront/ALB path.
 
 ## GitHub AWS connection check
 
