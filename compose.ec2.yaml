@@ -1,48 +1,68 @@
 # Applied explicitly by scripts/deploy-ec2.sh; local development is unchanged.
+# Bounded json-file logs keep the root volume from filling up. Publishing the
+# compose service label makes every log line self-describing in CloudWatch.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+    labels: "com.docker.compose.service"
+
 services:
   user-db:
     restart: unless-stopped
+    logging: *logging
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U foc_user -d foc_user"]
   supplier-db:
     restart: unless-stopped
+    logging: *logging
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U foc_supplier -d foc_supplier"]
   credit-db:
     restart: unless-stopped
+    logging: *logging
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U foc_credit -d foc_credit"]
   order-db:
     restart: unless-stopped
+    logging: *logging
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U foc_order -d foc_order"]
   mailpit:
     restart: unless-stopped
+    logging: *logging
 
   user-service:
     build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/user-service:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
     restart: unless-stopped
+    logging: *logging
   supplier-service:
     build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/supplier-service:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
     restart: unless-stopped
+    logging: *logging
   credit-service:
     build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/credit-service:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
     restart: unless-stopped
+    logging: *logging
   order-service:
     build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/order-service:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
     restart: unless-stopped
+    logging: *logging
   frontend:
     build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/frontend:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
     restart: unless-stopped
+    logging: *logging
   gateway:
     build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/gateway:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
     restart: unless-stopped
+    logging: *logging
     ports: !override
       - "${GATEWAY_BIND_ADDRESS:-127.0.0.1}:3000:8080"
     volumes:

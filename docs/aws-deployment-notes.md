@@ -326,3 +326,162 @@ do not run `scripts/check-ec2-images.sh` on the application server.
 `scripts/check-ec2-release.py` separately tests SSM propagation, failures and
 timeouts, command targeting, and refusal of dirty/stale/different-branch server
 checkouts without calling AWS or touching the application stack.
+
+## Bounded container logs and CloudWatch observability
+
+Added on 30 October 2026. Goal: stop unbounded `json-file` growth on the root
+volume, centralize container logs with seven-day retention, and collect memory
+and root-disk metrics for three basic alarms. The CloudWatch agent was chosen
+over the `awslogs` Docker driver because it also provides the host metrics, it
+keeps `docker logs` working on the host, and it does not leak AWS dependencies
+into the CI disposable stack.
+
+### Log bounds in the deployment Compose file
+
+`compose.ec2.yaml` now sets a shared logging block on all eleven runtime
+containers: `json-file` with `max-size: 10m`, `max-file: 3` (30 MB per
+container, roughly 330 MB worst case) and `labels: com.docker.compose.service`.
+Docker applies log options only at container creation, so the bounds take
+effect when the next deployment recreates the containers. Local development
+keeps the unbounded defaults. Every line is a Docker JSON envelope
+(`{"log","stream","time","attrs",...}`) whose `attrs` field carries the compose
+service name, keeping lines self-describing in CloudWatch. Gateway access logs
+stay off; its stderr warnings reach CloudWatch through the same files.
+
+### CloudWatch agent configuration
+
+`scripts/amazon-cloudwatch-agent.json` ships in the repository and reaches
+`/opt/foc/scripts/` through the normal release fast-forward. It publishes:
+
+| Data | Detail |
+| --- | --- |
+| Container logs | `/var/lib/docker/containers/*/*-json.log` into log group `/foc/app`, one stream per container log file, seven-day retention |
+| Memory | `mem_used_percent` in namespace `CWAgent`, dimension `InstanceId` |
+| Root disk | `disk_used_percent` for mount `/` only, `drop_device` keeps dimensions stable across Nitro reboots |
+
+`publish_multi_logs: true` is required for the wildcard path: without it the
+agent ships only the most recently modified matching file, silently dropping
+the other ten containers. The log envelope is stored verbatim in CloudWatch;
+Logs Insights can unwrap it with
+`parse @message '{"log": *, "stream": *, "time": *, "attrs": *}' as line, stream, time, attrs`.
+
+### One-time agent installation on EC2
+
+Run after a release that includes the agent configuration (so the file exists
+under `/opt/foc/scripts/`). Send through SSM as root:
+
+```sh
+aws ssm send-command \
+  --profile nus-foc --region ap-southeast-1 \
+  --instance-ids i-0ceabdd31ee0f7594 \
+  --document-name AWS-RunShellScript \
+  --parameters commands='
+set -eu
+cd /opt/foc
+curl -fsSLo /tmp/amazon-cloudwatch-agent.deb \
+  https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+dpkg -i /tmp/amazon-cloudwatch-agent.deb
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 \
+  -c file:/opt/foc/scripts/amazon-cloudwatch-agent.json -s
+' --query 'Command.CommandId' --output text
+```
+
+Check progress with `aws ssm get-command-invocation` and verify with
+`.../amazon-cloudwatch-agent-ctl -a status`. The instance role needs
+`CloudWatchAgentServerPolicy`; attach it first (next section).
+
+### IAM, notifications and alarms
+
+Run these from a laptop with the AWS CLI. The IAM and SNS steps can happen at
+any time; the alarms need the agent installed and publishing first.
+
+The agent authenticates through the instance role, exactly like ECR pulls do.
+`CloudWatchAgentServerPolicy` is the AWS-managed policy covering
+`cloudwatch:PutMetricData`, log group/stream creation, `PutLogEvents`,
+`PutRetentionPolicy` and SSM parameter reads. Find the role behind the instance
+profile and attach it:
+
+```sh
+aws ec2 describe-instances --profile nus-foc --region ap-southeast-1 \
+  --instance-ids i-0ceabdd31ee0f7594 \
+  --query 'Reservations[0].Instances[0].IamInstanceProfile.Arn' --output text
+# The role name is the last path segment of that instance-profile ARN.
+aws iam attach-role-policy --profile nus-foc \
+  --role-name <role-name> \
+  --policy-arn arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+```
+
+Alarms need somewhere to notify. The `foc-demo-alarms` SNS topic is that
+destination; the email subscription fans out to an inbox. AWS sends a
+confirmation email that must be accepted before notifications are delivered:
+
+```sh
+aws sns create-topic --profile nus-foc --region ap-southeast-1 --name foc-demo-alarms
+aws sns subscribe --profile nus-foc --region ap-southeast-1 \
+  --topic-arn <topic-arn> --protocol email --notification-endpoint <email>
+aws sns list-subscriptions-by-topic --profile nus-foc --region ap-southeast-1 \
+  --topic-arn <topic-arn>   # Status flips to Confirmed after accepting
+```
+
+After the agent publishes its first data points, create the alarms. A CloudWatch
+alarm targets one metric plus an exact dimension set, and dimension sets must
+match what the agent actually publishes — list them instead of guessing:
+
+```sh
+aws cloudwatch list-metrics --profile nus-foc --region ap-southeast-1 \
+  --namespace CWAgent
+```
+
+| Alarm | Condition | Detection window |
+| --- | --- | --- |
+| `foc-demo-memory-high` | `mem_used_percent` > 85 | 2 × 5 min |
+| `foc-demo-disk-high` | root `disk_used_percent` > 80 | 2 × 5 min |
+| `foc-demo-instance-status-check` | `StatusCheckFailed` > 0 | 3 × 1 min |
+
+```sh
+aws cloudwatch put-metric-alarm --profile nus-foc --region ap-southeast-1 \
+  --alarm-name foc-demo-memory-high \
+  --alarm-description "FoC EC2 memory above 85% for 10 minutes" \
+  --namespace CWAgent --metric-name mem_used_percent --statistic Average \
+  --dimensions Name=InstanceId,Value=i-0ceabdd31ee0f7594 \
+  --period 300 --evaluation-periods 2 --threshold 85 \
+  --comparison-operator GreaterThanThreshold --alarm-actions <topic-arn>
+
+# Copy the full dimension set of the disk metric (InstanceId, path, fstype,
+# partition) from list-metrics output:
+aws cloudwatch put-metric-alarm --profile nus-foc --region ap-southeast-1 \
+  --alarm-name foc-demo-disk-high \
+  --alarm-description "FoC EC2 root disk above 80% for 10 minutes" \
+  --namespace CWAgent --metric-name disk_used_percent --statistic Average \
+  --dimensions <disk dimensions from list-metrics> \
+  --period 300 --evaluation-periods 2 --threshold 80 \
+  --comparison-operator GreaterThanThreshold --alarm-actions <topic-arn>
+
+aws cloudwatch put-metric-alarm --profile nus-foc --region ap-southeast-1 \
+  --alarm-name foc-demo-instance-status-check \
+  --alarm-description "FoC EC2 status checks failing" \
+  --namespace AWS/EC2 --metric-name StatusCheckFailed --statistic Maximum \
+  --dimensions Name=InstanceId,Value=i-0ceabdd31ee0f7594 \
+  --period 60 --evaluation-periods 3 --threshold 0 \
+  --comparison-operator GreaterThanThreshold --alarm-actions <topic-arn>
+```
+
+New alarms start in `INSUFFICIENT_DATA` and settle to `OK` once enough
+datapoints exist. Missing data is treated as missing, so a stopped agent leaves
+alarms in `INSUFFICIENT_DATA` rather than firing them.
+
+### Cost and teardown
+
+The agent itself is free. Charges are log ingestion and seven-day storage,
+two custom metrics and three standard alarms — typically a few dollars per
+month at this traffic. For teardown, delete the alarms and the SNS topic; the
+`/foc/app` log group expires by its own seven-day retention.
+
+### Verification
+
+1. After the next deployment, `docker inspect` any container and confirm the
+   `LogConfig` shows `max-size=10m`.
+2. `aws logs tail /foc/app --follow` shows one stream per container with
+   service names in `attrs`.
+3. `aws cloudwatch list-metrics --namespace CWAgent` shows both metrics.
+4. Alarms leave `INSUFFICIENT_DATA` after roughly ten minutes of data.
