@@ -9,6 +9,7 @@ import (
 )
 
 type Config struct {
+	ScheduleToken                                            string
 	SupplierInternalURL, SupplierInternalToken               string
 	DatabaseURL, Origin, SessionCookie                       string
 	UserServiceURL, UserServiceToken                         string
@@ -18,12 +19,16 @@ type Config struct {
 
 func LoadConfig() (Config, error) {
 	c := Config{
+		ScheduleToken:       os.Getenv("ORDER_SCHEDULE_INTERNAL_TOKEN"),
 		SupplierInternalURL: os.Getenv("ORDER_SUPPLIER_INTERNAL_URL"), SupplierInternalToken: os.Getenv("ORDER_SUPPLIER_INTERNAL_TOKEN"),
 		DatabaseURL: os.Getenv("ORDER_DATABASE_URL"), Origin: os.Getenv("ORDER_APP_ORIGIN"),
 		SessionCookie: os.Getenv("ORDER_SESSION_COOKIE"), UserServiceURL: os.Getenv("ORDER_USER_SERVICE_URL"),
 		UserServiceToken: os.Getenv("ORDER_USER_INTERNAL_TOKEN"), SupplierServiceURL: os.Getenv("ORDER_SUPPLIER_SERVICE_URL"),
 		CreditServiceURL: os.Getenv("ORDER_CREDIT_SERVICE_URL"), CreditServiceToken: os.Getenv("ORDER_CREDIT_INTERNAL_TOKEN"),
 		DependencyTimeout: 3 * time.Second, RecoveryInterval: 30 * time.Second, RecoveryStaleAfter: time.Minute,
+	}
+	if c.ScheduleToken != "" && !validSecret(c.ScheduleToken) {
+		return c, errors.New("ORDER_SCHEDULE_INTERNAL_TOKEN must be at least 32 characters")
 	}
 	if c.SupplierInternalURL != "" || c.SupplierInternalToken != "" {
 		u, err := url.Parse(c.SupplierInternalURL)

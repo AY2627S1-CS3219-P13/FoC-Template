@@ -10,7 +10,7 @@ import unittest
 
 
 TAG = "a" * 40
-SERVICES = ["user-service", "supplier-service", "credit-service", "order-service", "frontend", "gateway"]
+SERVICES = ["user-service", "supplier-service", "credit-service", "order-service", "schedule-order", "frontend", "gateway"]
 STUB = r'''#!/usr/bin/env python3
 import json
 import os
@@ -51,7 +51,7 @@ class DeployTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         (self.root / "scripts").mkdir()
         shutil.copy(Path(__file__).with_name("deploy-ec2.sh"), self.root / "scripts/deploy-ec2.sh")
-        for name in [".env", "credit-service/.env", "order-service/.env"]:
+        for name in [".env", "credit-service/.env", "order-service/.env", "schedule-order/.env"]:
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("# disposable test configuration\n")
@@ -90,13 +90,15 @@ class DeployTests(unittest.TestCase):
         self.assertEqual(calls[preflight][-4:], ["--rm", "--no-deps", "user-service", "check-config"])
         self.assertLess(stop, credit)
         self.assertLess(credit, gateway)
-        self.assertEqual(calls[pull][-6:], SERVICES)
+        self.assertEqual(calls[pull][-len(SERVICES):], SERVICES)
+        self.assertIn("schedule-order",calls[stop])
+        self.assertTrue(any(self.action(c)=="exec" and "http://schedule-order:8080/readyz" in c for c in calls))
         self.assertFalse(any(self.action(c) == "down" or "--volumes" in c for c in calls))
         for call in calls:
             if self.action(call) == "up":
                 self.assertIn("--no-build", call)
                 self.assertIn("never", call)
-        self.assertEqual(sum(c[0] == "docker" and c[1] == "inspect" for c in calls), 6)
+        self.assertEqual(sum(c[0] == "docker" and c[1] == "inspect" for c in calls), len(SERVICES))
 
     def test_failed_download_does_not_stop_running_services(self):
         result = self.run_deploy(FAIL_ACTION="pull")

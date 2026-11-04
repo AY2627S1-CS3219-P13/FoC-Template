@@ -485,3 +485,7 @@ month at this traffic. For teardown, delete the alarms and the SNS topic; the
    service names in `attrs`.
 3. `aws cloudwatch list-metrics --namespace CWAgent` shows both metrics.
 4. Alarms leave `INSUFFICIENT_DATA` after roughly ten minutes of data.
+
+### Schedule Order rollout prerequisite
+
+Schedule Order now participates in the image-publish matrix and image-only EC2 override as `foc/schedule-order`. Provision that ECR repository and include it in the existing publish/describe IAM scope before releasing this change. Run the existing User/Credit/Order environment initializers on the deployment checkout; Order initialization creates `schedule-order/.env` and appends the shared import credential without replacing existing settings. Schedule owns the new `schedule-data` volume. Deployment stops Schedule and Order together before the Order migration, then checks Schedule readiness over the private Compose network. These code/configuration changes do not provision AWS resources or deploy automatically from this local task.

@@ -12,7 +12,8 @@ var webAssets embed.FS
 func registerUI(mux *http.ServeMux) {
 	for route, file := range map[string]string{
 		"/orders": "index.html", "/orders/": "index.html",
-		"/orders/app.js": "app.js", "/orders/core.mjs": "core.mjs", "/orders/style.css": "style.css",
+		"/orders/schedule": "index.html",
+		"/orders/app.js":   "app.js", "/orders/core.mjs": "core.mjs", "/orders/style.css": "style.css",
 	} {
 		pattern := "GET " + route
 		if route == "/orders/" {

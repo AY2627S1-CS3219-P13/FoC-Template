@@ -1,0 +1,6 @@
+.env
+.env.*
+.git
+.agent
+output
+test-results

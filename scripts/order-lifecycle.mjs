@@ -86,6 +86,40 @@ assert.equal((await action(requester, cancelled.id, 'cancel')).status, 'cancelle
 await until(async () => { const w = await wallet(requester); return w.available === 70 && w.reserved === 0; }, 'Real Credit refund did not complete');
 assert.equal((await history(requester)).filter(t => t.kind === 'release' && t.orderId === cancelled.id).length, 1);
 console.log('PASS: repeated cancellation produces exactly one refund');
+// Scheduled creation and asynchronous ownership transfer use the real separate
+// Schedule database/runtime, Order's private import listener and Credit escrow.
+const locations=places.filter(p=>p.type==='location');
+assert(locations.length>=2);
+const dateParts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Singapore',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(Date.now()+86400000));
+const part=type=>dateParts.find(p=>p.type===type).value;
+const date=`${part('year')}-${part('month')}-${part('day')}`;
+const scheduledPayload={pickup:{type:'location',id:locations[0].id},delivery:{type:'location',id:locations[1].id},items:[{name:'Future scheduled validation',quantity:1}],offeredCredits:10,windowStart:`${date}T09:00:00+08:00`};
+const scheduledKey=randomBytes(16).toString('hex');
+const scheduled=(await call(requester,'/api/v1/scheduled-orders','POST',scheduledPayload,201,{'Idempotency-Key':scheduledKey})).data.order;
+assert.equal(scheduled.status,'scheduled');
+assert.equal((await call(requester,'/api/v1/scheduled-orders','POST',scheduledPayload,200,{'Idempotency-Key':scheduledKey})).data.order.id,scheduled.id);
+assert.equal((await wallet(requester)).reserved,10);
+assert.equal((await call(courier,`/api/v1/scheduled-orders/${scheduled.id}/actions`,'POST',{action:'accept'},202)).data.order.transferPending,true);
+await until(async()=>{
+  const response=await fetch(base+`/api/v1/orders/${scheduled.id}`,{headers:{Cookie:requester.cookie},signal:AbortSignal.timeout(5000)});
+  if(response.status===404)return false;
+  assert.equal(response.status,200);
+  const imported=(await response.json()).order;
+  assert.equal(imported.courierId,courier.id);
+  assert.equal(new Date(imported.windowStart).getTime(),Date.parse(scheduledPayload.windowStart));
+  return imported.status==='accepted';
+},'Asynchronous scheduled transfer did not complete');
+assert.equal((await wallet(requester)).reserved,10);
+assert.equal((await call(courier,'/api/v1/orders/session')).data.courierActive,1);
+await action(requester,scheduled.id,'cancel');
+await until(async()=>{const w=await wallet(requester);return w.available===70&&w.reserved===0;},'Transferred scheduled refund did not complete');
+const scheduledHistory=await history(requester);
+assert.equal(scheduledHistory.filter(t=>t.kind==='reserve'&&t.orderId===scheduled.id).length,1);
+assert.equal(scheduledHistory.filter(t=>t.kind==='release'&&t.orderId===scheduled.id).length,1);
+const replayAfterTransfer=(await call(requester,'/api/v1/scheduled-orders','POST',scheduledPayload,200,{'Idempotency-Key':scheduledKey})).data.order;
+assert.equal(replayAfterTransfer.status,'cancelled');
+assert.equal(replayAfterTransfer.courierId,courier.id);
+console.log('PASS: scheduled creation reserves once, asynchronously transfers ownership, and cancels/refunds through Order');
 await call(requester, '/api/v1/auth/logout', 'POST', undefined, 204);
 await call(courier, '/api/v1/auth/logout', 'POST', undefined, 204);
 console.log('Real four-service Order/Credit lifecycle check passed.');

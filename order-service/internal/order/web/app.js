@@ -13,6 +13,10 @@ import {
 const STALE_AFTER_MS = 4500;
 const POLL_INTERVAL_MS = 2000;
 const STALE_CHECK_INTERVAL_MS = 500;
+const scheduleMode = location.pathname === "/orders/schedule";
+// Imported orders retain assignment history in every later state. Unassigned
+// scheduled IDs, including cancelled/expired requests, remain Schedule-owned.
+const scheduleOwned = order => order?.id?.startsWith("scheduled-") && !order.courierId;
 
 const $ = (id) => document.getElementById(id);
 const emptyDraft = () => ({
@@ -21,6 +25,7 @@ const emptyDraft = () => ({
   items: [],
   offer: "",
   expiry: "",
+  date: "", slot: "",
   name: "",
   quantity: "1",
   description: "",
@@ -71,7 +76,7 @@ const show = (id, text, kind = "notice") => {
 };
 
 async function api(path, options = {}) {
-  const response = await fetch(`/api/v1/orders${path}`, {
+  const response = await fetch(`${options.schedule ? "/api/v1/scheduled-orders" : "/api/v1/orders"}${path}`, {
     credentials: "same-origin",
     ...options,
     headers: { "Content-Type": "application/json", ...options.headers },
@@ -90,7 +95,7 @@ async function api(path, options = {}) {
 }
 
 function storageKey() {
-  return `foc.order.v1.${user}`;
+  return `foc.order.v1.${scheduleMode ? "scheduled." : ""}${user}`;
 }
 function persist(required = false) {
   if (!user) return;
@@ -131,6 +136,7 @@ function readDraft() {
   ])
     $(id).value = draft[field];
   renderItems();
+  if (scheduleMode) { $("schedule-date").value=draft.date; void loadSlots(); }
   preview();
   controls();
   if (attempt)
@@ -189,6 +195,7 @@ async function session() {
       await loadPlaces();
     }
     admin = identity.roles.includes("admin");
+    $("courier-capacity").textContent=`${identity.courierActive} / ${identity.courierLimit} active deliveries`;
     if (capacityRevision === capacityVersion)
       courierBusy = identity.courierBusy;
     void refreshAccount();
@@ -384,6 +391,7 @@ function preview() {
   } catch {
     $("preview-expiry").textContent = "Choose a valid date";
   }
+  if(scheduleMode) $("preview-expiry").textContent=draft.slot ? `${time(draft.slot)} – ${time(new Date(Date.parse(draft.slot)+1800000))} SGT` : "Choose a delivery window";
 }
 function controls() {
   $("creation-fields").disabled = !user || !!attempt || posting;
@@ -486,8 +494,9 @@ async function post(event) {
   const generation = epoch;
   try {
     if (!attempt) {
-      const body = creationBody(draft);
-      if (new Date(expiryISO(draft.expiry)).getTime() <= Date.now())
+      if (scheduleMode && !draft.slot) throw new Error("Choose an available delivery window.");
+      const body = creationBody(draft, scheduleMode ? draft.slot : undefined);
+      if (!scheduleMode && new Date(expiryISO(draft.expiry)).getTime() <= Date.now())
         throw new Error("Expiry must be in the future, in Singapore time.");
       attempt = { key: creationKey(), body };
     }
@@ -499,6 +508,7 @@ async function post(event) {
       "Posting… You can still browse other errands. Success will appear only after the server confirms it.",
     );
     const data = await api("", {
+      schedule: scheduleMode,
       method: "POST",
       headers: { "Idempotency-Key": attempt.key },
       body: attempt.body,
@@ -557,7 +567,7 @@ function renderList() {
     $("orders").append(node("div", "No errands here yet.", "empty"));
   for (const record of rows) {
     const o = cache.get(record.id) || record;
-    if (view === "open" && (o.status !== "open" || o.requesterId === user)) continue;
+    if (view === "open" && (!["open","scheduled"].includes(o.status) || o.requesterId === user)) continue;
     const card = node(
         "button",
         undefined,
@@ -572,6 +582,7 @@ function renderList() {
       statusPill(o.status),
       node("small", `Expires ${time(o.expiresAt)} SGT`),
     );
+    if (o.windowStart) card.append(node("p",`Delivery ${time(o.windowStart)} – ${time(o.expiresAt)} SGT`));
     card.addEventListener("click", () => {
       selected = o.id;
       detailStale = true;
@@ -606,12 +617,20 @@ async function loadList() {
     const data = await api(`?scope=${current}&page=${currentPage}&sort=${sort}&filter=${filter}`, {
       signal: AbortSignal.timeout(2500),
     });
+    if (["mine","open"].includes(current) && currentPage===1) {
+      const scheduled=await api(`?scope=${current}`,{schedule:true,signal:AbortSignal.timeout(Math.max(1,2500-(Date.now()-started)))});
+      data.orders.push(...scheduled.orders.filter(o=>filter==="all" || (filter==="past") === ["cancelled","expired"].includes(o.status)));
+    }
     // Timers may resume late after a suspended tab; also fence the response age.
     if (Date.now() - started >= 2500) throw new Error("Refresh deadline exceeded.");
     if (generation !== epoch || view !== current || page !== currentPage || revision !== listGeneration)
       return;
     lastListSync = started;
-    rows = data.orders.map(remember);
+    rows = [...new Map(data.orders.map(o=>[o.id,remember(o)])).values()];
+    if(current==="open") rows.sort((a,b)=>{
+      if(sort==="credits" && BigInt(a.offeredCredits)!==BigInt(b.offeredCredits)) return BigInt(a.offeredCredits)>BigInt(b.offeredCredits) ? -1 : 1;
+      return Date.parse(a.expiresAt)-Date.parse(b.expiresAt) || Date.parse(a.createdAt)-Date.parse(b.createdAt) || a.id.localeCompare(b.id);
+    });
     hasMore = data.hasMore;
     stale = false;
     if (rows.some((o) => o.id === selected)) detailStale = false;
@@ -666,6 +685,9 @@ function renderDetail() {
     detail.append(node("h4", label), node("p", text));
   if (o.cancellationReason)
     detail.append(node("p", o.cancellationReason, "warning"));
+  if (o.windowStart) detail.append(node("h4","Fixed delivery window"),node("p",`${time(o.windowStart)} – ${time(o.expiresAt)} SGT`));
+  if (o.transferPending) detail.append(node("p","Acceptance pending. Waiting for confirmed assignment.","notice"));
+  if (o.refundPending) detail.append(node("p","Credit refund pending.","notice"));
   if (o.status === "delivered")
     detail.append(
       node(
@@ -689,10 +711,10 @@ function renderDetail() {
   if (o.completionRequestedAt && o.status === "delivered")
     detail.append(node("p", "Updating… Confirmation is pending. A dispute can still be raised before completion.", "notice"));
   let available = [];
-  if (o.status === "open" && o.requesterId !== user) available = ["accept"];
+  if (["open","scheduled"].includes(o.status) && o.requesterId !== user) available = ["accept"];
   if (o.courierId === user && o.status === "accepted") available = ["pick_up"];
   if (o.courierId === user && o.status === "picked up") available = ["deliver"];
-  if (o.requesterId === user && ["open", "accepted"].includes(o.status)) available = ["cancel"];
+  if (o.requesterId === user && ["open", "scheduled", "accepted"].includes(o.status)) available = ["cancel"];
   if (o.requesterId === user && o.status === "delivered") available = o.completionRequestedAt ? ["dispute"] : ["confirm", "dispute"];
   if (admin && o.status === "dispute") available = ["resolve_completed", "resolve_not_completed"];
   if (pendingAction) available = [pendingAction.action];
@@ -703,12 +725,13 @@ function renderDetail() {
       resolve_completed: "Resolve as completed", resolve_not_completed: "Resolve as not completed",
     }[action], "primary");
     button.disabled = stale || detailStale || inFlight.has(o.id) ||
+      o.transferPending || (action === "deliver" && o.windowStart && (Date.now()<Date.parse(o.windowStart) || Date.now()>=Date.parse(o.expiresAt))) ||
       (action === "accept" && courierBusy !== false && !pendingAction) ||
       (action === "accept" && Object.keys(pending).some((id) => id !== o.id));
     button.addEventListener("click", () => void act(o.id, action));
     actions.append(button);
     if (action === "accept" && courierBusy !== false && !pendingAction)
-      actions.append(node("span", courierBusy ? "You have an ongoing order." : "Checking your delivery availability…", "muted"));
+      actions.append(node("span", courierBusy ? "You have three active orders." : "Checking your delivery availability…", "muted"));
   }
   if (pendingAction?.message)
     detail.append(node("p", pendingAction.message, "error"));
@@ -723,6 +746,7 @@ async function act(id, action) {
     inFlight.add(id);
     renderDetail();
     const data = await api(`/${encodeURIComponent(id)}/actions`, {
+      schedule: scheduleOwned(cache.get(id)),
       method: "POST",
       body: JSON.stringify({ action }),
     });
@@ -772,9 +796,11 @@ async function syncDetail() {
   try {
     // This signed-in refresh detects Supplier changes without retaining a cookie
     // server-side. Facts and refund intent commit together before the response.
-    const data = await api(`/${encodeURIComponent(id)}/refresh`, {
-      method: "POST",
-      body: "{}",
+    const scheduled=scheduleOwned(cache.get(id));
+    const data = await api(`/${encodeURIComponent(id)}${scheduled ? "" : "/refresh"}`, {
+      schedule: scheduled,
+      method: scheduled ? "GET" : "POST",
+      ...(scheduled ? {} : {body: "{}"}),
       signal: AbortSignal.timeout(2500),
     });
     if (generation !== epoch) return;
@@ -804,7 +830,21 @@ async function syncDetail() {
     syncing = false;
   }
 }
+function updateActiveTab() {
+  const scheduling = scheduleMode && view === "create";
+  if (scheduling) $("schedule-order-link").setAttribute("aria-current", "page");
+  else $("schedule-order-link").removeAttribute("aria-current");
+  document.querySelectorAll("[data-view]").forEach((button) => {
+    if (!scheduling && button.dataset.view === view)
+      button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+}
 function setView(next) {
+  if (scheduleMode && next === "create") {
+    location.assign("/orders");
+    return;
+  }
   view = next;
   selected = null;
   detailStale = true;
@@ -814,11 +854,7 @@ function setView(next) {
   show("sync-notice", "List is not updated. Synchronizing…", "warning");
   page = 1;
   rows = [];
-  document.querySelectorAll("[data-view]").forEach((button) => {
-    if (button.dataset.view === view)
-      button.setAttribute("aria-current", "page");
-    else button.removeAttribute("aria-current");
-  });
+  updateActiveTab();
   $("create-view").hidden = view !== "create";
   $("list-view").hidden = view === "create";
   $("list-label").textContent =
@@ -917,3 +953,34 @@ setInterval(() => {
     renderDetail();
   }
 }, STALE_CHECK_INTERVAL_MS);
+
+let slotsRevision=0;
+async function loadSlots() {
+  if (!scheduleMode || attempt) return;
+  const revision=++slotsRevision;
+  const select=$("schedule-slot"); select.replaceChildren(new Option("Choose delivery window", ""));
+  if (!draft.pickup || !draft.delivery || !draft.date) return;
+  const ref=value=>({type:value.slice(0,value.indexOf(":")),id:value.slice(value.indexOf(":")+1)});
+  const p=ref(draft.pickup),d=ref(draft.delivery);
+  const query=new URLSearchParams({date:draft.date,pickupType:p.type,pickupId:p.id,deliveryType:d.type,deliveryId:d.id});
+  try {
+    const data=await api(`/slots?${query}`,{schedule:true});
+    if(revision!==slotsRevision)return;
+    for(const start of data.slots)select.append(new Option(`${time(start)} – ${time(new Date(Date.parse(start)+1800000))}`,start));
+    if(data.slots.includes(draft.slot))select.value=draft.slot;
+    else {draft.slot="";persist();}
+    if(!data.slots.length)show("form-message","No available windows on this date. Choose another date.");
+  } catch(error) { if(revision===slotsRevision)show("form-message",error.message,"error"); }
+}
+$("schedule-fields").hidden=!scheduleMode;
+$("expiry-field").hidden=scheduleMode;
+$("expiry").required=!scheduleMode;
+$("schedule-date").required=scheduleMode;
+$("schedule-slot").required=scheduleMode;
+updateActiveTab();
+$("preview-status").textContent=scheduleMode ? "Scheduled" : "Open";
+$("preview-status").className=`pill status-${scheduleMode ? "scheduled" : "open"}`;
+if(scheduleMode)document.title="Schedule order · Friend on Campus";
+$("schedule-date").addEventListener("input",()=>{draft.date=$("schedule-date").value;persist();void loadSlots();});
+$("schedule-slot").addEventListener("change",()=>{draft.slot=$("schedule-slot").value;persist();});
+for(const id of ["pickup","delivery"])$(id).addEventListener("input",()=>void loadSlots());

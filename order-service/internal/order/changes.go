@@ -44,7 +44,7 @@ func (a *App) refreshPlaces(ctx context.Context, o Order, session string) (Order
 		}
 		*target = fresh
 	}
-	return o, nil
+	return checkScheduledHours(o)
 }
 
 func saveChange(ctx context.Context, tx pgx.Tx, before, after Order) (Order, error) {
@@ -216,6 +216,9 @@ func (a *App) transition(w http.ResponseWriter, r *http.Request) error {
 	if before.Status != from {
 		return problem(409, "status_conflict", "This errand has changed. Refresh its confirmed status.")
 	}
+	if body.Action == "deliver" && before.WindowStart != nil && r.Context().Value(receivedKey{}).(time.Time).Before(*before.WindowStart) {
+		return problem(409, "delivery_too_early", "Delivery can only be marked within the fixed delivery window.")
+	}
 	if !before.ExpiresAt.After(r.Context().Value(receivedKey{}).(time.Time)) {
 		expired := before
 		expired.Status = "expired"
@@ -246,7 +249,7 @@ func (a *App) transition(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.ConstraintName == "orders_one_courier_slot" {
-			return problem(409, "courier_busy", "Finish delivering your current errand before accepting another.")
+			return problem(409, "courier_busy", "You have three active orders. Deliver or finish one before accepting another.")
 		}
 		return err
 	}

@@ -62,7 +62,7 @@ export function newer(previous, incoming) {
   return incoming;
 }
 
-export function creationBody(draft) {
+export function creationBody(draft, windowStart) {
   const ref = (value) => {
     const split = value.indexOf(":");
     if (split < 1) throw new Error("Choose both pickup and delivery.");
@@ -79,6 +79,6 @@ export function creationBody(draft) {
       quantity: positiveInteger(item.quantity),
     })),
     offeredCredits: positiveInteger(draft.offer),
-    expiresAt: expiryISO(draft.expiry),
+    ...(windowStart ? {windowStart} : {expiresAt: expiryISO(draft.expiry)}),
   });
 }

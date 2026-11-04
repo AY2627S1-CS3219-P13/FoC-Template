@@ -47,6 +47,7 @@ test("review07 replaying an old delivery preserves aggregate courier capacity", 
   const old = await seed(page, "review-old-delivery");
   const current = await seed(page, "review-current-assignment");
   const candidate = await seed(page, "review-third-candidate");
+  const extraOne=await seed(page,"review-extra-one"),extraTwo=await seed(page,"review-extra-two");
   await start(page, "courier");
   await action(page, old.id, "accept");
   await action(page, old.id, "pick_up");
@@ -65,9 +66,11 @@ test("review07 replaying an old delivery preserves aggregate courier capacity", 
   await expect(page.locator("#order-detail")).toContainText("unresolved");
   // This authenticated request represents another tab accepting a newer errand.
   await action(page, current.id, "accept");
+  await action(page,extraOne.id,"accept");
+  await action(page,extraTwo.id,"accept");
   await page.getByRole("button", { name: "Help a friend", exact: true }).click();
   await select(page, "review-third-candidate");
-  await expect(page.locator("#order-detail")).toContainText("You have an ongoing order");
+  await expect(page.locator("#order-detail")).toContainText("You have three active orders");
   await expect(page.getByRole("button", { name: "Accept errand", exact: true })).toBeDisabled();
   expect((await page.evaluate(() => globalThis.__reviewCapacityState())).courierBusy).toBe(true);
   // Bound the observation window: don't let the periodic session poll conceal

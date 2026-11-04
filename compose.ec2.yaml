@@ -29,6 +29,11 @@ services:
     logging: *logging
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U foc_order -d foc_order"]
+  schedule-db:
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U foc_schedule -d foc_schedule"]
   mailpit:
     restart: unless-stopped
     logging: *logging
@@ -56,6 +61,11 @@ services:
   frontend:
     build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/frontend:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
+    restart: unless-stopped
+    logging: *logging
+  schedule-order:
+    build: !reset null
+    image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/schedule-order:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
     restart: unless-stopped
     logging: *logging
   gateway:

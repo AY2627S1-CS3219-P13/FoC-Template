@@ -246,6 +246,10 @@ func TestDeliveredReleasesOnlyItsOwnCourierSlot(t *testing.T) {
 	if got := actionForTest(t, a, first.ID, "courier", "deliver"); got.Code != 409 {
 		t.Fatal("skipped pickup")
 	}
+	for _, key := range []string{"held-extra-one", "held-extra-two"} {
+		extra := createdForTest(t, a, key)
+		mustAction(t, a, extra.ID, "courier", "accept", "accepted")
+	}
 	if got := actionForTest(t, a, second.ID, "courier", "accept"); got.Code != 409 {
 		t.Fatal("second assignment allowed")
 	}
@@ -271,7 +275,7 @@ func TestDeliveredReleasesOnlyItsOwnCourierSlot(t *testing.T) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.releases != 0 || f.reserved != 30 {
+	if f.releases != 0 || f.reserved != 50 {
 		t.Fatal("delivery moved credits")
 	}
 }
@@ -279,8 +283,8 @@ func TestDeliveredReleasesOnlyItsOwnCourierSlot(t *testing.T) {
 func TestConcurrentCourierAssignments(t *testing.T) {
 	a, _ := testApp(t)
 	a.auth = actorAuth{}
-	orders := []Order{createdForTest(t, a, "one"), createdForTest(t, a, "two")}
-	results := make(chan int, 2)
+	orders := []Order{createdForTest(t, a, "one"), createdForTest(t, a, "two"), createdForTest(t, a, "three"), createdForTest(t, a, "four")}
+	results := make(chan int, 4)
 	var wg sync.WaitGroup
 	for _, o := range orders {
 		wg.Add(1)
@@ -297,7 +301,7 @@ func TestConcurrentCourierAssignments(t *testing.T) {
 			busy++
 		}
 	}
-	if ok != 1 || busy != 1 {
+	if ok != 3 || busy != 1 {
 		t.Fatalf("success=%d busy=%d", ok, busy)
 	}
 }

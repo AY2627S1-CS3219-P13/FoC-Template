@@ -228,6 +228,10 @@ func TestDeliveryCommitControlsNextAcceptance(t *testing.T) {
 	}
 	underlying := a.catalogue
 	entered, finish := make(chan struct{}), make(chan struct{})
+	for _, key := range []string{"delivery-race-extra-one", "delivery-race-extra-two"} {
+		extra := createdForTest(t, a, key)
+		mustAction(t, a, extra.ID, "courier", "accept", "accepted")
+	}
 	var mu sync.Mutex
 	firstCall := true
 	a.catalogue = resolverFunc(func(ctx context.Context, ref PlaceRef, token string) (Place, error) {

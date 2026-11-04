@@ -34,6 +34,10 @@ func TestBrowserFixture(t *testing.T) {
 		}
 	}()
 	server := &http.Server{Addr: ":8080", ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/api/v1/scheduled-orders" {
+			writeJSON(w, 200, map[string]any{"orders": []Order{}, "hasMore": false})
+			return
+		}
 		if r.URL.Path == "/__test/session" {
 			token := r.URL.Query().Get("actor")
 			if token != "requester" && token != "courier" && token != "other" && token != "admin" {

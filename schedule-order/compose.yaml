@@ -1,0 +1,63 @@
+name: foc-schedule
+services:
+  schedule-test-db:
+    image: postgres:18-bookworm
+    profiles: [test]
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: schedule_order_test
+    tmpfs: [/var/lib/postgresql]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U test -d schedule_order_test]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  schedule-tests:
+    profiles: [test]
+    build:
+      context: .
+      target: development
+    environment:
+      SCHEDULE_TEST_DATABASE_URL: postgres://test:test@schedule-test-db:5432/schedule_order_test?sslmode=disable
+    depends_on:
+      schedule-test-db:
+        condition: service_healthy
+    command: [sh, scripts/check.sh]
+    volumes:
+      - schedule-go-cache:/root/.cache/go-build
+  schedule-db:
+    image: postgres:18-bookworm
+    environment:
+      POSTGRES_USER: foc_schedule
+      POSTGRES_PASSWORD: ${SCHEDULE_POSTGRES_PASSWORD:-}
+      POSTGRES_DB: foc_schedule
+    volumes: [schedule-data:/var/lib/postgresql]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U foc_schedule -d foc_schedule]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  schedule-order:
+    build: .
+    environment:
+      SCHEDULE_DATABASE_URL: postgres://foc_schedule:${SCHEDULE_POSTGRES_PASSWORD:-}@schedule-db:5432/foc_schedule?sslmode=disable
+      SCHEDULE_APP_ORIGIN: ${SCHEDULE_APP_ORIGIN:-http://localhost:3000}
+      SCHEDULE_USER_SERVICE_URL: http://user-service:8081
+      SCHEDULE_USER_INTERNAL_TOKEN: ${USER_INTERNAL_TOKEN:-}
+      SCHEDULE_SUPPLIER_SERVICE_URL: http://supplier-service:8080
+      SCHEDULE_SUPPLIER_INTERNAL_TOKEN: ${SUPPLIER_INTERNAL_TOKEN:-}
+      SCHEDULE_CREDIT_SERVICE_URL: http://credit-service:8081
+      SCHEDULE_CREDIT_INTERNAL_TOKEN: ${USER_CREDIT_INTERNAL_TOKEN:-}
+      SCHEDULE_ORDER_SERVICE_URL: http://order-service:8081
+      SCHEDULE_ORDER_INTERNAL_TOKEN: ${SCHEDULE_INTERNAL_TOKEN:-}
+    depends_on:
+      schedule-db:
+        condition: service_healthy
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+volumes:
+  schedule-data:
+  schedule-go-cache:
+    name: foc-schedule-go-cache

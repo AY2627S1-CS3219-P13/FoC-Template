@@ -63,3 +63,12 @@ test("creation serializes typed records, names and full precision amounts", () =
   assert.throws(() => creationBody({ ...draft, delivery: draft.pickup }));
   assert.throws(() => creationBody({ ...draft, items: [] }));
 });
+
+test("scheduled creation preserves int64 values and replaces manual expiry",()=>{
+ const draft={pickup:"location:com2",delivery:"location:utown",items:[{name:"Tea",quantity:"9223372036854775807"}],offer:"9223372036854775807",expiry:""};
+ const raw=creationBody(draft,"2030-11-04T09:00:00+08:00");
+ assert.match(raw,/"offeredCredits":9223372036854775807/);
+ assert.match(raw,/"quantity":9223372036854775807/);
+ assert.equal(JSON.parse(raw).windowStart,"2030-11-04T09:00:00+08:00");
+ assert.ok(!raw.includes('"expiresAt"'));
+});

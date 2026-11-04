@@ -17,6 +17,7 @@
       ><div class="account-bar">
         <span id="account-name" class="account-label"></span>
         <span id="account-balance" class="account-label" aria-live="polite"></span>
+        <span id="courier-capacity" class="account-label" aria-live="polite"></span>
         <a class="secondary" href="/">Back to catalogue</a>
       </div>
     </header>
@@ -45,6 +46,7 @@
           <h2>Your errand desk</h2>
         </div>
         <nav aria-label="Errand views" class="tabs">
+          <a id="schedule-order-link" href="/orders/schedule">Schedule order</a>
           <button data-view="create" aria-current="page">New errand</button
           ><button data-view="mine">My requests</button
           ><button data-view="open">Help a friend</button
@@ -168,12 +170,16 @@
                     >Positive whole credits, within your available
                     balance.</small
                   ></label
-                ><label
+                ><label id="expiry-field"
                   >Expiry · Singapore time <span class="required">*</span
                   ><input id="expiry" type="datetime-local" required /><small
                     >SGT (UTC+08:00), regardless of your device timezone.</small
                   ></label
                 >
+              </div>
+              <div id="schedule-fields" class="fields" hidden>
+                <label>Delivery date<input id="schedule-date" type="date" /><small>Singapore time. At least one hour ahead.</small></label>
+                <label>Delivery window<select id="schedule-slot"><option value="">Choose places and a date</option></select><small>Delivery must be marked within this fixed 30-minute window.</small></label>
               </div>
             </fieldset>
             <p id="form-message" role="status" hidden></p>
@@ -216,7 +222,7 @@
               </div>
               <div>
                 <dt>Status after posting</dt>
-                <dd><span class="pill status-open">Open</span></dd>
+                <dd><span id="preview-status" class="pill status-open">Open</span></dd>
               </div>
             </dl>
           </div>

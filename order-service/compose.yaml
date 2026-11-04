@@ -21,6 +21,7 @@ services:
     build: .
     environment:
       ORDER_DATABASE_URL: postgres://foc_order:${ORDER_POSTGRES_PASSWORD:-}@order-db:5432/foc_order?sslmode=disable
+      ORDER_SCHEDULE_INTERNAL_TOKEN: ${SCHEDULE_INTERNAL_TOKEN:-}
       ORDER_APP_ORIGIN: ${ORDER_APP_ORIGIN:-http://localhost:8084}
       ORDER_SESSION_COOKIE: ${ORDER_SESSION_COOKIE:-}
       ORDER_USER_SERVICE_URL: ${ORDER_USER_SERVICE_URL:-http://user-service:8081}
@@ -66,6 +67,8 @@ services:
       order-test-db:
         condition: service_healthy
     command: ["sh", "scripts/check.sh"]
+    volumes:
+      - order-go-cache:/root/.cache/go-build
 
   order-ui-fixture:
     profiles: [ui-test]
@@ -79,6 +82,8 @@ services:
       order-test-db:
         condition: service_healthy
     command: ["go", "test", "./internal/order", "-run", "^TestBrowserFixture$", "-count=1", "-timeout=30m"]
+    volumes:
+      - order-go-cache:/root/.cache/go-build
     ports:
       - "127.0.0.1:8085:8080"
     healthcheck:
@@ -100,3 +105,5 @@ services:
 
 volumes:
   order-data:
+  order-go-cache:
+    name: foc-order-go-cache

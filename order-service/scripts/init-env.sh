@@ -6,6 +6,9 @@ file="$root/.env"
 # Root Compose shares this read-only Supplier credential with Order. Keep
 # existing credentials intact, including when the Order environment exists.
 shared_env="$root/../.env"
+if [ -f "$shared_env" ]; then
+  sh "$root/../schedule-order/scripts/init-env.sh"
+fi
 if [ -f "$shared_env" ] && ! grep -q '^SUPPLIER_INTERNAL_TOKEN=' "$shared_env"; then
   umask 077
   supplier_token=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')

@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [user, supplier, credit, order]
+        service: [user, supplier, credit, order, schedule]
     steps:
       - uses: actions/checkout@v5
       - name: Generate local environment

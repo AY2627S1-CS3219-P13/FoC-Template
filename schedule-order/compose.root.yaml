@@ -1,0 +1,13 @@
+services:
+  schedule-order:
+    environment:
+      SCHEDULE_APP_ORIGIN: ${USER_APP_ORIGIN:-http://localhost:3000}
+    depends_on:
+      order-service:
+        condition: service_started
+      supplier-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+      credit-service:
+        condition: service_started

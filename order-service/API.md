@@ -339,3 +339,13 @@ upgrade procedure and resumable legacy bootstrap; no new public replay endpoint
 or additional configuration is introduced.
 
 Creation reconciliation releases visible escrows or aborts missing ones through Credit’s durable `/abort` endpoint. It does not retry reservation merely to obtain a cleanup record. Terminal abandonment requires Credit confirmation that no late request can freeze funds; dependency failures keep `release_pending` retryable.
+
+## Scheduled-order integration
+
+Schedule Order is an independent service with a child page at `/orders/schedule`. Public scheduling endpoints and the private import protocol are documented in [Schedule Order API](../schedule-order/API.md). The gateway routes its API separately; all post-transfer lifecycle actions continue through Order.
+
+`GET /api/v1/orders/session` now also returns `courierActive` and `courierLimit:3`; `courierBusy` means the combined accepted/picked-up count has reached three. This replaces the earlier one-slot limit. Delivery/cancellation/expiry free only the affected assignment, and delivered/disputed/history states do not count. Overlapping scheduled windows are allowed.
+
+Imported orders retain `windowStart` and derive `expiresAt` as 30 minutes later. `deliver` is rejected with 409 `delivery_too_early` before window start; at/after end existing expiry rules apply. The UI disables delivery outside the window. Pickup has no added timing check. Full-window opening-hours reconciliation can system-cancel pre-delivery scheduled assignments with durable full-refund intent; invalid text/outages are not closure evidence.
+
+Order's private listener is port 8081 and only serves the authenticated scheduled import endpoint. Configure `ORDER_SCHEDULE_INTERNAL_TOKEN` to enable it; invalid supplied tokens fail startup. No internal route is exposed by the public handler or gateway. Import uses the existing reserved escrow and records durable outcomes, so duplicate calls cannot reserve, assign or settle again.

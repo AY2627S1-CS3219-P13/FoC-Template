@@ -64,8 +64,10 @@ func run(log *slog.Logger) error {
 	go lifecycleLoop(ctx, app, log)
 	go publicationLoop(ctx, app, log)
 	server := &http.Server{Addr: ":8080", Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second}
-	failure := make(chan error, 1)
+	private := &http.Server{Addr: ":8081", Handler: app.InternalHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second}
+	failure := make(chan error, 2)
 	go func() { failure <- server.ListenAndServe() }()
+	go func() { failure <- private.ListenAndServe() }()
 	log.Info("HTTP listener started", "publicPort", 8080)
 	select {
 	case <-ctx.Done():
@@ -74,6 +76,7 @@ func run(log *slog.Logger) error {
 	shutdown, done := context.WithTimeout(context.Background(), 15*time.Second)
 	defer done()
 	_ = server.Shutdown(shutdown)
+	_ = private.Shutdown(shutdown)
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return errors.New("HTTP server stopped unexpectedly")
 	}

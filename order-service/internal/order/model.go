@@ -42,6 +42,7 @@ type createRequest struct {
 }
 
 type Order struct {
+	WindowStart           *time.Time `json:"windowStart,omitempty"`
 	DeliveredAt           *time.Time `json:"deliveredAt,omitempty"`
 	CompletionRequestedAt *time.Time `json:"completionRequestedAt,omitempty"`
 	ID                    string     `json:"id"`

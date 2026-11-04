@@ -240,7 +240,7 @@ See [Supplier API](supplier-service/API.md) for CRUD and catalogue queries, [ver
 
 This repository follows a **one-service-per-folder** structure: each
 microservice (`user-service/`, `supplier-service/`, `order-service/`,
-`credit-service/`) lives in its own top-level folder.
+`credit-service/`, `schedule-order/`) lives in its own top-level folder.
 
 ```text
 .
@@ -249,6 +249,7 @@ microservice (`user-service/`, `supplier-service/`, `order-service/`,
 ├── supplier-service/
 ├── order-service/
 ├── credit-service/
+├── schedule-order/
 ├── gateway/
 ├── <n2h-service>/
 └── README.md
@@ -265,3 +266,9 @@ microservice (`user-service/`, `supplier-service/`, `order-service/`,
 
 CI smoke additionally runs `scripts/order-lifecycle.mjs` through the real four services and gateway. It creates two verified accounts, waits for their wallets, and asserts exact balances and ledger entries for creation/retry, acceptance, pickup, delivery, confirmation/payout/retry and cancellation/refund/retry. Delivery must free courier capacity before payout; the total across both wallets stays 200. CI destroys its disposable databases afterward. Run this control only against disposable data because it creates account/order/history fixtures.
 Smoke setup waits up to 65 seconds for initial wallet allocation after successful verification/login. Only `404 wallet_not_found` is retried; unexpected failures and incorrect balances still fail. Its immediate and delayed-allocation regression controls run in CI before the live smoke check.
+
+### Scheduled orders
+
+The main [Orders page](http://localhost:3000/orders) links to [Schedule order](http://localhost:3000/orders/schedule). The backend runs independently in `schedule-order/` with its own PostgreSQL database. Order's initializer also initializes its generated environment without replacing existing settings. The gateway starts and routes the service with the rest of the application.
+
+See [Schedule Order setup/recovery](schedule-order/README.md), [API](schedule-order/API.md) and [requirements](schedule-order/spec.md). Its isolated check is `docker compose --profile test run --build --rm schedule-tests`. Accepted regular and scheduled orders share a three-order courier cap; scheduled requests transfer asynchronously to Order Service on acceptance.
