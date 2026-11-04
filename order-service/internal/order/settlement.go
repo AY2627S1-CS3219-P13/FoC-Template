@@ -15,7 +15,8 @@ import (
 // A final completed decision is never reopened by a later dispute.
 const completionArbitration = time.Second
 
-func (a *App) settleAction(w http.ResponseWriter, r *http.Request, action string) error {
+func (a *App) settleAction(w http.ResponseWriter, r *http.Request, body actionRequest) error {
+	action := body.Action
 	ctx := r.Context()
 	identity := ctx.Value(identityKey{}).(Identity)
 	admin := slices.Contains(identity.Roles, "admin")
@@ -77,12 +78,15 @@ func (a *App) settleAction(w http.ResponseWriter, r *http.Request, action string
 			return statusConflict()
 		}
 		after.Status = "dispute"
+		after.DisputeDescription = body.Description
+		after.DisputePhoto = body.Photo
 		after.CompletionRequestedAt = nil
 	case "resolve_completed", "resolve_not_completed":
 		if before.Status != "dispute" {
 			return statusConflict()
 		}
 		after.Status = "completed"
+		after.ResolutionExplanation = body.Explanation
 		if action == "resolve_not_completed" {
 			after.Status = "not completed"
 		}

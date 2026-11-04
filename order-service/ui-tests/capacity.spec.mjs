@@ -63,6 +63,7 @@ test("review07 replaying an old delivery preserves aggregate courier capacity", 
     } else await route.continue();
   });
   await page.getByRole("button", { name: "Mark delivered", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Submit", exact: true }).click();
   await expect(page.locator("#order-detail")).toContainText("unresolved");
   // This authenticated request represents another tab accepting a newer errand.
   await action(page, current.id, "accept");

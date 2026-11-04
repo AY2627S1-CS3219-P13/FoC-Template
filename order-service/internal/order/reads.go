@@ -100,7 +100,18 @@ func (a *App) listOrders(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	more := len(result) > 20
+	// Creation boundaries let the browser merge unpaginated scheduled history
+	// into the correct regular-history page, rather than pinning it to page one.
+	type boundary struct {
+		ID        string    `json:"id"`
+		CreatedAt time.Time `json:"createdAt"`
+	}
+	var pageStart, nextPageStart *boundary
+	if len(result) > 0 {
+		pageStart = &boundary{result[0].ID, result[0].CreatedAt}
+	}
 	if more {
+		nextPageStart = &boundary{result[20].ID, result[20].CreatedAt}
 		result = result[:20]
 	}
 	// Release the query connection before reconciliation, including with a
@@ -129,7 +140,7 @@ func (a *App) listOrders(w http.ResponseWriter, r *http.Request) error {
 	if err := r.Context().Err(); err != nil {
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"orders": result, "page": page, "hasMore": more})
+	writeJSON(w, 200, map[string]any{"orders": result, "page": page, "hasMore": more, "pageStart": pageStart, "nextPageStart": nextPageStart})
 	return nil
 }
 

@@ -20,7 +20,7 @@ func registerUI(mux *http.ServeMux) {
 			pattern += "{$}"
 		}
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 			w.Header().Set("Referrer-Policy", "same-origin")
 			data, err := webAssets.ReadFile("web/" + file)
 			if err != nil {

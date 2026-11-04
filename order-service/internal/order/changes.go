@@ -59,8 +59,9 @@ func saveChange(ctx context.Context, tx pgx.Tx, before, after Order) (Order, err
 	updated, err := scanOrder(tx.QueryRow(ctx, `UPDATE orders SET pickup=$2,delivery=$3,status=$4,courier_id=$5,
         version=version+1,cancellation_reason=$6,
  delivered_at=CASE WHEN $4='delivered' AND status<>'delivered' THEN clock_timestamp() ELSE delivered_at END,
- completion_requested_at=$7 WHERE id=$1 RETURNING `+orderColumns,
-		after.ID, pickup, delivery, after.Status, after.CourierID, after.CancellationReason, after.CompletionRequestedAt))
+ completion_requested_at=$7,delivery_photo=$8,dispute_description=$9,dispute_photo=$10,resolution_explanation=$11 WHERE id=$1 RETURNING `+orderColumns,
+		after.ID, pickup, delivery, after.Status, after.CourierID, after.CancellationReason, after.CompletionRequestedAt,
+		after.DeliveryPhoto, after.DisputeDescription, after.DisputePhoto, after.ResolutionExplanation))
 	if err != nil {
 		return Order{}, err
 	}
@@ -147,15 +148,16 @@ func (a *App) refreshOrder(w http.ResponseWriter, r *http.Request) error {
 // Requester and administrator branches use the same transactional change guard.
 // Retrying the same action on the same order is safe, even after a newer job.
 func (a *App) transition(w http.ResponseWriter, r *http.Request) error {
-	var body struct {
-		Action string `json:"action"`
-	}
+	var body actionRequest
 	if err := readJSON(w, r, &body); err != nil {
+		return err
+	}
+	if err := body.validate(); err != nil {
 		return err
 	}
 	switch body.Action {
 	case "cancel", "confirm", "dispute", "resolve_completed", "resolve_not_completed":
-		return a.settleAction(w, r, body.Action)
+		return a.settleAction(w, r, body)
 	}
 	from, to := "", ""
 	switch body.Action {
@@ -244,6 +246,9 @@ func (a *App) transition(w http.ResponseWriter, r *http.Request) error {
 	if after.Status != "cancelled" {
 		after.Status = to
 		after.CourierID = &user
+		if body.Action == "deliver" {
+			after.DeliveryPhoto = body.Photo
+		}
 	}
 	after, err = saveChange(r.Context(), tx, before, after)
 	if err != nil {

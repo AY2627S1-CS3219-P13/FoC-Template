@@ -612,6 +612,24 @@ footer {
   color: #738298;
   font-size: 11px;
 }
+.evidence-photo {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  border-radius: 12px;
+}
+.action-dialog {
+  width: min(480px, calc(100% - 32px));
+  max-height: 90vh;
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+.action-dialog::backdrop { background: rgb(15 23 42 / 45%); }
+.action-dialog form { display: grid; gap: 16px; }
+.action-dialog textarea { width: 100%; resize: vertical; }
 @media (max-width: 850px) {
   .editor-grid,
   .list-grid {

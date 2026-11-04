@@ -41,6 +41,41 @@ test.beforeEach(async ({ page }) => {
   await page.request.post("/__test/reset");
 });
 
+test("All requests merges scheduled requests by creation time newest first", async ({ page }) => {
+  await start(page);
+  const regular = await seed(page, "regular-middle");
+  await page.route("**/api/v1/scheduled-orders?scope=mine", route => route.fulfill({ json: {
+    orders: [
+      { ...regular, id: "scheduled-oldest", status: "scheduled", createdAt: new Date(Date.parse(regular.createdAt) - 10000).toISOString(), pickup: { ...regular.pickup, name: "Scheduled oldest" } },
+      { ...regular, id: "scheduled-newest", status: "scheduled", createdAt: new Date(Date.parse(regular.createdAt) + 10000).toISOString(), pickup: { ...regular.pickup, name: "Scheduled newest" } },
+    ], hasMore: false,
+  } }));
+  await page.getByRole("button", { name: "My requests", exact: true }).click();
+  await expect(page.locator(".order-card h3")).toHaveText([
+    "Scheduled newest → UTown", "Campus Cafe → UTown", "Scheduled oldest → UTown",
+  ]);
+});
+
+test("All requests places older scheduled requests on the correct history page", async ({ page }) => {
+  await start(page);
+  const regular = [];
+  for (let i = 0; i < 21; i++) regular.push(await seed(page, `paged-${i}`));
+  const oldest = regular[0], newest = regular.at(-1);
+  await page.route("**/api/v1/scheduled-orders?scope=mine", route => route.fulfill({ json: {
+    orders: [
+      { ...oldest, id: "scheduled-oldest", status: "scheduled", createdAt: new Date(Date.parse(oldest.createdAt) - 10000).toISOString(), pickup: { ...oldest.pickup, name: "Scheduled oldest" } },
+      { ...newest, id: "scheduled-newest", status: "scheduled", createdAt: new Date(Date.parse(newest.createdAt) + 10000).toISOString(), pickup: { ...newest.pickup, name: "Scheduled newest" } },
+    ], hasMore: false,
+  } }));
+  await page.getByRole("button", { name: "My requests", exact: true }).click();
+  await expect(page.locator(".order-card")).toHaveCount(21);
+  await expect(page.locator(".order-card h3").first()).toHaveText("Scheduled newest → UTown");
+  await expect(page.locator(".order-card")).not.toContainText(["Scheduled oldest"]);
+  await page.locator("#next").click();
+  await expect(page.locator(".order-card h3")).toHaveText(["Campus Cafe → UTown", "Scheduled oldest → UTown"]);
+  await expect(page.locator("#next")).toBeDisabled();
+});
+
 test("account header, request filters and view changes", async ({ page }) => {
   await page.route("**/api/v1/users/me", async (route) => {
     const session = await page.request.get("/api/v1/orders/session");
@@ -99,6 +134,7 @@ test("admin courier capacity survives reload and releases on delivery", async ({
   await page.locator(".order-card").first().click();
   await page.getByRole("button", { name: "Mark picked up", exact: true }).click();
   await page.getByRole("button", { name: "Mark delivered", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Submit", exact: true }).click();
   await expect(page.locator("#order-detail .pill")).toHaveText("delivered");
   await page.getByRole("button", { name: "Help a friend", exact: true }).click();
   await page.locator(".order-card").click();
@@ -364,6 +400,7 @@ test("courier pending state, delivered capacity and old-action replay", async ({
   await page
     .getByRole("button", { name: "Mark delivered", exact: true })
     .click();
+  await page.getByRole("dialog").getByRole("button", { name: "Submit", exact: true }).click();
   await expect(page.locator("#order-detail")).toContainText("Updating…");
   await expect(page.locator("#order-detail .pill")).toHaveText("picked up");
   await page.getByRole("button", { name: "New errand", exact: true }).click();
@@ -425,6 +462,14 @@ test("lost delivery response keeps a retryable action across reload", async ({ p
     } else await route.continue();
   });
   await page.getByRole("button", { name: "Mark delivered", exact: true }).click();
+  const photo = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 16;
+    canvas.getContext("2d").fillRect(0, 0, 16, 16);
+    return canvas.toDataURL("image/png").split(",")[1];
+  });
+  await page.getByLabel("Proof of delivery photo (optional)").setInputFiles({ name: "delivered.png", mimeType: "image/png", buffer: Buffer.from(photo, "base64") });
+  await page.getByRole("dialog").getByRole("button", { name: "Submit", exact: true }).click();
   await expect(page.locator("#order-detail")).toContainText("unresolved");
   await page.reload();
   await expect(page.locator("#session-notice")).toContainText("signed in");
@@ -433,6 +478,7 @@ test("lost delivery response keeps a retryable action across reload", async ({ p
   await page.getByRole("button", { name: "Retry same action", exact: true }).click();
   await expect(page.locator("#order-detail .pill")).toHaveText("delivered");
   await expect(page.locator("#order-detail")).not.toContainText("unresolved");
+  await expect.poll(() => page.getByAltText("Proof of delivery", { exact: true }).evaluate(img => img.naturalWidth)).toBeGreaterThan(0);
 });
 
 test("open snapshot has no pagination, removes assignments live and reconciles reconnect", async ({ page }) => {
@@ -494,14 +540,43 @@ test("dispute is visible to admins and both resolution controls are available", 
   await page.getByRole("button", { name: "My requests", exact: true }).click();
   await page.locator(".order-card").click();
   await page.getByRole("button", { name: "Raise dispute", exact: true }).click();
+  const disputeForm = page.getByRole("dialog", { name: "Raise dispute", exact: true });
+  await expect(disputeForm.getByLabel("Dispute description (required)")).toHaveAttribute("required", "");
+  await disputeForm.getByLabel("Dispute description (required)").fill("The drinks were missing.");
+  const image = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 16;
+    canvas.getContext("2d").fillRect(0, 0, 16, 16);
+    return canvas.toDataURL("image/png").split(",")[1];
+  });
+  await disputeForm.getByLabel("Dispute photo (optional)").setInputFiles({ name: "evidence.png", mimeType: "image/png", buffer: Buffer.from(image, "base64") });
+  await disputeForm.getByRole("button", { name: "Submit", exact: true }).click();
   await expect(page.locator("#order-detail .pill")).toHaveText("dispute");
+  await expect(page.locator("#order-detail")).toContainText("The drinks were missing.");
+  await expect(page.getByAltText("Dispute photo", { exact: true })).toBeVisible();
+  await expect.poll(() => page.getByAltText("Dispute photo", { exact: true }).evaluate(img => img.naturalWidth)).toBeGreaterThan(0);
+  await expect(page.locator("#order-detail textarea, #order-detail input[type=file]")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Confirm delivery", exact: true })).toHaveCount(0);
   await start(page, "admin");
   await page.getByRole("button", { name: "Disputes", exact: true }).click();
   await page.locator(".order-card").click();
   await expect(page.getByRole("button", { name: "Resolve as completed", exact: true })).toBeEnabled();
+  await expect(page.locator("#order-detail")).toContainText("The drinks were missing.");
+  await expect(page.getByAltText("Dispute photo", { exact: true })).toBeVisible();
+  await expect.poll(() => page.getByAltText("Dispute photo", { exact: true }).evaluate(img => img.naturalWidth)).toBeGreaterThan(0);
   await page.getByRole("button", { name: "Resolve as not completed", exact: true }).click();
+  const decisionForm = page.getByRole("dialog", { name: "Resolve as not completed", exact: true });
+  await expect(decisionForm.getByLabel("Decision explanation (required)")).toHaveAttribute("required", "");
+  await decisionForm.getByLabel("Decision explanation (required)").fill("Photo confirms the drinks were not delivered.");
+  await decisionForm.getByRole("button", { name: "Submit", exact: true }).click();
   await expect(page.locator("#order-detail .pill")).toHaveText("not completed");
+  await expect(page.locator("#order-detail")).toContainText("Photo confirms the drinks were not delivered.");
+  await start(page);
+  await page.getByRole("button", { name: "My requests", exact: true }).click();
+  await page.locator(".order-card").click();
+  await expect(page.locator("#order-detail")).toContainText("Photo confirms the drinks were not delivered.");
+  await expect(page.getByAltText("Dispute photo", { exact: true })).toBeVisible();
+  await expect.poll(() => page.getByAltText("Dispute photo", { exact: true }).evaluate(img => img.naturalWidth)).toBeGreaterThan(0);
 });
 
 test("lifecycle invalidations coalesce into authoritative refreshes and retain version fences", async ({ page }) => {
