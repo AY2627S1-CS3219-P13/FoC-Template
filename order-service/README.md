@@ -71,8 +71,8 @@ Failed account reads show unavailable labels; direct standalone access without
 those gateway routes cannot display account details. Each status has a distinct
 colour and text label. My requests filters all/current/past before pagination;
 the four terminal states are completed, not completed, cancelled and expired.
-Switching views clears the selected detail. Accept is disabled while an accepted
-or picked-up delivery occupies the courier's slot, with an explanatory note.
+Switching views clears the selected detail. Accept is disabled when three accepted
+or picked-up deliveries occupy the courier's capacity, with an explanatory note.
 Admins assigned as couriers may record pickup and delivery; dispute resolution
 remains admin-only. Signed-in users can open Orders from the catalogue header.
 
@@ -216,3 +216,11 @@ isolation, admission fencing, authorization and settlement conflicts. The browse
 suite covers lifecycle invalidations, snapshot recovery and freshness fences.
 
 Uncertain creation cleanup no longer reserves funds to establish a retry record. Credit supports a durable abort by order ID: missing escrows get a tombstone, held escrows are refunded, and every late reserve is fenced under the same transaction lock. Order marks the attempt abandoned only after a successful release/abort. A lost insufficient-credit refusal needs no refund because no funds moved; it still needs the fence. Credit must be deployed with the new endpoint/migration before Order; older Credit leaves cleanup pending safely.
+
+## Scheduled orders and three-order capacity
+
+Use **Schedule order** from the main `/orders` screen to open `/orders/schedule`. The independent [Schedule Order Service](../schedule-order/README.md) owns the request until its asynchronous acceptance transfer succeeds. Scheduling-specific backend code remains outside this service; Order integrates private import, normal accepted lifecycle and shared courier capacity.
+
+The scheduling form highlights **Schedule order** and previews its **Scheduled** status with a distinct dark navy badge. **New errand** returns to regular order creation; no separate back tab is needed.
+
+The courier cap is now three accepted/picked-up orders combined, including regular and future scheduled orders. Delivery frees only the corresponding slot. Migration 010 replaces the former unique one-slot index with serialized three-slot enforcement and adds scheduled delivery-window metadata/import outcomes. Stop old Order writers before migration; old and new capacity semantics must not run together. `ORDER_SCHEDULE_INTERNAL_TOKEN` authenticates imports on private port 8081 and is supplied by the root initializer/Compose setup. No second escrow reserve occurs on import. See the [Schedule API contract](../schedule-order/API.md).

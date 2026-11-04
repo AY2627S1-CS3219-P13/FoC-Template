@@ -50,6 +50,11 @@ func TestSessionTracksCourierCapacity(t *testing.T) {
 	o := createdForTest(t, a, "capacity")
 	check(false)
 	mustAction(t, a, o.ID, "courier", "accept", "accepted")
+	check(false)
+	for _, key := range []string{"capacity-extra-one", "capacity-extra-two"} {
+		extra := createdForTest(t, a, key)
+		mustAction(t, a, extra.ID, "courier", "accept", "accepted")
+	}
 	check(true)
 	mustAction(t, a, o.ID, "courier", "pick_up", "picked up")
 	check(true)

@@ -21,14 +21,16 @@ func visible(o Order, user string) bool {
 }
 
 func (a *App) session(w http.ResponseWriter, r *http.Request) error {
-	var busy bool
-	if err := a.db.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM orders WHERE courier_id=$1 AND status IN ('accepted','picked up'))", actor(r)).Scan(&busy); err != nil {
+	var active int
+	if err := a.db.QueryRow(r.Context(), "SELECT count(*) FROM orders WHERE courier_id=$1 AND status IN ('accepted','picked up')", actor(r)).Scan(&active); err != nil {
 		return err
 	}
 	writeJSON(w, 200, struct {
 		Identity
-		CourierBusy bool `json:"courierBusy"`
-	}{r.Context().Value(identityKey{}).(Identity), busy})
+		CourierBusy   bool `json:"courierBusy"`
+		CourierActive int  `json:"courierActive"`
+		CourierLimit  int  `json:"courierLimit"`
+	}{r.Context().Value(identityKey{}).(Identity), active >= 3, active, 3})
 	return nil
 }
 
@@ -174,6 +176,10 @@ func (a *App) refreshHistory(ctx context.Context, observed Order, session string
 			continue
 		}
 		*target = fresh
+	}
+	after, err = checkScheduledHours(after)
+	if err != nil {
+		return Order{}, err
 	}
 	after, err = saveChange(ctx, tx, before, after)
 	if err != nil {

@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+test -z "$(gofmt -l cmd internal)"
+go vet ./...
+go test -race -count=1 ./...
+go build -o /tmp/schedule-order ./cmd/server

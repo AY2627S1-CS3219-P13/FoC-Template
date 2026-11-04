@@ -79,7 +79,12 @@ test("admin courier capacity survives reload and releases on delivery", async ({
   await start(page);
   await seed(page, "first-delivery");
   await seed(page, "second-delivery");
+  const extraOne=await seed(page,"admin-capacity-extra-one"),extraTwo=await seed(page,"admin-capacity-extra-two");
   await start(page, "admin");
+  for(const extra of [extraOne,extraTwo]){
+    const response=await page.request.post(`/api/v1/orders/${extra.id}/actions`,{headers:{Origin:new URL(page.url()).origin},data:{action:"accept"}});
+    expect(response.status()).toBe(200);
+  }
   await page.getByRole("button", { name: "Help a friend", exact: true }).click();
   await page.locator(".order-card").first().click();
   await page.getByRole("button", { name: "Accept errand", exact: true }).click();
@@ -89,9 +94,9 @@ test("admin courier capacity survives reload and releases on delivery", async ({
   await page.getByRole("button", { name: "Help a friend", exact: true }).click();
   await page.locator(".order-card").click();
   await expect(page.getByRole("button", { name: "Accept errand", exact: true })).toBeDisabled();
-  await expect(page.locator("#order-detail")).toContainText("You have an ongoing order.");
+  await expect(page.locator("#order-detail")).toContainText("You have three active orders.");
   await page.getByRole("button", { name: "My deliveries", exact: true }).click();
-  await page.locator(".order-card").click();
+  await page.locator(".order-card").first().click();
   await page.getByRole("button", { name: "Mark picked up", exact: true }).click();
   await page.getByRole("button", { name: "Mark delivered", exact: true }).click();
   await expect(page.locator("#order-detail .pill")).toHaveText("delivered");

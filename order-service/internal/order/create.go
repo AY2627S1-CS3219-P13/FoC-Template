@@ -171,14 +171,14 @@ func writeOrder(w http.ResponseWriter, status int, value Order) {
 	writeJSON(w, status, map[string]any{"order": value})
 }
 
-const orderColumns = "id,requester_id,pickup,delivery,items,offered_credits,expires_at,status,created_at,courier_id,version,cancellation_reason,delivered_at,completion_requested_at"
+const orderColumns = "id,requester_id,pickup,delivery,items,offered_credits,expires_at,status,created_at,courier_id,version,cancellation_reason,delivered_at,completion_requested_at,window_start"
 
 type rowScanner interface{ Scan(...any) error }
 
 func scanOrder(row rowScanner) (Order, error) {
 	var value Order
 	var pickup, delivery, items []byte
-	err := row.Scan(&value.ID, &value.RequesterID, &pickup, &delivery, &items, &value.OfferedCredits, &value.ExpiresAt, &value.Status, &value.CreatedAt, &value.CourierID, &value.Version, &value.CancellationReason, &value.DeliveredAt, &value.CompletionRequestedAt)
+	err := row.Scan(&value.ID, &value.RequesterID, &pickup, &delivery, &items, &value.OfferedCredits, &value.ExpiresAt, &value.Status, &value.CreatedAt, &value.CourierID, &value.Version, &value.CancellationReason, &value.DeliveredAt, &value.CompletionRequestedAt, &value.WindowStart)
 	if err != nil {
 		return value, err
 	}
@@ -188,6 +188,10 @@ func scanOrder(row rowScanner) (Order, error) {
 	singapore := time.FixedZone("Asia/Singapore", 8*60*60)
 	value.ExpiresAt = value.ExpiresAt.In(singapore)
 	value.CreatedAt = value.CreatedAt.In(singapore)
+	if value.WindowStart != nil {
+		sgt := value.WindowStart.In(singapore)
+		value.WindowStart = &sgt
+	}
 	if value.DeliveredAt != nil {
 		sgt := value.DeliveredAt.In(singapore)
 		value.DeliveredAt = &sgt

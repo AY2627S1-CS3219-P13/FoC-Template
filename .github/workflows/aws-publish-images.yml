@@ -76,7 +76,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        service: [user-service, supplier-service, credit-service, order-service, frontend, gateway]
+        service: [user-service, supplier-service, credit-service, order-service, schedule-order, frontend, gateway]
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
       ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}

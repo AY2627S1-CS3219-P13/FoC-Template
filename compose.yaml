@@ -14,6 +14,12 @@ include:
     env_file:
       - .env
       - order-service/.env
+  - path:
+      - schedule-order/compose.yaml
+      - schedule-order/compose.root.yaml
+    env_file:
+      - .env
+      - schedule-order/.env
 
 services:
   user-db:
@@ -150,6 +156,8 @@ services:
       supplier-service:
         condition: service_started
       order-service:
+        condition: service_started
+      schedule-order:
         condition: service_started
     read_only: true
     tmpfs: [/tmp]

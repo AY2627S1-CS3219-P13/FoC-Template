@@ -135,6 +135,10 @@ func TestVerificationTransitionRollbackRetainsCapacity(t *testing.T) {
 		t.Fatal("failed action recorded as successful")
 	}
 	next := createdForTest(t, a, "verify-blocked")
+	for _, key := range []string{"verify-extra-one", "verify-extra-two"} {
+		extra := createdForTest(t, a, key)
+		mustAction(t, a, extra.ID, "courier", "accept", "accepted")
+	}
 	if got := actionForTest(t, a, next.ID, "courier", "accept"); got.Code != 409 {
 		t.Fatal("failed delivery freed capacity", got.Code)
 	}
