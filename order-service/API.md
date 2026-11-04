@@ -74,7 +74,14 @@ pagination. Past includes completed, not completed, cancelled and expired;
 current includes the other five states, including disputes. Unknown filters
 return `400 invalid_filter`.
 
-Every data route validates the current session through User. Mine/courier listings return `{orders: [], page: 1, hasMore: false}` in descending creation time/ID order, 20 per page. `scope=mine` (default) selects the requester; `courier` selects original courier assignments, including delivered history; `open` selects unexpired open orders from other requesters. Pages are positive integers up to 100000; this is pagination, not an order-count cap.
+Every data route validates the current session through User. Mine/courier listings return `{orders: [], page: 1, hasMore: false}` in descending creation time with ascending ID ties, 20 per page. `scope=mine` (default) selects the requester; `courier` selects original courier assignments, including delivered history; `open` selects unexpired open orders from other requesters. Pages are positive integers up to 100000; this is pagination, not an order-count cap.
+
+History responses also include `pageStart` and `nextPageStart` (each null or
+`{id,createdAt}`), taken before reconciliation. The browser uses these creation
+boundaries to merge scheduled requests into the correct page, sorting the combined
+My requests list newest first, with ascending ID ties. Regular history keeps its
+20-record pages; the combined page can additionally include scheduled requests
+in that creation interval.
 
 Mine/courier/dispute snapshots reconcile every displayed entry against Supplier
 using the current session, with per-request lookup reuse. Renames update details;
@@ -100,6 +107,28 @@ Snapshots resolve distinct places with at most eight concurrent lookups before a
 
 Send `{ "action": "..." }`; identity and roles always come from the freshly
 validated session. There is no arbitrary status setter or item-level status.
+
+`deliver` accepts an optional `photo` as a base64 data URL. `dispute` requires
+`description` (trimmed, 1–2000 characters) and accepts the same optional `photo`.
+Both `resolve_completed` and `resolve_not_completed` require `explanation`
+(trimmed, 1–2000 characters). Whitespace-only or invalid control text is rejected
+with `400 invalid_description` / `invalid_explanation`. Evidence fields on other
+actions return `400 invalid_action_fields`.
+
+Photos must be real JPEG or PNG images, at most 512 KiB decoded and 4096 pixels
+per side, using `data:image/jpeg;base64,...` or `data:image/png;base64,...`.
+Invalid photos return `400 invalid_photo`; the existing 1 MiB JSON limit applies.
+The browser accepts JPEG/PNG/WebP files up to 20 MiB and resizes them before sending.
+For example: `{"action":"dispute","description":"An item was missing.","photo":"data:image/jpeg;base64,..."}`
+or `{"action":"resolve_not_completed","explanation":"Evidence confirms the missing item."}`.
+
+Authorized order snapshots include `deliveryPhoto`, `disputeDescription`,
+`disputePhoto` and `resolutionExplanation` when present. They are committed
+atomically with the action and shown read-only in order details. Submitted dispute
+text and photos cannot be edited or removed, including after resolution. An action
+replay returns the existing result and never replaces its original evidence or
+explanation, even if a different valid payload is supplied. Evidence is excluded
+from public events and SSE. Existing historical disputes may lack descriptions.
 
 | Action | Actor | Required state → result |
 | --- | --- | --- |

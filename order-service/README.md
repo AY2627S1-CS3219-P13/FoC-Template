@@ -2,6 +2,17 @@
 
 Order Service includes creation, live open listings, concurrency-safe acceptance and the nine-state lifecycle. Requesters can cancel, confirm and dispute; assigned couriers record pickup/delivery; admins resolve disputes. Credit reservations and settlement jobs recover durably. The standalone UI at `/orders` follows the existing User/Supplier visual language without importing or modifying those services or the shared frontend.
 
+My requests → All requests merges regular and scheduled requests in newest-first
+creation order. Couriers can attach an optional delivery photo. Disputes require a
+description and support an optional photo; both admin outcomes require a decision
+explanation. Submitted evidence is read-only and cannot be edited or removed by
+retrying an action. Participants can review the evidence and final explanation in
+order details, and admins can review evidence in the dispute queue. The browser
+resizes JPEG/PNG/WebP files (up to 20 MiB); the API validates JPEG/PNG images up to
+512 KiB. See `API.md` for field names and validation limits. Migration 011 adds
+durable evidence fields without changing historical records; stop old instances
+before upgrading, as required for other migrations.
+
 Supplier changes are reconciled in authenticated list/refresh/action requests and automatically by the recovery worker using Supplier’s private service-authenticated catalogue. No user credentials are retained for background polling. Receipt-order arbitration uses durable pre-authentication admissions; [API.md](API.md) documents its receipt boundary and timing limits.
 
 The complete request/response contract is in [API.md](API.md).

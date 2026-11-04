@@ -27,6 +27,13 @@ func forwardTransition(from, to string) bool {
 }
 
 func checkChange(before, after Order) error {
+	// Evidence is written only with its original state transition. Replays and
+	// all later lifecycle/refresh operations must preserve the submitted record.
+	if (before.DeliveryPhoto != after.DeliveryPhoto && !(before.Status == "picked up" && after.Status == "delivered")) ||
+		((before.DisputeDescription != after.DisputeDescription || before.DisputePhoto != after.DisputePhoto) && !(before.Status == "delivered" && after.Status == "dispute")) ||
+		(before.ResolutionExplanation != after.ResolutionExplanation && !(before.Status == "dispute" && (after.Status == "completed" || after.Status == "not completed"))) {
+		return problem(409, "evidence_immutable", "Submitted evidence and explanations cannot be edited.")
+	}
 	if before.ID != after.ID || (before.Status != after.Status && !forwardTransition(before.Status, after.Status)) {
 		return problem(409, "status_conflict", "This errand cannot make that state transition.")
 	}

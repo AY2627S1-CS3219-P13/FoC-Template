@@ -6,6 +6,8 @@ import {
   newer,
   creationBody,
   creationKey,
+  newestFirst,
+  scheduledHistoryPage,
 } from "/orders/core.mjs";
 
 // The server rotates the event stream every 8s, so a stream error alone is not
@@ -147,6 +149,7 @@ function readDraft() {
     );
 }
 function clearSessionUI() {
+  document.querySelectorAll(".action-dialog").forEach(dialog => dialog.close());
   eventSource?.close();
   eventSource = null;
   lastEventPosition = 0n;
@@ -617,9 +620,10 @@ async function loadList() {
     const data = await api(`?scope=${current}&page=${currentPage}&sort=${sort}&filter=${filter}`, {
       signal: AbortSignal.timeout(2500),
     });
-    if (["mine","open"].includes(current) && currentPage===1) {
+    if (current === "mine" || (current === "open" && currentPage === 1)) {
       const scheduled=await api(`?scope=${current}`,{schedule:true,signal:AbortSignal.timeout(Math.max(1,2500-(Date.now()-started)))});
-      data.orders.push(...scheduled.orders.filter(o=>filter==="all" || (filter==="past") === ["cancelled","expired"].includes(o.status)));
+      const history = current === "mine" ? scheduledHistoryPage(scheduled.orders, currentPage, data.pageStart, data.nextPageStart) : scheduled.orders;
+      data.orders.push(...history.filter(o=>filter==="all" || (filter==="past") === ["cancelled","expired"].includes(o.status)));
     }
     // Timers may resume late after a suspended tab; also fence the response age.
     if (Date.now() - started >= 2500) throw new Error("Refresh deadline exceeded.");
@@ -627,6 +631,7 @@ async function loadList() {
       return;
     lastListSync = started;
     rows = [...new Map(data.orders.map(o=>[o.id,remember(o)])).values()];
+    if(current==="mine") rows.sort(newestFirst);
     if(current==="open") rows.sort((a,b)=>{
       if(sort==="credits" && BigInt(a.offeredCredits)!==BigInt(b.offeredCredits)) return BigInt(a.offeredCredits)>BigInt(b.offeredCredits) ? -1 : 1;
       return Date.parse(a.expiresAt)-Date.parse(b.expiresAt) || Date.parse(a.createdAt)-Date.parse(b.createdAt) || a.id.localeCompare(b.id);
@@ -685,6 +690,17 @@ function renderDetail() {
     detail.append(node("h4", label), node("p", text));
   if (o.cancellationReason)
     detail.append(node("p", o.cancellationReason, "warning"));
+  for (const [label, text] of [["Dispute description", o.disputeDescription], ["Admin decision explanation", o.resolutionExplanation]]) {
+    if (text) detail.append(node("h4", label), node("p", text));
+  }
+  for (const [label, photo] of [["Proof of delivery", o.deliveryPhoto], ["Dispute photo", o.disputePhoto]]) {
+    if (!photo) continue;
+    const img = node("img");
+    img.src = photo;
+    img.alt = label;
+    img.className = "evidence-photo";
+    detail.append(node("h4", label), img);
+  }
   if (o.windowStart) detail.append(node("h4","Fixed delivery window"),node("p",`${time(o.windowStart)} – ${time(o.expiresAt)} SGT`));
   if (o.transferPending) detail.append(node("p","Acceptance pending. Waiting for confirmed assignment.","notice"));
   if (o.refundPending) detail.append(node("p","Credit refund pending.","notice"));
@@ -728,7 +744,10 @@ function renderDetail() {
       o.transferPending || (action === "deliver" && o.windowStart && (Date.now()<Date.parse(o.windowStart) || Date.now()>=Date.parse(o.expiresAt))) ||
       (action === "accept" && courierBusy !== false && !pendingAction) ||
       (action === "accept" && Object.keys(pending).some((id) => id !== o.id));
-    button.addEventListener("click", () => void act(o.id, action));
+    button.addEventListener("click", () => {
+      if (!pendingAction && ["deliver", "dispute", "resolve_completed", "resolve_not_completed"].includes(action)) openActionForm(o.id, action);
+      else void act(o.id, action);
+    });
     actions.append(button);
     if (action === "accept" && courierBusy !== false && !pendingAction)
       actions.append(node("span", courierBusy ? "You have three active orders." : "Checking your delivery availability…", "muted"));
@@ -737,18 +756,105 @@ function renderDetail() {
     detail.append(node("p", pendingAction.message, "error"));
   detail.append(actions);
 }
-async function act(id, action) {
+async function photoData(file) {
+  if (!file) return "";
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 20 * 1024 * 1024)
+    throw new Error("Choose a JPEG, PNG or WebP image up to 20 MiB.");
+  const bitmap = await createImageBitmap(file);
+  try {
+    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    context.fillStyle = "white";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    for (const quality of [0.85, 0.7, 0.5, 0.3]) {
+      const data = canvas.toDataURL("image/jpeg", quality);
+      if (data.length - data.indexOf(",") - 1 <= 4 * Math.ceil(512 * 1024 / 3)) return data;
+    }
+    throw new Error("This photo is too large. Choose a smaller photo.");
+  } finally {
+    bitmap.close();
+  }
+}
+function openActionForm(id, action) {
+  const generation = epoch;
+  const dialog = node("dialog", undefined, "action-dialog");
+  const form = node("form");
+  const resolving = action.startsWith("resolve_");
+  const title = action === "deliver" ? "Mark delivered" : action === "dispute" ? "Raise dispute" : action === "resolve_completed" ? "Resolve as completed" : "Resolve as not completed";
+  dialog.setAttribute("aria-label", title);
+  form.append(node("h3", title));
+  let text, photo;
+  if (action !== "deliver") {
+    const label = node("label", resolving ? "Decision explanation (required)" : "Dispute description (required)");
+    text = node("textarea");
+    text.required = true;
+    text.maxLength = 2000;
+    text.rows = 5;
+    label.append(text);
+    form.append(label);
+  }
+  if (!resolving) {
+    const label = node("label", action === "deliver" ? "Proof of delivery photo (optional)" : "Dispute photo (optional)");
+    photo = node("input");
+    photo.type = "file";
+    photo.accept = "image/jpeg,image/png,image/webp";
+    label.append(photo);
+    form.append(label, node("p", "JPEG, PNG or WebP, up to 20 MiB. Photos are resized before submission.", "muted"));
+  }
+  if (action === "dispute") form.append(node("p", "Your description and photo cannot be edited after submission.", "notice"));
+  const error = node("p", "", "error");
+  error.setAttribute("role", "alert");
+  const buttons = node("div", undefined, "actions");
+  const cancel = node("button", "Cancel");
+  cancel.type = "button";
+  cancel.addEventListener("click", () => dialog.close());
+  const submit = node("button", "Submit", "primary");
+  submit.type = "submit";
+  buttons.append(cancel, submit);
+  form.append(error, buttons);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    error.textContent = "";
+    if (text && !text.value.trim()) {
+      error.textContent = "Enter an explanation before submitting.";
+      text.focus();
+      return;
+    }
+    submit.disabled = true;
+    try {
+      const payload = { action };
+      if (text) payload[resolving ? "explanation" : "description"] = text.value.trim();
+      if (photo?.files[0]) payload.photo = await photoData(photo.files[0]);
+      if (!dialog.open || generation !== epoch) return;
+      dialog.close();
+      await act(id, action, payload);
+    } catch (err) {
+      error.textContent = err.message || "Unable to read this photo. Choose another image.";
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  dialog.append(form);
+  dialog.addEventListener("close", () => dialog.remove(), { once: true });
+  document.body.append(dialog);
+  dialog.showModal();
+}
+async function act(id, action, payload = pending[id]?.payload || { action }) {
   if (inFlight.has(id) || !user) return;
   const generation = epoch;
   try {
-    pending[id] = { action };
+    pending[id] = { action, payload };
     persist(true);
     inFlight.add(id);
     renderDetail();
     const data = await api(`/${encodeURIComponent(id)}/actions`, {
       schedule: scheduleOwned(cache.get(id)),
       method: "POST",
-      body: JSON.stringify({ action }),
+      body: JSON.stringify(payload),
     });
     if (generation !== epoch) return;
     remember(data.order);
@@ -772,6 +878,7 @@ async function act(id, action) {
     } else
       pending[id] = {
         action,
+        payload,
         message:
           "The result could not be confirmed. Retry this action before starting a conflicting action.",
       };

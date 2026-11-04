@@ -62,7 +62,14 @@ func createdForTest(t *testing.T, a *App, key string, expiry ...time.Time) Order
 }
 func actionForTest(t *testing.T, a *App, id, token, action string) *httptest.ResponseRecorder {
 	t.Helper()
-	return request(t, a, "POST", "/api/v1/orders/"+id+"/actions", token, "", map[string]string{"action": action})
+	body := map[string]string{"action": action}
+	if action == "dispute" {
+		body["description"] = "The delivery did not match my request."
+	}
+	if action == "resolve_completed" || action == "resolve_not_completed" {
+		body["explanation"] = "Reviewed the submitted delivery and dispute evidence."
+	}
+	return request(t, a, "POST", "/api/v1/orders/"+id+"/actions", token, "", body)
 }
 func readStored(t *testing.T, a *App, id string) Order {
 	t.Helper()

@@ -82,3 +82,14 @@ export function creationBody(draft, windowStart) {
     ...(windowStart ? {windowStart} : {expiresAt: expiryISO(draft.expiry)}),
   });
 }
+// Match PostgreSQL's creation DESC, ID ASC history ordering (IDs are ASCII).
+export function newestFirst(a, b) {
+  return Date.parse(b.createdAt) - Date.parse(a.createdAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+export function scheduledHistoryPage(orders, page, pageStart, nextPageStart) {
+  return orders.filter(order =>
+    (page === 1 || (pageStart && newestFirst(order, pageStart) >= 0)) &&
+    (!nextPageStart || newestFirst(order, nextPageStart) < 0),
+  );
+}

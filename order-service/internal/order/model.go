@@ -42,6 +42,10 @@ type createRequest struct {
 }
 
 type Order struct {
+	DeliveryPhoto         string     `json:"deliveryPhoto,omitempty"`
+	DisputeDescription    string     `json:"disputeDescription,omitempty"`
+	DisputePhoto          string     `json:"disputePhoto,omitempty"`
+	ResolutionExplanation string     `json:"resolutionExplanation,omitempty"`
 	WindowStart           *time.Time `json:"windowStart,omitempty"`
 	DeliveredAt           *time.Time `json:"deliveredAt,omitempty"`
 	CompletionRequestedAt *time.Time `json:"completionRequestedAt,omitempty"`

@@ -171,14 +171,14 @@ func writeOrder(w http.ResponseWriter, status int, value Order) {
 	writeJSON(w, status, map[string]any{"order": value})
 }
 
-const orderColumns = "id,requester_id,pickup,delivery,items,offered_credits,expires_at,status,created_at,courier_id,version,cancellation_reason,delivered_at,completion_requested_at,window_start"
+const orderColumns = "id,requester_id,pickup,delivery,items,offered_credits,expires_at,status,created_at,courier_id,version,cancellation_reason,delivered_at,completion_requested_at,window_start,delivery_photo,dispute_description,dispute_photo,resolution_explanation"
 
 type rowScanner interface{ Scan(...any) error }
 
 func scanOrder(row rowScanner) (Order, error) {
 	var value Order
 	var pickup, delivery, items []byte
-	err := row.Scan(&value.ID, &value.RequesterID, &pickup, &delivery, &items, &value.OfferedCredits, &value.ExpiresAt, &value.Status, &value.CreatedAt, &value.CourierID, &value.Version, &value.CancellationReason, &value.DeliveredAt, &value.CompletionRequestedAt, &value.WindowStart)
+	err := row.Scan(&value.ID, &value.RequesterID, &pickup, &delivery, &items, &value.OfferedCredits, &value.ExpiresAt, &value.Status, &value.CreatedAt, &value.CourierID, &value.Version, &value.CancellationReason, &value.DeliveredAt, &value.CompletionRequestedAt, &value.WindowStart, &value.DeliveryPhoto, &value.DisputeDescription, &value.DisputePhoto, &value.ResolutionExplanation)
 	if err != nil {
 		return value, err
 	}
