@@ -8,6 +8,10 @@ import {
   creationKey,
   newestFirst,
   scheduledHistoryPage,
+  distanceMeters,
+  pickupLocationId,
+  formatDistance,
+  openComparator,
 } from "/orders/core.mjs";
 
 // The server rotates the event stream every 8s, so a stream error alone is not
@@ -338,6 +342,7 @@ async function loadPlaces() {
     }
     places = loaded;
     placesReady = true;
+    fillStartingLocations();
     for (const id of ["pickup", "delivery"]) {
       const select = $(id);
       select.replaceChildren(new Option(`Choose ${id}`, ""));
@@ -364,6 +369,49 @@ async function loadPlaces() {
       controls();
     }
   }
+}
+// The courier's starting point is a per-browser convenience, kept across reloads.
+const FROM_KEY = "foc-orders-start-from";
+function savedStart() {
+  try {
+    return localStorage.getItem(FROM_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+function saveStart(value) {
+  try {
+    if (value) localStorage.setItem(FROM_KEY, value);
+    else localStorage.removeItem(FROM_KEY);
+  } catch {
+    // Storage may be blocked; the selection still applies to this page.
+  }
+}
+const placeable = (p) => p.type === "location" && typeof p.latitude === "number" && typeof p.longitude === "number";
+function startingLocation() {
+  const id = $("open-from").value;
+  return id ? places.find((p) => placeable(p) && p.id === id) || null : null;
+}
+function fillStartingLocations() {
+  const select = $("open-from"),
+    wanted = select.value || savedStart();
+  select.replaceChildren(new Option("No starting location", ""));
+  for (const place of places.filter(placeable)) select.append(new Option(place.name, place.id));
+  select.value = places.some((p) => placeable(p) && p.id === wanted) ? wanted : "";
+  startingLocationChanged();
+  // Show restored distance labels now; the next poll also sends `from`.
+  if (view === "open") renderList();
+}
+// Nearest pickup needs a starting point; fall back to expiry when it is cleared.
+function startingLocationChanged() {
+  const hasStart = Boolean(startingLocation());
+  $("open-sort").querySelector('option[value="distance"]').disabled = !hasStart;
+  if (!hasStart && $("open-sort").value === "distance") $("open-sort").value = "expiry";
+}
+function pickupDistance(order) {
+  const start = startingLocation();
+  const pickup = start && places.find((p) => placeable(p) && p.id === pickupLocationId(order));
+  return pickup ? distanceMeters(start, pickup) : null;
 }
 function placeLabel(p) {
   return p.type === "supplier" ? `Supplier: ${p.name} · ${p.locationName}` : `Campus: ${p.name}`;
@@ -586,6 +634,11 @@ function renderList() {
       node("small", `Expires ${time(o.expiresAt)} SGT`),
     );
     if (o.windowStart) card.append(node("p",`Delivery ${time(o.windowStart)} – ${time(o.expiresAt)} SGT`));
+    const distance = view === "open" ? pickupDistance(o) : null;
+    if (distance !== null) {
+      const away = formatDistance(distance), start = startingLocation().name;
+      card.append(node("small", away ? `Approximately ${away} from ${start}` : `Pickup at ${start}`, "distance"));
+    }
     card.addEventListener("click", () => {
       selected = o.id;
       detailStale = true;
@@ -597,6 +650,7 @@ function renderList() {
   }
   $("pagination").hidden = view === "open";
   $("open-sort-label").hidden = view !== "open";
+  $("open-from-label").hidden = view !== "open";
   $("request-filter-label").hidden = view !== "mine";
   $("page-label").textContent = `Page ${page}`;
   $("previous").disabled = page === 1;
@@ -613,11 +667,13 @@ async function loadList() {
     currentPage = page,
     revision = listGeneration,
     sort = $("open-sort").value,
+    from = current === "open" ? $("open-from").value : "",
     started = Date.now();
   listing = true;
   try {
     const filter = current === "mine" ? $("request-filter").value : "all";
-    const data = await api(`?scope=${current}&page=${currentPage}&sort=${sort}&filter=${filter}`, {
+    const start = from ? `&from=${encodeURIComponent(from)}` : "";
+    const data = await api(`?scope=${current}&page=${currentPage}&sort=${sort}&filter=${filter}${start}`, {
       signal: AbortSignal.timeout(2500),
     });
     if (current === "mine" || (current === "open" && currentPage === 1)) {
@@ -632,10 +688,8 @@ async function loadList() {
     lastListSync = started;
     rows = [...new Map(data.orders.map(o=>[o.id,remember(o)])).values()];
     if(current==="mine") rows.sort(newestFirst);
-    if(current==="open") rows.sort((a,b)=>{
-      if(sort==="credits" && BigInt(a.offeredCredits)!==BigInt(b.offeredCredits)) return BigInt(a.offeredCredits)>BigInt(b.offeredCredits) ? -1 : 1;
-      return Date.parse(a.expiresAt)-Date.parse(b.expiresAt) || Date.parse(a.createdAt)-Date.parse(b.createdAt) || a.id.localeCompare(b.id);
-    });
+    // Re-sort after merging scheduled requests, which Order Service did not rank.
+    if(current==="open") rows.sort(openComparator(sort, pickupDistance));
     hasMore = data.hasMore;
     stale = false;
     if (rows.some((o) => o.id === selected)) detailStale = false;
@@ -1042,6 +1096,12 @@ window.addEventListener("focus", () => void tick());
 void tick();
 setInterval(() => void tick(), POLL_INTERVAL_MS);
 $("open-sort").addEventListener("change", () => {
+  listGeneration++;
+  void loadList();
+});
+$("open-from").addEventListener("change", () => {
+  saveStart($("open-from").value);
+  startingLocationChanged();
   listGeneration++;
   void loadList();
 });

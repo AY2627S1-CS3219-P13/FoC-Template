@@ -23,6 +23,7 @@ type App struct {
 	auth                sessionValidator
 	catalogue           placeResolver
 	places              placeLister
+	locator             locationLocator
 	credit              escrowClient
 	log                 *slog.Logger
 	now                 func() time.Time
@@ -40,6 +41,7 @@ func New(db *pgxpool.Pool, cfg Config, log *slog.Logger) *App {
 		auth:      &AuthClient{URL: cfg.UserServiceURL, Token: cfg.UserServiceToken, CookieName: cfg.SessionCookie, Client: client},
 		catalogue: &CatalogueClient{BaseURL: cfg.SupplierServiceURL, CookieName: cfg.SessionCookie, Client: client},
 		places:    &CatalogueClient{BaseURL: cfg.SupplierServiceURL, CookieName: cfg.SessionCookie, Client: client},
+		locator:   &CatalogueClient{BaseURL: cfg.SupplierServiceURL, CookieName: cfg.SessionCookie, Client: client},
 		credit:    &CreditClient{BaseURL: cfg.CreditServiceURL, Token: cfg.CreditServiceToken, Client: client},
 	}
 }

@@ -20,6 +20,10 @@ type placeLister interface {
 	List(context.Context, string, int) ([]Place, bool, error)
 }
 
+type locationLocator interface {
+	Coordinates(context.Context, string) (map[string]*Coordinate, error)
+}
+
 type escrowClient interface {
 	Reserve(context.Context, string, string, int64) error
 	Release(context.Context, string) error

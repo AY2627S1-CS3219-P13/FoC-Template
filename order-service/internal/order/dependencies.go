@@ -25,7 +25,8 @@ type supplierResponse struct {
 
 type locationResponse struct {
 	Locations []struct {
-		ID, Name string
+		ID, Name            string
+		Latitude, Longitude *float64
 	} `json:"locations"`
 }
 
@@ -122,6 +123,11 @@ func (c *CatalogueClient) locations(ctx context.Context, session string) (locati
 	seen := make(map[string]bool)
 	for _, location := range body.Locations {
 		if location.ID == "" || location.Name == "" || seen[location.ID] {
+			return body, placesUnavailable()
+		}
+		// Coordinates are optional for older catalogues, but must be complete and valid.
+		if (location.Latitude == nil) != (location.Longitude == nil) ||
+			(location.Latitude != nil && (*location.Latitude < -90 || *location.Latitude > 90 || *location.Longitude < -180 || *location.Longitude > 180)) {
 			return body, placesUnavailable()
 		}
 		seen[location.ID] = true

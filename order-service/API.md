@@ -91,7 +91,21 @@ Catalogue outages return 503 rather than a falsely synchronized list. History
 on other pages is not refreshed. A dispute resolved concurrently is omitted
 from the admin snapshot.
 
-`scope=open` returns all eligible orders as `{orders: [], hasMore: false}` without pagination (`page` is ignored). Sort with `sort=expiry` (default) or `sort=credits` (highest first); ties use expiry, creation time ascending, then ID. Unsupported sort values return `400 invalid_sort`. Each snapshot refreshes every listed order’s places using the current session, sharing lookups only within that request. Inactive/deleted places remove orders and record refund-intent events; Supplier outages fail the snapshot with 503.
+`scope=open` returns all eligible orders as `{orders: [], hasMore: false}` without pagination (`page` is ignored). Sort with `sort=expiry` (default), `sort=credits` (highest first) or `sort=distance` (nearest pickup first); ties use expiry, creation time ascending, then ID. Unsupported sort values return `400 invalid_sort`.
+
+`from={campus location ID}` sets the courier's starting point, e.g.
+`GET /api/v1/orders?scope=open&sort=distance&from=central-library`. With it,
+each order gains `pickupDistanceMeters`: the straight-line (Haversine) distance,
+rounded to a metre, from that location to the pickup's campus location (a
+supplier's registered location, or the location itself). Coordinates come from
+Supplier's `GET /api/v1/locations` using the current session; they ignore paths
+and entrances, so the value is an estimate for ranking. `from` never filters the
+list and may accompany any sort. `sort=distance` without `from` returns
+`400 starting_location_required`; an unknown location, or one without
+coordinates, returns `400 invalid_location`. A pickup whose location has no
+coordinates omits `pickupDistanceMeters` and sorts after every known distance.
+Location places from `/api/v1/orders/places` include `latitude`/`longitude` so
+the browser can rank merged scheduled requests with the same formula. Each snapshot refreshes every listed order’s places using the current session, sharing lookups only within that request. Inactive/deleted places remove orders and record refund-intent events; Supplier outages fail the snapshot with 503.
 
 An open order is readable by authenticated users. Administrators can also inspect disputed orders and their events. Otherwise only its requester or assigned courier may read it, its events or refresh it; other users receive the same `404 order_not_found` as an unknown ID. No arbitrary requester/courier IDs are accepted from the browser. Reads do not contact Credit.
 

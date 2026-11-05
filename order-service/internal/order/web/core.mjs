@@ -87,6 +87,50 @@ export function newestFirst(a, b) {
   return Date.parse(b.createdAt) - Date.parse(a.createdAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
+// Same mean Earth radius and rounding as the server's proximity.go, so merged
+// scheduled requests rank exactly like regular ones.
+const EARTH_RADIUS_METERS = 6371000;
+
+export function distanceMeters(a, b) {
+  const radians = (degrees) => (degrees * Math.PI) / 180;
+  const dLat = radians(b.latitude - a.latitude);
+  const dLng = radians(b.longitude - a.longitude);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(radians(a.latitude)) * Math.cos(radians(b.latitude)) * Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * EARTH_RADIUS_METERS * Math.asin(Math.min(1, Math.sqrt(h))));
+}
+
+// A supplier pickup is located at its registered campus location.
+export function pickupLocationId(order) {
+  return order.pickup.type === "location" ? order.pickup.id : order.pickup.locationId;
+}
+
+// null means "same place": closer than the coordinates can meaningfully tell.
+export function formatDistance(meters) {
+  if (meters < 50) return null;
+  return meters < 1000 ? `${Math.round(meters / 10) * 10} m` : `${(meters / 1000).toFixed(1)} km`;
+}
+
+// Mirror the server's open-list order. distanceOf returns metres or null;
+// unknown distances follow known ones. Ties: expiry, creation, then ID.
+export function openComparator(sort, distanceOf) {
+  return (a, b) => {
+    if (sort === "distance") {
+      const da = distanceOf(a), db = distanceOf(b);
+      if ((da === null) !== (db === null)) return da === null ? 1 : -1;
+      if (da !== null && da !== db) return da - db;
+    }
+    if (sort === "credits" && BigInt(a.offeredCredits) !== BigInt(b.offeredCredits))
+      return BigInt(a.offeredCredits) > BigInt(b.offeredCredits) ? -1 : 1;
+    return (
+      Date.parse(a.expiresAt) - Date.parse(b.expiresAt) ||
+      Date.parse(a.createdAt) - Date.parse(b.createdAt) ||
+      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+    );
+  };
+}
+
 export function scheduledHistoryPage(orders, page, pageStart, nextPageStart) {
   return orders.filter(order =>
     (page === 1 || (pageStart && newestFirst(order, pageStart) >= 0)) &&

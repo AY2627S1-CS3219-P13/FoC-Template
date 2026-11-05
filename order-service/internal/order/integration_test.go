@@ -73,7 +73,13 @@ func (f *fakeDependencies) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(401)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"locations": []map[string]string{{"id": "com2", "name": "COM2"}, {"id": "utown", "name": "UTown"}}})
+		// Annex deliberately has no coordinates, like a location from an older catalogue.
+		writeJSON(w, 200, map[string]any{"locations": []map[string]any{
+			{"id": "com2", "name": "COM2", "latitude": 1.293925, "longitude": 103.774153},
+			{"id": "utown", "name": "UTown", "latitude": 1.304, "longitude": 103.7735},
+			{"id": "central-library", "name": "Central Library", "latitude": 1.296558, "longitude": 103.773111},
+			{"id": "annex", "name": "Annex"},
+		}})
 	case r.URL.Path == "/api/v1/suppliers":
 		writeJSON(w, 200, map[string]any{"suppliers": []map[string]any{{"id": testSupplierID, "name": "Campus Cafe", "locationId": "com2", "description": "Level 1", "openingHours": "09:00-17:00", "active": true}}, "page": 1, "pageSize": 100, "total": 1, "totalPages": 1})
 	case strings.HasPrefix(r.URL.Path, "/api/v1/suppliers/"):

@@ -9,7 +9,43 @@ import {
   creationBody,
   newestFirst,
   scheduledHistoryPage,
+  distanceMeters,
+  pickupLocationId,
+  formatDistance,
+  openComparator,
 } from "../internal/order/web/core.mjs";
+
+test("distances match the server's Haversine reference values", () => {
+  const com2 = { latitude: 1.293925, longitude: 103.774153 };
+  const library = { latitude: 1.296558, longitude: 103.773111 };
+  assert.equal(distanceMeters(com2, library), 315);
+  assert.equal(distanceMeters(library, com2), 315);
+  assert.equal(distanceMeters(library, { latitude: 1.304, longitude: 103.7735 }), 829);
+  assert.equal(distanceMeters(com2, com2), 0);
+  assert.equal(formatDistance(0), null);
+  assert.equal(formatDistance(49), null);
+  assert.equal(formatDistance(50), "50 m");
+  assert.equal(formatDistance(315), "320 m");
+  assert.equal(formatDistance(829), "830 m");
+  assert.equal(formatDistance(1123), "1.1 km");
+});
+
+test("supplier pickups use their registered campus location", () => {
+  assert.equal(pickupLocationId({ pickup: { type: "location", id: "com2" } }), "com2");
+  assert.equal(pickupLocationId({ pickup: { type: "supplier", id: "uuid", locationId: "central-library" } }), "central-library");
+});
+
+test("nearest pickup sorts by distance, then expiry, with unknown distances last", () => {
+  const order = (id, expiry, distance) => ({
+    id, distance, offeredCredits: "10",
+    expiresAt: `2030-11-04T10:${expiry}:00Z`, createdAt: "2030-11-04T09:00:00Z",
+  });
+  const rows = [order("unknown", "05", null), order("far", "01", 900), order("near-late", "30", 100), order("near-soon", "10", 100)];
+  const distanceOf = (o) => o.distance;
+  assert.deepEqual(rows.toSorted(openComparator("distance", distanceOf)).map((o) => o.id), ["near-soon", "near-late", "far", "unknown"]);
+  // Other sorts ignore distance.
+  assert.deepEqual(rows.toSorted(openComparator("expiry", distanceOf)).map((o) => o.id), ["far", "unknown", "near-soon", "near-late"]);
+});
 
 test("scheduled history keeps creation order across regular-history page boundaries", () => {
   const order = (id, minute) => ({ id, createdAt: `2030-11-04T10:${minute}:00Z` });

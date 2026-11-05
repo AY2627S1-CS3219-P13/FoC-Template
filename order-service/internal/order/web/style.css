@@ -537,6 +537,8 @@ dd {
 }
 .list-toolbar {
   display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
@@ -577,6 +579,11 @@ dd {
 }
 .order-card .pill {
   margin-right: 10px;
+}
+.order-card .distance {
+  display: block;
+  margin-top: 8px;
+  font-weight: 600;
 }
 .detail {
   position: sticky;

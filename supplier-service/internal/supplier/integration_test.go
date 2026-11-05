@@ -108,7 +108,23 @@ func TestSupplierLifecycle(t *testing.T) {
 	if json.Unmarshal(w.Body.Bytes(), &list) != nil || len(list.Suppliers) != 21 {
 		t.Fatal("expected exactly 21 seeded suppliers after two migrations")
 	}
-	status(t, request(t, a, "GET", "/api/v1/locations", "user", nil), 200)
+	w = request(t, a, "GET", "/api/v1/locations", "user", nil)
+	status(t, w, 200)
+	var places struct {
+		Locations []Location `json:"locations"`
+	}
+	if json.Unmarshal(w.Body.Bytes(), &places) != nil || len(places.Locations) != 15 {
+		t.Fatal("expected the 15 seeded campus locations")
+	}
+	for _, l := range places.Locations {
+		// Every seeded location lies on the NUS Kent Ridge campus.
+		if l.Latitude < 1.28 || l.Latitude > 1.31 || l.Longitude < 103.76 || l.Longitude > 103.79 {
+			t.Fatalf("location %s has off-campus coordinates %v,%v", l.ID, l.Latitude, l.Longitude)
+		}
+	}
+	if _, err := a.db.Exec(context.Background(), "INSERT INTO locations(id,name) VALUES('nowhere','Nowhere')"); err == nil {
+		t.Fatal("a location without coordinates was accepted")
+	}
 	body := map[string]any{"name": "Test Cafe", "category": "food", "locationId": "com2", "description": "At the entrance"}
 	status(t, request(t, a, "POST", "/api/v1/suppliers", "user", body), 403)
 	w = request(t, a, "POST", "/api/v1/suppliers", "admin", body)

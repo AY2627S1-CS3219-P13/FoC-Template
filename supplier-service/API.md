@@ -13,11 +13,15 @@ use `credentials: "include"`. POST, PATCH and DELETE require the exact configure
 | --- | --- | --- |
 | `GET /api/v1/suppliers` | 200 paginated catalogue below | User or admin |
 | `GET /api/v1/suppliers/{id}` | 200 `{ "supplier": {...} }`, including inactive | User or admin |
-| `GET /api/v1/locations` | 200 `{ "locations": [{"id":"com2","name":"COM2"}, ...] }` | User or admin |
+| `GET /api/v1/locations` | 200 `{ "locations": [{"id":"com2","name":"COM2","latitude":1.293925,"longitude":103.774153}, ...] }` | User or admin |
 | `POST /api/v1/suppliers` | 201 `{ "supplier": {...} }` and Location header | Admin |
 | `PATCH /api/v1/suppliers/{id}` | 200 `{ "supplier": {...} }` | Admin |
 | `DELETE /api/v1/suppliers/{id}` | 204, no body | Admin |
 | `GET /healthz` | 200, process live | None; direct port |
+
+Every location carries WGS84 decimal-degree `latitude` and `longitude` (required
+by the schema). They are approximate building positions for straight-line
+distance estimates, not navigation; Order uses them for nearest-pickup sorting.
 | `GET /readyz` | 200 if database reachable, otherwise 503 | None; direct port |
 
 ## Querying the catalogue

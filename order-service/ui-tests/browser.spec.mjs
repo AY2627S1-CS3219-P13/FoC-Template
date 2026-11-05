@@ -23,11 +23,11 @@ async function fill(page, name = "Milk Tea") {
   await page.locator("#offer").fill("10");
   await page.locator("#expiry").fill(expiry());
 }
-async function seed(page, key) {
+async function seed(page, key, pickup = { type: "supplier", id: supplier.slice(9) }) {
   const result = await page.request.post("/api/v1/orders", {
     headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": key },
     data: {
-      pickup: { type: "supplier", id: supplier.slice(9) },
+      pickup,
       delivery: { type: "location", id: "utown" },
       items: [{ name: key, quantity: 1 }],
       offeredCredits: 10,
@@ -502,6 +502,40 @@ test("open snapshot has no pagination, removes assignments live and reconciles r
   await page.unroute("**/api/v1/orders?scope=**");
   await expect(page.locator("#sync-notice")).toBeHidden({ timeout: 5000 });
   await expect(page.locator(".order-card")).toHaveCount(21);
+});
+
+test("nearest pickup ranks open errands from the courier's starting location", async ({ page }) => {
+  await start(page);
+  // The COM2 supplier errand expires first, so only distance can put the library first.
+  await seed(page, "com2-supplier");
+  await seed(page, "library-pickup", { type: "location", id: "central-library" });
+  await start(page, "courier");
+  await page.getByRole("button", { name: "Help a friend", exact: true }).click();
+  const cards = page.locator(".order-card");
+  await expect(cards).toHaveCount(2);
+  // toBeDisabled does not report a disabled <option>; check the DOM property.
+  const nearest = page.locator('#open-sort option[value="distance"]');
+  await expect(nearest).toHaveJSProperty("disabled", true);
+  await expect(page.locator(".order-card .distance")).toHaveCount(0);
+  await expect(cards.first()).toContainText("Campus Cafe");
+
+  await page.locator("#open-from").selectOption("central-library");
+  await expect(nearest).toHaveJSProperty("disabled", false);
+  await page.locator("#open-sort").selectOption("distance");
+  await expect(cards.first()).toContainText("Pickup at Central Library");
+  await expect(cards.nth(1)).toContainText("Campus Cafe");
+  await expect(cards.nth(1)).toContainText("Approximately 320 m from Central Library");
+
+  // The starting point survives a reload (sort resets to expiry, labels remain).
+  await page.reload();
+  await page.getByRole("button", { name: "Help a friend", exact: true }).click();
+  await expect(page.locator("#open-from")).toHaveValue("central-library");
+  await expect(cards.first()).toContainText("Approximately 320 m from Central Library");
+  // Clearing the starting point falls back to expiry and hides distances.
+  await page.locator("#open-sort").selectOption("distance");
+  await page.locator("#open-from").selectOption("");
+  await expect(page.locator("#open-sort")).toHaveValue("expiry");
+  await expect(page.locator(".order-card .distance")).toHaveCount(0);
 });
 
 test("requester cancellation and confirmation reach terminal states", async ({ page }) => {
