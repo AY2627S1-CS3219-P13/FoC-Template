@@ -14,13 +14,14 @@ func registerUI(mux *http.ServeMux) {
 		"/orders": "index.html", "/orders/": "index.html",
 		"/orders/schedule": "index.html",
 		"/orders/app.js":   "app.js", "/orders/core.mjs": "core.mjs", "/orders/style.css": "style.css",
+		"/orders/sw.js": "sw.js",
 	} {
 		pattern := "GET " + route
 		if route == "/orders/" {
 			pattern += "{$}"
 		}
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; worker-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 			w.Header().Set("Referrer-Policy", "same-origin")
 			data, err := webAssets.ReadFile("web/" + file)
 			if err != nil {

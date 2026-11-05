@@ -24,6 +24,8 @@ const (
 	testSupplierID     = "22222222-2222-4222-8222-222222222222"
 	inactiveSupplierID = "33333333-3333-4333-8333-333333333333"
 	secondSupplierID   = "44444444-4444-4444-8444-444444444444"
+
+	testSupplierInternalToken = "supplier-internal-token-for-tests-1234"
 )
 
 type fakeDependencies struct {
@@ -68,8 +70,12 @@ func (f *fakeDependencies) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, Identity{UserID: testUserID, Roles: []string{"user"}, ExpiresAt: time.Now().Add(time.Hour)})
-	case r.URL.Path == "/api/v1/locations":
-		if cookie, _ := r.Cookie("foc_session"); cookie == nil {
+	case r.URL.Path == "/api/v1/locations" || r.URL.Path == "/internal/v1/locations":
+		if cookie, _ := r.Cookie("foc_session"); r.URL.Path == "/api/v1/locations" && cookie == nil {
+			w.WriteHeader(401)
+			return
+		}
+		if r.URL.Path == "/internal/v1/locations" && r.Header.Get("Authorization") != "Bearer "+testSupplierInternalToken {
 			w.WriteHeader(401)
 			return
 		}

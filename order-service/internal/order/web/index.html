@@ -236,6 +236,20 @@
         </aside>
       </section>
       <section id="list-view" hidden aria-label="Errand list">
+        <section id="alerts-panel" class="alerts-panel" aria-labelledby="alerts-title" hidden>
+          <div>
+            <h3 id="alerts-title">Nearby alerts</h3>
+            <p id="alerts-state" class="muted" role="status"></p>
+          </div>
+          <div class="alerts-form">
+            <label>Near <select id="alerts-location"></select></label>
+            <label>Distance <select id="alerts-radius"><option value="200">Within 200 m</option><option value="500">Within 500 m</option><option value="1000">Within 1 km</option></select></label>
+            <button id="alerts-enable">Turn on alerts</button>
+            <button id="alerts-save" class="secondary" hidden>Save changes</button>
+            <button id="alerts-disable" class="secondary" hidden>Turn off on this device</button>
+          </div>
+          <p id="alerts-message" class="error" role="alert" hidden></p>
+        </section>
         <div class="list-toolbar">
           <p id="list-label" class="muted"></p>
           <label id="request-filter-label" hidden>Show requests <select id="request-filter"><option value="all">All requests</option><option value="current">Current requests</option><option value="past">Past requests</option></select></label>

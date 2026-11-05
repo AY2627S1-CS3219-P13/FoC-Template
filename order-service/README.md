@@ -89,6 +89,7 @@ remains admin-only. Signed-in users can open Orders from the catalogue header.
 
 - `/orders` provides New errand, My requests, Help a friend and My deliveries. Sign in through the existing gateway first; the local host-only session cookie is shared across localhost ports. Selectors load all Supplier pages, show exact location/description/opening hours, and retain unavailable previous selections for correction.
 - Help a friend has a **Start from** campus-location selector. Choosing one labels each errand "Approximately 320 m from Central Library" (or "Pickup at …" under 50 m) and enables **Nearest pickup** sorting. Distances are straight-line estimates from Supplier's location coordinates. The selection is kept in this browser's local storage across reloads; clearing it hides distances and returns to expiry sorting.
+- Help a friend also has a **Nearby alerts** panel. A courier picks a campus location and 200 m, 500 m or 1 km, then **Turn on alerts**. The browser asks for notification permission, registers `/orders/sw.js` and subscribes through its push service (Chrome, Edge, Firefox, or Safari on macOS 13+). New errands within range then arrive as system notifications, at most one every two minutes, even with the site closed. Clicking one opens Help a friend with that errand selected (`/orders?view=open&order=<id>`). The preference is per account; each browser is a device that can be turned off on its own. The panel explains unsupported browsers, insecure addresses, blocked permission and servers without push. `localhost` and HTTPS are secure origins, so the laptop demo works; iPhone home-screen web apps are not supported.
 - Browser requests are asynchronous. Only affected/conflicting actions lock; navigation remains usable. The last committed status stays visible while an action is pending. Lists and selected details refresh every two seconds while visible; outages retain the last snapshot and mark it stale. Responses with older order versions cannot overwrite newer ones.
 - Drafts and unresolved command identities are scoped by user in session storage (this browser tab only). A lost creation reply retains the exact serialized body/key across reload. No session cookie is readable or stored by JavaScript. Names/descriptions render as text, never HTML. Quantity/offer values preserve signed-64-bit precision rather than passing through JavaScript's lossy number representation.
 - The lifecycle guard allows only forward whole-request transitions across all nine states. Assigned couriers pick up/deliver, requesters cancel before pickup or confirm/dispute after delivery, and admins resolve disputes. The Disputes tab and the User orders link (to the frontend's `/admin/orders` lookup) are admin-only. Delivery releases courier capacity atomically; later retries and settlement never alter a newer assignment.
@@ -107,8 +108,9 @@ event at `GET /api/v1/orders/publication-status`. Published means available in t
 durable feed, not acknowledged by every browser. Streams rotate after eight
 seconds and reconnect automatically within the existing server timeouts. Snapshot
 polling remains a fallback and handles status changes and Supplier reconciliation.
-Offline users see an authoritative snapshot when they return; there are no OS
-push notifications, emails or persistent per-user notification inboxes. The shared
+Offline users see an authoritative snapshot when they return. Couriers who turn on
+nearby alerts also get Web Push notifications for new errands near them (see
+`API.md` and `NEARBY-ALERTS.md`); there are no emails or per-user notification inboxes. The shared
 frontend/gateway remains unchanged; this is available through Order's `/orders` UI.
 
 ## Run and test
@@ -160,6 +162,8 @@ Required variables are `ORDER_DATABASE_URL`, `ORDER_APP_ORIGIN`, `ORDER_SESSION_
 Compose defaults `ORDER_PUBLIC_PORT=8084` and `ORDER_APP_ORIGIN=http://localhost:8084`. Change both together when moving the UI. The optional integration overlay accepts `ORDER_DEPENDENCY_NETWORK` (default `foc_default`). The environment initializer reads User's token from the repository-root `.env` and Credit's separate `.env`, preserves existing credentials, and adds the Supplier catalogue token to the root `.env` when missing.
 
 Order’s recovery worker uses Supplier’s authenticated internal read-only catalogue on its existing port 8080 with a separate `SUPPLIER_INTERNAL_TOKEN`. Order’s environment initializer adds that token to the root `.env` without changing existing credentials, and root Compose shares it; browser cookies are never retained for background work. Each sweep checks up to 100 orders, rotating oldest checks first. Inactive/deleted places cancel open, accepted and picked-up orders and durably record refund intent; Credit performs the idempotent release. Delivered, disputed and terminal orders are protected. Outages or malformed responses do not imply deactivation. Default recovery runs every 30 seconds; event consumption materializes settlement queues before an independent financial retry tick delivers refunds. Standalone Order must configure `ORDER_SUPPLIER_INTERNAL_URL` and `ORDER_SUPPLIER_INTERNAL_TOKEN` to enable the sweep.
+
+Nearby alerts are enabled by `ORDER_VAPID_PRIVATE_KEY` (base64 PKCS#8 DER P-256 key) and `ORDER_VAPID_SUBJECT` (`mailto:` with a real address, or an `https://` URL). Both or neither must be set, and they need the Supplier internal catalogue above; invalid values stop startup. `scripts/init-env.sh` adds a key to `order-service/.env`, including on existing installations, with the subject `https://github.com/AY2627S1-CS3219-P13/FoC-Template`. Only root Compose passes them to Order, because standalone Order has no internal catalogue by default. Keep the key stable: a new key invalidates every browser subscription, so rotating it must also clear `push_subscriptions`. The container needs outbound HTTPS to the push services. If the repository becomes private or is renamed, set the subject to a team mailbox.
 
 The internal catalogue routes reuse Supplier’s existing HTTP listener; there is no additional port or service. The gateway rejects `/internal` paths, and the routes require their service credential even when called directly. Run `sh order-service/scripts/init-env.sh` after initializing User and Credit for the root stack.
 
@@ -213,7 +217,8 @@ repair and restart; already bootstrapped orders remain intact. Mixed old/new
 writers and automatic queue pruning are unsupported.
 
 Admin `GET /api/v1/orders/publication-status` adds `workflow` diagnostics: per
-consumer pending/failed event counts and oldest time, schedules and due/overdue
+consumer pending/failed event counts and oldest time (including
+`workflow-nearby-alerts`), push delivery counts, schedules and due/overdue
 counts, failed timers, pending/failed refund/payout jobs and uninitialized legacy
 orders. It exposes no domain payloads or credentials. Readiness still measures
 database reachability rather than Credit availability or drained queues.

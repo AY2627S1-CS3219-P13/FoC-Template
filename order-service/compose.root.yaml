@@ -9,6 +9,9 @@ services:
       ORDER_SESSION_COOKIE: ""
       ORDER_USER_INTERNAL_TOKEN: ${USER_INTERNAL_TOKEN:?Run sh user-service/scripts/init-env.sh}
       ORDER_CREDIT_INTERNAL_TOKEN: ${USER_CREDIT_INTERNAL_TOKEN:?Run sh credit-service/scripts/init-env.sh}
+      # Nearby alerts need the Supplier internal route above, so only the root stack enables them.
+      ORDER_VAPID_PRIVATE_KEY: ${ORDER_VAPID_PRIVATE_KEY:-}
+      ORDER_VAPID_SUBJECT: ${ORDER_VAPID_SUBJECT:-}
     depends_on:
       user-service:
         condition: service_started

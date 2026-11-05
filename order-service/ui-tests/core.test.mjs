@@ -13,7 +13,14 @@ import {
   pickupLocationId,
   formatDistance,
   openComparator,
+  alertState,
+  radiusLabel,
+  base64UrlBytes,
+  subscriptionBody,
+  deepLink,
 } from "../internal/order/web/core.mjs";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
 
 test("distances match the server's Haversine reference values", () => {
   const com2 = { latitude: 1.293925, longitude: 103.774153 };
@@ -120,4 +127,94 @@ test("scheduled creation preserves int64 values and replaces manual expiry",()=>
  assert.match(raw,/"quantity":9223372036854775807/);
  assert.equal(JSON.parse(raw).windowStart,"2030-11-04T09:00:00+08:00");
  assert.ok(!raw.includes('"expiresAt"'));
+});
+
+test("alert panel states follow browser support, permission and the account", () => {
+  const base = { supported: true, secure: true, permission: "default", pushAvailable: true, preference: null, subscribed: false, devices: 0 };
+  const on = { enabled: true, locationId: "com2", radiusMeters: 500 };
+  assert.equal(alertState({ ...base, supported: false }).key, "unsupported");
+  assert.equal(alertState({ ...base, secure: false }).key, "insecure");
+  assert.equal(alertState({ ...base, pushAvailable: false }).key, "unavailable");
+  assert.equal(alertState({ ...base, permission: "denied", preference: on, subscribed: true }).key, "blocked");
+  assert.equal(alertState(base).key, "off");
+  assert.equal(alertState({ ...base, preference: { ...on, enabled: false }, subscribed: true }).key, "off");
+  assert.deepEqual(alertState({ ...base, preference: on, subscribed: true }), { key: "on", message: "On for this device · within 500 m" });
+  assert.equal(alertState({ ...base, preference: on, devices: 2 }).key, "elsewhere");
+  assert.equal(alertState({ ...base, preference: on, devices: 0 }).key, "off");
+  assert.equal(radiusLabel(200), "within 200 m");
+  assert.equal(radiusLabel(1000), "within 1 km");
+});
+
+test("subscriptions send only the documented fields and keys decode to bytes", () => {
+  assert.deepEqual(subscriptionBody({ endpoint: "https://fcm.googleapis.com/x", expirationTime: null, keys: { p256dh: "BA", auth: "AA" } }),
+    { endpoint: "https://fcm.googleapis.com/x", keys: { p256dh: "BA", auth: "AA" } });
+  assert.deepEqual([...base64UrlBytes("-_8")], [0xfb, 0xff]);
+  assert.equal(base64UrlBytes("B".padEnd(87, "A")).length, 65);
+});
+
+test("notification links open Help a friend for one errand", () => {
+  assert.deepEqual(deepLink("?view=open&order=abc%2F1"), { view: "open", order: "abc/1" });
+  assert.deepEqual(deepLink("?view=open"), { view: "open", order: null });
+  assert.equal(deepLink("?view=mine&order=abc"), null);
+  assert.equal(deepLink(""), null);
+  assert.deepEqual(deepLink(`?view=open&order=${"x".repeat(161)}`), { view: "open", order: null });
+});
+
+// Run the real service worker against a minimal worker global.
+function loadWorker() {
+  const listeners = {}, shown = [], opened = [], messages = [];
+  let windows = [];
+  const self = {
+    location: { origin: "https://foc.example" },
+    addEventListener: (type, fn) => (listeners[type] = fn),
+    skipWaiting: () => {},
+    registration: { showNotification: async (title, options) => shown.push({ title, options }) },
+    clients: {
+      claim: async () => {},
+      matchAll: async () => windows,
+      openWindow: async (url) => opened.push(url),
+    },
+  };
+  vm.runInNewContext(readFileSync(new URL("../internal/order/web/sw.js", import.meta.url), "utf8"), { self, URL });
+  const fire = async (type, event) => {
+    let work;
+    listeners[type]({ ...event, waitUntil: (p) => (work = p) });
+    await work;
+  };
+  return { self, fire, shown, opened, messages, setWindows: (w) => (windows = w) };
+}
+
+test("the service worker shows payload text and falls back safely", async () => {
+  const sw = loadWorker();
+  const payload = { v: 1, orderId: "o-1", title: "New errand nearby", body: "Campus Cafe (COM2) · about 320 m", url: "/orders?view=open&order=o-1" };
+  await sw.fire("push", { data: { json: () => payload } });
+  await sw.fire("push", { data: { json: () => ({ v: 1, orderId: "o-2", url: "https://evil.example/" }) } });
+  await sw.fire("push", { data: { json: () => { throw new SyntaxError("not JSON"); } } });
+  await sw.fire("push", { data: null });
+  assert.deepEqual(JSON.parse(JSON.stringify(sw.shown[0])), {
+    title: "New errand nearby",
+    options: { body: "Campus Cafe (COM2) · about 320 m", tag: "errand-o-1", data: { url: "/orders?view=open&order=o-1", orderId: "o-1" } },
+  });
+  assert.equal(sw.shown[1].options.data.url, "/orders?view=open");
+  for (const fallback of sw.shown.slice(2)) {
+    assert.equal(fallback.title, "New errand nearby");
+    assert.equal(fallback.options.tag, "errand");
+  }
+});
+
+test("notification clicks reuse an open Orders tab or open the errand", async () => {
+  const sw = loadWorker();
+  const click = (data) => ({ notification: { data, close: () => {} } });
+  await sw.fire("notificationclick", click({ url: "/orders?view=open&order=o-1", orderId: "o-1" }));
+  assert.deepEqual(sw.opened, ["https://foc.example/orders?view=open&order=o-1"]);
+  let focused = false;
+  const posted = [];
+  sw.setWindows([
+    { url: "https://foc.example/", focus: async () => assert.fail("wrong tab") },
+    { url: "https://foc.example/orders", focus: async () => (focused = true), postMessage: (m) => posted.push(m) },
+  ]);
+  await sw.fire("notificationclick", click({ url: "/orders?view=open&order=o-2", orderId: "o-2" }));
+  assert.ok(focused);
+  assert.deepEqual(JSON.parse(JSON.stringify(posted)), [{ type: "open-errand", orderId: "o-2" }]); // objects from the worker realm
+  assert.equal(sw.opened.length, 1);
 });

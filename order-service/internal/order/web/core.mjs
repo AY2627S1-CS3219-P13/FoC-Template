@@ -137,3 +137,37 @@ export function scheduledHistoryPage(orders, page, pageStart, nextPageStart) {
     (!nextPageStart || newestFirst(order, nextPageStart) < 0),
   );
 }
+
+// Nearby alerts: the panel state from browser capability, permission and the
+// server's view of this account. `subscribed` means this browser has a subscription.
+export function alertState({ supported, secure, permission, pushAvailable, preference, subscribed, devices }) {
+  if (!supported) return { key: "unsupported", message: "This browser can't receive alerts. Use Chrome, Edge, Firefox, or Safari on macOS." };
+  if (!secure) return { key: "insecure", message: "Alerts need a secure address (HTTPS or localhost)." };
+  if (!pushAvailable) return { key: "unavailable", message: "Nearby alerts are not available on this server right now." };
+  if (permission === "denied")
+    return { key: "blocked", message: "Notifications are blocked for this site. Allow them in your browser's site settings, then reload this page." };
+  if (preference?.enabled && subscribed) return { key: "on", message: `On for this device · ${radiusLabel(preference.radiusMeters)}` };
+  if (preference?.enabled && devices > 0)
+    return { key: "elsewhere", message: "On for another of your devices. Turn alerts on here to also get them on this device." };
+  return { key: "off", message: "Off. Get a notification when a new errand appears near you, even with this page closed." };
+}
+
+export const radiusLabel = (meters) => (meters >= 1000 ? `within ${meters / 1000} km` : `within ${meters} m`);
+
+// PushManager.subscribe needs the VAPID public key as bytes.
+export function base64UrlBytes(value) {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+}
+
+// Send only the documented fields; toJSON() also carries expirationTime.
+export function subscriptionBody(json) {
+  return { endpoint: json.endpoint, keys: { p256dh: json.keys?.p256dh, auth: json.keys?.auth } };
+}
+
+// /orders?view=open&order=<id>, the link a notification opens.
+export function deepLink(search) {
+  const query = new URLSearchParams(search);
+  const order = query.get("order");
+  return query.get("view") === "open" ? { view: "open", order: order && order.length <= 160 ? order : null } : null;
+}

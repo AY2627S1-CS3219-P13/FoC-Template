@@ -25,6 +25,7 @@ type App struct {
 	places              placeLister
 	locator             locationLocator
 	credit              escrowClient
+	push                *pushService
 	log                 *slog.Logger
 	now                 func() time.Time
 }
@@ -43,6 +44,7 @@ func New(db *pgxpool.Pool, cfg Config, log *slog.Logger) *App {
 		places:    &CatalogueClient{BaseURL: cfg.SupplierServiceURL, CookieName: cfg.SessionCookie, Client: client},
 		locator:   &CatalogueClient{BaseURL: cfg.SupplierServiceURL, CookieName: cfg.SessionCookie, Client: client},
 		credit:    &CreditClient{BaseURL: cfg.CreditServiceURL, Token: cfg.CreditServiceToken, Client: client},
+		push:      newPushService(cfg, client),
 	}
 }
 
@@ -118,6 +120,10 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/orders/stream", a.endpoint(a.protected(a.streamOrders)))
 	mux.HandleFunc("GET /api/v1/orders/publication-status", a.endpoint(a.protected(a.publicationStatus)))
 	mux.HandleFunc("GET /api/v1/orders/places", a.endpoint(a.protected(a.listPlaces)))
+	mux.HandleFunc("GET /api/v1/orders/alerts", a.endpoint(a.protected(a.alertSettings)))
+	mux.HandleFunc("PUT /api/v1/orders/alerts", a.endpoint(a.protected(a.saveAlertPreference)))
+	mux.HandleFunc("PUT /api/v1/orders/alerts/subscription", a.endpoint(a.protected(a.saveSubscription)))
+	mux.HandleFunc("DELETE /api/v1/orders/alerts/subscription", a.endpoint(a.protected(a.deleteSubscription)))
 	mux.HandleFunc("GET /api/v1/orders", a.endpoint(a.snapshot(a.protected(a.listOrders))))
 	mux.HandleFunc("GET /api/v1/orders/{id}", a.endpoint(a.protected(a.getOrder)))
 	mux.HandleFunc("GET /api/v1/orders/{id}/events", a.endpoint(a.protected(a.events)))
@@ -138,7 +144,7 @@ func (a *App) middleware(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		}
 		if (origin != "" && origin != a.cfg.Origin) || (r.Method != http.MethodGet && r.Method != http.MethodHead && origin != a.cfg.Origin) {
 			a.endpoint(func(http.ResponseWriter, *http.Request) error {
