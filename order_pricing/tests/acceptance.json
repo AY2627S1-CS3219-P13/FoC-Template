@@ -1,0 +1,29 @@
+{
+  "status": "local-components-implemented-external-gates-pending",
+  "description": "Acceptance inventory. Run scripts/check.sh for component and isolated integration evidence. The bundled policy double alone establishes none of these gates. Actual Order/UI/source integrations, production calibration, archival and AWS deployment remain separate work.",
+  "serving": [
+    {"id": "http-validation", "requires": "real HTTP app", "assert": "API section 2/3 transport, duplicate-key/null/enum/unknown-field rules, auth, body limits and normalized fingerprints hold."},
+    {"id": "source-context", "requires": "collector + clock-controlled sources", "assert": "Atomic full refresh, limits, future/regressing timestamps and source-asOf freshness; failures preserve last valid snapshot; no request-path source fan-out."},
+    {"id": "pinning", "requires": "real HTTP app + controllable policy", "assert": "One calculation sees one immutable release/context during concurrent refresh; DTOs contain no credentials/user identity."},
+    {"id": "lifecycle", "requires": "real HTTP app + failing loaders", "assert": "Load/warm-up failure keeps readiness false; fresh catalogue/config/baseline/storage gate readiness; shutdown drains bounded work and closes policy."},
+    {"id": "timeouts-capacity", "requires": "blocking policy", "assert": "Event loop remains responsive, admission is bounded with 429/Retry-After, total budget is enforced and timed-out workers retain slots until completion."},
+    {"id": "output-validation", "requires": "malformed policy doubles", "assert": "Noninteger, out-of-bound, wrong-schema or malformed results cannot issue success; unexpected errors are sanitized."},
+    {"id": "durable-issuance", "requires": "real shared database", "assert": "Quote and QuoteCalculated commit atomically before HTTP success; injected storage failure returns quote_recording_unavailable."},
+    {"id": "replica-replay", "requires": "two replicas + shared database", "assert": "Concurrent scoped same-key calls serialize; replay survives expiry/restart/release change; changed known input conflicts; additive unknown input does not conflict."},
+    {"id": "events-export", "requires": "real database + concurrent writers", "assert": "Atomic batch validation, dedup/conflict, out-of-order linkage and commit-prefix export cursors satisfy API section 7; archival/retention are configured."},
+    {"id": "order-integration", "requires": "Order + UI + Pricing through gateway", "assert": "User-scoped proxy keys, matching draft revisions, explicit selected offer, durable linkage/outbox and manual-offer fallback; no scheduled quotes."},
+    {"id": "mixed-release", "requires": "old/new images and shared storage", "assert": "Old/new callers and replicas coexist; replayed responses retain their original release; expand/contract migrations permit rollback."}
+  ],
+  "formula": [
+    {"id": "formula-calibration", "requires": "agreed coefficients + real formula", "assert": "Short/typical/difficult fixture prices agree with documented effort assumptions; bounds do not imply a fulfilment guarantee."},
+    {"id": "effort-monotonicity", "requires": "real formula", "assert": "Increasing walkable distance or handling quantity alone cannot lower price, including at caps; quantity adjustment is modest and bounded."},
+    {"id": "no-double-counting", "requires": "real formula + diagnostic features", "assert": "Distance-derived travel time is charged once; item-handling time and carrying adjustment have distinct documented meanings."},
+    {"id": "bounded-relative-traffic", "requires": "versioned local lookup + real formula", "assert": "Singapore-time factors scale the relative pickup index; quieter locations/times cannot lower reward; multiplier stays 1..1.2 before rounding; unknown locations stay neutral. Legacy people counts cannot override release-owned indices and estimates are never labelled observed availability."}
+  ],
+  "mlops": [
+    {"id": "real-export", "requires": "export job + built image", "assert": "Export includes exact selected policy/preprocessing/assets, complete checksums, supported majors/capabilities and fully pinned dependencies; image loads without runtime downloads."},
+    {"id": "training-serving-parity", "requires": "training + real model policy", "assert": "Same versioned examples produce equivalent preprocessing and predictions offline and inside serving; omitted fields remain unknown."},
+    {"id": "lineage-quality", "requires": "training/evaluation job", "assert": "Versioned datasets, seeds, code/model/release identities and mature labels are reproducible; synthetic/estimated/observed provenance stays distinct; promotion is explicit."},
+    {"id": "immutable-promotion-rollback", "requires": "deployment pipeline", "assert": "New image digest is deployed through readiness and serialized releases; failed rollout restores prior full release without deleting shared issuance/events."}
+  ]
+}

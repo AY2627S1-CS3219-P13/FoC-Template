@@ -82,6 +82,10 @@ push and pull request, so a green local run is a green CI run.
 - Containers run as a non-root user with a read-only filesystem and
   `cap_drop: [ALL]`; keep new services that way.
 
+## Chat math rendering
+
+* In chat response, display math blocks `\[...\]` or `$$...$$` must be surrounded by blank lines for Markdown rendering compatibility.
+
 ## Changes
 
 - Keep diffs small and in the existing style; update the affected `README.md` /

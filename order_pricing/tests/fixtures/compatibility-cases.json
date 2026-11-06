@@ -1,0 +1,33 @@
+[
+  {"name": "old-minimal", "valid": true, "remove": ["/request/totalItemQuantity"]},
+  {"name": "future-minor", "valid": true, "set": {
+    "/contractVersion": "1.9", "/context/schemaVersion": "1.9",
+    "/futureOption": {"recommendedCredits": 999},
+    "/request/newFeature": 42, "/request/pickup/label": "ignored",
+    "/request/draft/newIdentity": "ignored",
+    "/context/futureForecast": {"supply": 999},
+    "/context/catalogue/locations/0/label": "ignored",
+    "/context/orderContext/areas/0/potentialDemand": 999,
+    "/context/routes/0/experimentalMinutes": 1,
+    "/context/sources/0/debug": "ignored"
+  }},
+  {"name": "unavailable-orders", "valid": true, "set": {"/context/orderContext": {"state": "unavailable"}}, "remove": ["/context/sources/1"]},
+  {"name": "stale-orders", "valid": true, "set": {"/context/orderContext/state": "stale", "/context/sources/1/asOf": "2026-11-05T16:58:00Z"}},
+  {"name": "unknown-warning-not-an-input", "valid": true, "set": {"/request/warnings": ["new_warning"]}},
+  {"name": "quantity-null", "valid": false, "set": {"/request/totalItemQuantity": null}},
+  {"name": "quantity-zero", "valid": false, "set": {"/request/totalItemQuantity": 0}},
+  {"name": "quantity-bool", "valid": false, "set": {"/request/totalItemQuantity": true}},
+  {"name": "quantity-float", "valid": false, "set": {"/request/totalItemQuantity": 2.0}},
+  {"name": "quantity-unsafe", "valid": false, "set": {"/request/totalItemQuantity": 9007199254740992}},
+  {"name": "negative-revision", "valid": false, "set": {"/request/draft/revision": -1}},
+  {"name": "new-place-enum", "valid": false, "set": {"/request/pickup/type": "warehouse"}},
+  {"name": "new-order-state", "valid": false, "set": {"/context/orderContext/state": "warming"}},
+  {"name": "new-provenance", "valid": false, "set": {"/context/sources/0/provenance": "inferred"}},
+  {"name": "adapter-major", "valid": false, "set": {"/contractVersion": "2.0"}},
+  {"name": "context-major", "valid": false, "set": {"/context/schemaVersion": "2.0"}},
+  {"name": "malformed-time", "valid": false, "set": {"/calculatedAt": "yesterday"}},
+  {"name": "malformed-uuid", "valid": false, "set": {"/request/draft/id": "not-a-uuid"}},
+  {"name": "missing-required", "valid": false, "remove": ["/request/orderExpiresAt"]},
+  {"name": "unknown-is-not-zero", "valid": false, "set": {"/context/orderContext": {"state": "unavailable", "areas": []}}},
+  {"name": "fresh-without-data", "valid": false, "set": {"/context/orderContext": {"state": "fresh"}}}
+]

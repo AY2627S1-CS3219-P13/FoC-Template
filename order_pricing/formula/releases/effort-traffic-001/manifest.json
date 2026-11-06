@@ -1,0 +1,36 @@
+{
+  "adapterMajor": 1,
+  "bounds": {
+    "maximum": 30,
+    "minimum": 5
+  },
+  "contextMajor": 1,
+  "entryPoint": "policy.formula:load_policy",
+  "featureSchemaVersion": "effort-traffic-1",
+  "files": {
+    "artifacts/config.json": "243e8ef9dd932ba16c2a231a5512179e0e47753f1e07ac817d4be30e88a86de5",
+    "artifacts/context.json": "387fdb91cad25bbb945446885146dfc2181ac7df2c8178577ca1455a7e715440",
+    "artifacts/foot_traffic.json": "b78462c3033f6e6220bc00e1c41fc5ded804d7678d5245f8c092bae1f21a1d58",
+    "artifacts/warmup.json": "4dd216c53bbc09475431f117b77757c5a19d66c0c22d4a2279408c33775871f7",
+    "policy/__init__.py": "68cc3fe071e0c50918b86dd2e2c3c447f763de8ec80bd3edfd71684e3bc3afbc",
+    "policy/formula.py": "e16f374d74c5b2e804d09af6e0225dfa1411a985583b5ebc2c7de090b7568074",
+    "requirements.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "provenance": {
+    "calibration": "uncalibrated-policy-assumptions",
+    "codeCommit": "dd63aeb82fc39f7c597820c8914d042f1341148e",
+    "datasetIds": [
+      "synthetic-fixture-001",
+      "nus-relative-foot-traffic-001"
+    ],
+    "modelRuns": [],
+    "sourceCodeSha256": "e16f374d74c5b2e804d09af6e0225dfa1411a985583b5ebc2c7de090b7568074"
+  },
+  "releaseId": "effort-traffic-001",
+  "requiredCapabilities": [
+    "catalogue.v1",
+    "orders.v1",
+    "routes.v1",
+    "footfall.v1"
+  ]
+}

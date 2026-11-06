@@ -1,0 +1,11 @@
+{
+  "quoteId": "33333333-3333-4333-8333-333333333333",
+  "draft": {"id": "11111111-1111-4111-8111-111111111111", "revision": 4},
+  "recommendedCredits": 8,
+  "pricingMode": "baseline",
+  "quotedAt": "2026-11-05T17:00:00Z",
+  "validUntil": "2026-11-05T17:02:00Z",
+  "releaseId": "test-only-001",
+  "contextSnapshotId": "synthetic-context-001",
+  "warnings": []
+}

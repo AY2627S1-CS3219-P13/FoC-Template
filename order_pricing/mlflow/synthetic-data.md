@@ -16,7 +16,7 @@ the prediction interface.
 | Spatial demand model | Divide campus into zones. Use residences, lecture halls, libraries, food outlets, opening hours and available aggregate footfall counts to assign baseline activity. |
 | Non-homogeneous Poisson process | Generate pre-price quote requests with rates varying by zone, time, weekday, meal periods and academic calendar. Consider negative-binomial counts if observed variability exceeds Poisson assumptions. |
 | Origin–destination / gravity model | Generate pickup and destination pairs from location attractiveness and travel distance. Foot traffic is a proxy, not delivery demand itself. |
-| Agent-based, discrete-event simulation | Simulate deliverers going online, accepting jobs, travelling and becoming available again. Preserve capacity constraints: one active delivery per deliverer in the initial scope. |
+| Agent-based, discrete-event simulation | Simulate participation, acceptance, travel and capacity. Do not batch deliveries. Existing Order permits three assignments; assignment slots are not three independent deliverers or evidence of simultaneous travel. |
 | Behavioural choice models | Assume logistic booking and acceptance curves driven by price, wait, pickup distance and duration. Treat coefficients as uncertain hypotheses until calibrated against real behaviour. |
 
 Generate complete scenarios rather than independent columns. Shared context,

@@ -1,18 +1,59 @@
 # Order pricing
 
-Planning only: no service, training jobs or AWS resources are implemented yet.
+Local implementations include the reusable FastAPI framework, relative-effort
+formula package and reproducible synthetic training/selection/export pipeline.
+See the [shared adapter/context decisions](contracts/README.md),
+[formula](formula/README.md), [serving](serving/README.md) and
+[training](mlflow/README.md). AWS resources and the planned Order/UI/Supplier
+source integrations are not implemented here.
+
+The foundation separates the Order-facing quote contract from an enriched internal
+policy contract. The reusable serving framework owns authentication, asynchronous
+context collection and durable quote/event issuance; formula and model packages
+own feature preparation and price decisions. Versioned fixtures and conformance
+tests let these components evolve independently. Immutable policy images can be
+replaced while shared PostgreSQL preserves quote replay and training history.
+The local training/export workflow exercises that replacement without making
+production serving depend on a training process or MLflow tracking server.
+The [v1 integration contract](API.md) is the shared specification for parallel
+implementation. Pricing's private endpoints are implemented by the serving
+component; sibling-service additions in that contract remain separate work.
 
 ## Context and boundaries
 
 Provide model-backed order pricing through a stable interface, independently of
 model architecture. Initial assumptions: customer price equals deliverer payout;
 each delivery serves exactly one request. Model algorithms are intentionally
-unspecified. Prediction and price selection are separate responsibilities; the
-location of the pricing optimizer is still to be decided.
+unspecified. Pricing owns predictors and the pricing optimizer behind one advisory
+quote API. Order owns the user-selected offer and remains the creation authority.
 
 Order remains responsible for order lifecycle and Credit for balances and
 settlement. This component must not write their databases. Cross-service access
 uses authenticated internal HTTP, following the repository's service boundaries.
+
+## First prediction container decision
+
+The first container uses a transparent relative-effort pricing policy, not a
+trained price model. Estimate effort from walkable route/travel time, documented
+pickup/approach-time assumptions and a modest item-handling adjustment. Avoid
+counting distance and its derived travel time twice. Missing quantity remains
+unknown. The [relative foot-traffic policy](formula/FOOT_TRAFFIC.md) adds a bounded
+premium for quieter pickup locations/times using an estimated local lookup and
+Singapore-time profile. It is separate from physical effort and is not observed
+courier availability. The original effort-only release remains available.
+
+Use 5–30 inclusive whole credits as the initial recommendation bounds. Treat
+1 credit approximately like 1 dollar for price intuition only, not as a redemption
+or conversion promise. The range is a policy expectation, not evidence of
+willingness to pay or accept. Typical deliveries need not span the entire range.
+These bounds apply to recommendations, not the user's manually selected offer.
+
+Choose formula coefficients using representative short, typical and difficult
+deliveries before implementation is accepted. Exact coefficients, route data and
+time assumptions remain to be agreed; earlier numerical examples are illustrative.
+Synthetic scenarios test consistency and sensitivity, not real-world price
+effectiveness. Outcome-based price optimization is a later replacement, not a
+required validation stage for the first formula.
 
 ## Illustrative pricing objective and MVP scope
 
@@ -58,6 +99,8 @@ AWS                                        v
                          new ECS task definition + service update
                                            |
 Caller -> stable internal ALB endpoint -> ECS Fargate serving containers
+                                               ^
+Order / Supplier internal snapshots -> async collectors -> context cache
 ```
 
 - [mlflow/](mlflow/README.md): local experiment tracking, artifacts, training and
@@ -71,22 +114,37 @@ Caller -> stable internal ALB endpoint -> ECS Fargate serving containers
 
 ## Implementation plan
 
-1. Define the caller, prediction contracts and pricing decision ownership.
-2. Add containerized local MLflow and a reproducible training/evaluation job.
-3. Add the serving adapter, API validation and compatibility checks.
-4. Add a local release script: select, package, test, push, deploy and wait for
-   ECS stability; support rollback to a previous release.
-5. Provision ECR, ECS Fargate, an internal ALB, IAM and monitoring through
-   infrastructure as code. Start with health-gated rolling deployments.
+The three implementation briefs are [serving](tasks/serving.md),
+[formula](tasks/formula.md) and [MLOps](tasks/mlops.md). They share the versioned
+adapter and have separate component/conformance tests.
+
+Run local validation from the repository root:
+
+```sh
+sh order_pricing/scripts/check.sh
+```
+
+This runs fixtures/contracts, formula checks, MLOps checks and a fresh synthetic
+training/export before building formula/model serving images. An isolated Compose
+stack then exercises real PostgreSQL and HTTP replicas with synthetic source
+APIs. It verifies the policy interface across images, shared replay, source
+fallback, event recording/export, training ingestion, restart recovery and a
+recording-failure injection. It publishes no ports and removes its test stack;
+generated training runs/packages remain gitignored in `.integration/` for review.
+
+Next: implement the real source/Order/UI integrations and durable producers;
+calibrate the baseline and validate models on observed outcomes; finalize
+archival/retention and operational policy; then add image promotion, AWS
+infrastructure, monitoring and tested deployment rollback. Synthetic training
+demonstrates the pipeline and cannot establish real pricing effectiveness.
 
 ## Decisions for the next pass
 
-- Is the API prediction-only, or does it also return an optimized price? Who
-  owns the objective, fulfilment/earnings targets and infeasible-case policy?
-- Which service calls it, and how are input features assembled and authenticated?
-- What are the units (including credits versus currency), area boundaries,
-  prediction horizons, required fields and output meanings?
-- How are historical data, outcomes and any controlled price variation collected
-  without accessing another service's database directly?
-- Define latency/availability targets, timeout/fallback behaviour, promotion
-  criteria and AWS budget/region. See component documents for narrower decisions.
+- Choose baseline coefficients within the initial 5–30 recommendation bounds,
+  fulfilment/earnings targets and model validation thresholds; synthetic supply
+  assumptions need calibration.
+- Implement source snapshot APIs, durable quote/outcome recording and authenticated
+  export per the contract before claiming complete pilot training capture.
+- Define measured availability targets, promotion criteria, archival/retention,
+  rate limits and AWS budget/region. See the contract and component documents for
+  narrower decisions. Scheduled pricing and mandatory floors remain follow-ups.

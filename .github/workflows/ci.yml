@@ -14,6 +14,15 @@ concurrency:
 # green local check is a green CI check. Initialize all included services because
 # root Compose loads their environment files even for unrelated test profiles.
 jobs:
+  pricing-contracts:
+    name: Pricing contracts, components and integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check contracts, components and isolated integration
+        run: sh order_pricing/scripts/check.sh
+
   backend:
     name: ${{ matrix.service }}-service
     runs-on: ubuntu-latest
