@@ -54,6 +54,10 @@ services:
     restart: unless-stopped
     logging: *logging
   order-service:
+    environment:
+      ORDER_PRICING_URL: http://pricing-service:8080
+      ORDER_PRICING_TOKEN: ${PRICING_QUOTE_TOKEN:?Run sh order_pricing/scripts/init-env.sh}
+      ORDER_PRICING_SOURCE_TOKEN: ${PRICING_ORDER_SOURCE_TOKEN:?Run sh order_pricing/scripts/init-env.sh}
     build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/order-service:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
     restart: unless-stopped
@@ -68,7 +72,29 @@ services:
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/schedule-order:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
     restart: unless-stopped
     logging: *logging
+  smoke:
+    environment:
+      SMOKE_PRICING: "1"
+  pricing-db:
+    extends:
+      file: ./order_pricing/compose.runtime.yaml
+      service: pricing-db
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U foc_pricing -d foc_pricing"]
+  pricing-service:
+    extends:
+      file: ./order_pricing/compose.runtime.yaml
+      service: pricing-service
+    build: !reset null
+    image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/pricing-service:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
+    restart: unless-stopped
+    logging: *logging
   gateway:
+    depends_on:
+      pricing-service:
+        condition: service_healthy
     build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/gateway:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
     restart: unless-stopped
@@ -82,3 +108,6 @@ services:
         read_only: true
         bind:
           create_host_path: false
+
+volumes:
+  pricing-data:

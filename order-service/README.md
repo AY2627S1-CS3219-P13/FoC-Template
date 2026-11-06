@@ -267,8 +267,9 @@ Order readiness does not depend on advisory Pricing availability.
 The local-only policy uses synthetic route distances across the fifteen current
 catalogue locations. The form shows the credits and freshness without a demo
 label. This policy is
-for testing the interaction, not a calibrated campus map. Production Pricing
-images, ECR provisioning and EC2 release wiring are not added by this change.
+for testing the interaction, not a calibrated campus map. Pricing runtime image publication and EC2 wiring are described in
+[deployment notes](../docs/aws-deployment-notes.md#pricing-release-wiring). Cloud
+ECR provisioning and selection of a validated route package remain prerequisites.
 Training interactions and creation/outcome linkage remain follow-up work.
 
 Run backend checks with `docker compose --profile test run --build --rm order-tests`.

@@ -25,6 +25,11 @@ RUN PYTHONPATH=/app:/app/contracts/python python serving/local_demo.py
 ENV PRICING_PACKAGE_DIR=/opt/local-demo
 USER 65532:65532
 
+# Export synthetic test assets for the disposable CI image-only rollout check.
+# Production publishing always selects runtime with an explicit tracked package.
+FROM scratch AS local-policy
+COPY --from=local-demo /opt/local-demo/ /
+
 FROM runtime AS tests
 ENV PYTHONPATH=/app/serving:/app/contracts/python:/app
 COPY tests ./tests

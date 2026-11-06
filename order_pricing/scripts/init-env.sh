@@ -1,5 +1,5 @@
 #!/bin/sh
-# Add local Pricing credentials without replacing existing application settings.
+# Add Pricing credentials without replacing existing application settings.
 set -eu
 root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 file="$root/.env"
@@ -14,4 +14,4 @@ for name in PRICING_POSTGRES_PASSWORD PRICING_QUOTE_TOKEN PRICING_ORDER_WRITE_TO
     printf '\n%s=%s\n' "$name" "$value" >> "$file"
   fi
 done
-echo 'Local Pricing credentials initialized; existing settings kept.'
+echo 'Pricing credentials initialized; existing settings kept.'

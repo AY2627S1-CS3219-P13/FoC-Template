@@ -10,7 +10,7 @@ import unittest
 
 
 TAG = "a" * 40
-SERVICES = ["user-service", "supplier-service", "credit-service", "order-service", "schedule-order", "frontend", "gateway"]
+SERVICES = ["user-service", "supplier-service", "credit-service", "order-service", "schedule-order", "pricing-service", "frontend", "gateway"]
 STUB = r'''#!/usr/bin/env python3
 import json
 import os
@@ -55,6 +55,9 @@ class DeployTests(unittest.TestCase):
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("# disposable test configuration\n")
+        pricing_scripts = self.root / "order_pricing/scripts"
+        pricing_scripts.mkdir(parents=True)
+        shutil.copy(Path(__file__).parents[1] / "order_pricing/scripts/init-env.sh", pricing_scripts / "init-env.sh")
         tools = self.root / "bin"
         tools.mkdir()
         for name in ["docker", "curl"]:
@@ -92,6 +95,8 @@ class DeployTests(unittest.TestCase):
         self.assertLess(credit, gateway)
         self.assertEqual(calls[pull][-len(SERVICES):], SERVICES)
         self.assertIn("schedule-order",calls[stop])
+        self.assertIn("pricing-service",calls[stop])
+        self.assertTrue(any(self.action(c)=="exec" and "pricing-service" in c and "python" in c for c in calls))
         self.assertTrue(any(self.action(c)=="exec" and "http://schedule-order:8080/readyz" in c for c in calls))
         self.assertFalse(any(self.action(c) == "down" or "--volumes" in c for c in calls))
         for call in calls:
@@ -137,6 +142,27 @@ class DeployTests(unittest.TestCase):
         result = self.run_deploy(FAIL_READY="1")
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("Deployment ready:", result.stdout)
+
+    def test_pricing_readiness_failure_is_not_success(self):
+        result = self.run_deploy(FAIL_ACTION="exec")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("Deployment ready:", result.stdout)
+
+    def test_wrong_pricing_image_is_not_success(self):
+        result = self.run_deploy(WRONG_IMAGE="pricing-service")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("pricing-service is not running the requested image", result.stderr)
+
+    def test_pricing_credentials_are_initialized_once_without_logging_secrets(self):
+        first = self.run_deploy()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        configuration = (self.root / ".env").read_text()
+        second = self.run_deploy()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual((self.root / ".env").read_text(), configuration)
+        for line in configuration.splitlines():
+            if line.startswith("PRICING_"):
+                self.assertNotIn(line.split("=",1)[1], first.stdout + second.stdout)
 
     def test_wrong_running_image_is_not_success(self):
         result = self.run_deploy(WRONG_IMAGE="order-service")

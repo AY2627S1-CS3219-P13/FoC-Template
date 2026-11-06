@@ -164,8 +164,9 @@ for all fifteen existing location IDs. Their ordering and 150 m steps are arbitr
 UI fixtures, not campus geography. Package provenance stays synthetic for routes;
 live Supplier/Order projections remain observed. The form displays credits and
 freshness without a demo label. Existing immutable policy packages are unchanged. The demo
-stage must not be used for cloud publishing. EC2 release wiring, calibrated routes,
-creation quote linkage and durable Order training producers remain outstanding.
+stage must not be used for cloud publishing. EC2 release wiring is implemented separately from the local override; validated
+campus routes, creation quote linkage and durable Order training producers remain
+outstanding. See the cloud deployment notes below.
 
 Inspect with `docker compose -f compose.yaml -f compose.pricing.yaml ps`.
 Pricing has no published host port. Its database persists in the `pricing-data`
@@ -175,3 +176,19 @@ starts the application without Pricing integration.
 Price suggestions need no expiry input and update automatically every 30 seconds
 while the immediate-order editor is visible. The manual suggestion-refresh button
 has been removed; expiry remains required only for actual order creation.
+
+## CI/CD and EC2
+
+Pricing's component checks already run in CI. The release publisher now includes
+`foc/pricing-service`, using the `runtime` Docker target and the required repository
+variable `PRICING_POLICY_PACKAGE` to choose a committed release directory. The
+existing Pricing CI checks continue to validate the framework and policy packages.
+The EC2 override adds private Pricing/PostgreSQL, persistent storage, credential initialization,
+readiness checks and immutable-image verification. Local development still uses
+the separate `local-demo` target through `compose.pricing.yaml`.
+
+Before enabling the cloud release, provision the ECR repository/access and select
+a policy package with validated campus routes. The current checked-in example
+and the generated local UI fixtures are not a production campus map. See
+[Pricing release wiring](../docs/aws-deployment-notes.md#pricing-release-wiring)
+for prerequisites and verification. Training capture remains separate work.

@@ -287,3 +287,8 @@ and [Pricing](order_pricing/README.md#local-order-form-integration) for limitati
 Price suggestions need no expiry input and update automatically every 30 seconds
 while the immediate-order editor is visible. The manual suggestion-refresh button
 has been removed; expiry remains required only for actual order creation.
+
+Pricing now has an EC2 runtime image and deployment wiring alongside its existing
+CI checks. Cloud activation requires the Pricing ECR repository/access and an
+explicit `PRICING_POLICY_PACKAGE` repository variable selecting a committed,
+validated policy package. See [deployment prerequisites](docs/aws-deployment-notes.md#pricing-release-wiring).

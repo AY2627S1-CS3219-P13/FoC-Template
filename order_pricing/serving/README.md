@@ -122,10 +122,22 @@ Real PostgreSQL/two-replica/release-swap checks run in the dedicated Pricing
 integration stack. The [shared HTTP suite](../tests/README.md) can target a ready
 test app. In-memory storage is only a test double; runtime uses PostgreSQL.
 
-Still required before production pilot: authoritative sibling source endpoints,
-Order creation linkage/training outbox integration, real campus references, deployment secrets and
+Still required before production pilot: Order creation linkage/training outbox
+integration, validated campus references, deployment credentials/access and
 networks, backup/export archival and operational retention/reconciliation policy.
 Indefinite database retention is not a backup strategy. AWS infrastructure,
 promotion/rollback automation and service-level latency/quality alarms are not
 provisioned by this local framework. Acceptance gates must remain truthful about
 those missing integrations.
+
+## Release image
+
+The existing AWS publish job includes `pricing-service`. Its build step selects
+`order_pricing/serving/Dockerfile --target runtime` and passes the required
+`PRICING_POLICY_PACKAGE` repository variable as `POLICY_PACKAGE`. The selected
+manifest must be tracked. Existing Pricing checks remain in CI. `local-demo` and
+the `local-policy` fixture export are reserved for local/disposable CI checks.
+EC2 image configuration is in `compose.ec2.yaml`, sharing private source/storage
+settings from `compose.runtime.yaml` in the Pricing directory. See the AWS
+deployment notes for cloud prerequisites. Release triggers and orchestration
+remain unchanged.
