@@ -1,0 +1,26 @@
+name: foc-pricing-mlflow
+services:
+  mlflow:
+    build:
+      context: ..
+      dockerfile: mlflow/Dockerfile.server
+    ports: ["127.0.0.1:5000:5000"]
+    volumes: ["tracking:/data"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+  training:
+    build:
+      context: ..
+      dockerfile: mlflow/Dockerfile
+    volumes: ["work:/data"]
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+volumes:
+  tracking:
+  work:

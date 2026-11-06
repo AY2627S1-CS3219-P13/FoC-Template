@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:foc:pricing:contracts:1.1",
+  "$defs": {
+    "version": {"type": "string", "pattern": "^1\\.[0-9]+$"},
+    "id": {"type": "string", "minLength": 1},
+    "uuid": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f-]{36}$"},
+    "time": {"type": "string", "format": "date-time"},
+    "positiveInteger": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "draft": {
+      "type": "object", "required": ["id", "revision"],
+      "properties": {
+        "id": {"$ref": "#/$defs/uuid"},
+        "revision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+      }
+    },
+    "place": {
+      "type": "object", "required": ["type", "id"],
+      "properties": {
+        "type": {"enum": ["supplier", "location"]},
+        "id": {"$ref": "#/$defs/id"}
+      },
+      "allOf": [{
+        "if": {"properties": {"type": {"const": "supplier"}}},
+        "then": {"properties": {"id": {"$ref": "#/$defs/uuid"}}}
+      }]
+    },
+    "QuoteRequest": {
+      "type": "object", "required": ["draft", "pickup", "delivery"],
+      "properties": {
+        "draft": {"$ref": "#/$defs/draft"},
+        "pickup": {"$ref": "#/$defs/place"},
+        "delivery": {"$ref": "#/$defs/place"},
+        "orderExpiresAt": {"$ref": "#/$defs/time"},
+        "totalItemQuantity": {"$ref": "#/$defs/positiveInteger"}
+      }
+    },
+    "source": {
+      "type": "object", "required": ["source", "snapshotId", "asOf", "provenance"],
+      "properties": {
+        "source": {"$ref": "#/$defs/id"},
+        "snapshotId": {"$ref": "#/$defs/id"},
+        "asOf": {"$ref": "#/$defs/time"},
+        "provenance": {"enum": ["observed", "estimated", "synthetic"]}
+      }
+    },
+    "catalogue": {
+      "type": "object", "required": ["locations", "suppliers"],
+      "properties": {
+        "locations": {"type": "array", "maxItems": 1000, "items": {
+          "type": "object", "required": ["id"],
+          "properties": {"id": {"$ref": "#/$defs/id"}}
+        }},
+        "suppliers": {"type": "array", "maxItems": 10000, "items": {
+          "type": "object", "required": ["id", "locationId", "active"],
+          "properties": {
+            "id": {"$ref": "#/$defs/uuid"},
+            "locationId": {"$ref": "#/$defs/id"},
+            "active": {"type": "boolean"}
+          }
+        }}
+      }
+    },
+    "orderContext": {
+      "type": "object", "required": ["state"],
+      "properties": {
+        "state": {"enum": ["fresh", "stale", "unavailable"]},
+        "windowStart": {"$ref": "#/$defs/time"},
+        "windowEnd": {"$ref": "#/$defs/time"},
+        "areas": {"type": "array", "maxItems": 10000, "items": {
+          "type": "object", "required": ["locationId", "openRequestCount", "createdOrderCount"],
+          "properties": {
+            "locationId": {"$ref": "#/$defs/id"},
+            "openRequestCount": {"type": "integer", "minimum": 0},
+            "createdOrderCount": {"type": "integer", "minimum": 0}
+          }
+        }}
+      },
+      "allOf": [{
+        "if": {"properties": {"state": {"const": "unavailable"}}},
+        "then": {"not": {"anyOf": [
+          {"required": ["areas"]}, {"required": ["windowStart"]}, {"required": ["windowEnd"]}
+        ]}},
+        "else": {"required": ["windowStart", "windowEnd", "areas"]}
+      }]
+    },
+    "route": {
+      "type": "object", "required": ["pickupLocationId", "deliveryLocationId", "walkableMetres"],
+      "properties": {
+        "pickupLocationId": {"$ref": "#/$defs/id"},
+        "deliveryLocationId": {"$ref": "#/$defs/id"},
+        "walkableMetres": {"type": "number", "minimum": 0}
+      }
+    },
+    "footfall": {
+      "type": "object", "required": ["locationId", "windowStart", "windowEnd", "estimatedPeople"],
+      "properties": {
+        "locationId": {"$ref": "#/$defs/id"},
+        "windowStart": {"$ref": "#/$defs/time"},
+        "windowEnd": {"$ref": "#/$defs/time"},
+        "estimatedPeople": {"type": "number", "minimum": 0}
+      }
+    },
+    "ContextSnapshot": {
+      "type": "object", "required": ["schemaVersion", "snapshotId", "sources", "catalogue", "orderContext", "routes", "footfall"],
+      "properties": {
+        "schemaVersion": {"$ref": "#/$defs/version"},
+        "snapshotId": {"$ref": "#/$defs/id"},
+        "sources": {"type": "array", "items": {"$ref": "#/$defs/source"}},
+        "catalogue": {"$ref": "#/$defs/catalogue"},
+        "orderContext": {"$ref": "#/$defs/orderContext"},
+        "routes": {"type": "array", "items": {"$ref": "#/$defs/route"}},
+        "footfall": {"type": "array", "items": {"$ref": "#/$defs/footfall"}}
+      }
+    },
+    "PolicyInput": {
+      "type": "object", "required": ["contractVersion", "calculatedAt", "request", "resolvedPlaces", "context"],
+      "properties": {
+        "contractVersion": {"$ref": "#/$defs/version"},
+        "calculatedAt": {"$ref": "#/$defs/time"},
+        "request": {"$ref": "#/$defs/QuoteRequest"},
+        "resolvedPlaces": {
+          "type": "object", "required": ["pickupLocationId", "deliveryLocationId"],
+          "properties": {
+            "pickupLocationId": {"$ref": "#/$defs/id"},
+            "deliveryLocationId": {"$ref": "#/$defs/id"}
+          }
+        },
+        "context": {"$ref": "#/$defs/ContextSnapshot"}
+      }
+    },
+    "PolicyResult": {
+      "type": "object", "required": ["recommendedCredits", "pricingMode", "warnings", "featureSchemaVersion", "featureSnapshot"],
+      "properties": {
+        "recommendedCredits": {"$ref": "#/$defs/positiveInteger"},
+        "pricingMode": {"enum": ["baseline", "model"]},
+        "warnings": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "featureSchemaVersion": {"$ref": "#/$defs/id"},
+        "featureSnapshot": {"type": "object"}
+      }
+    },
+    "QuoteResponse": {
+      "type": "object", "required": ["quoteId", "draft", "recommendedCredits", "pricingMode", "quotedAt", "validUntil", "releaseId", "contextSnapshotId", "warnings"],
+      "properties": {
+        "quoteId": {"$ref": "#/$defs/uuid"},
+        "draft": {"$ref": "#/$defs/draft"},
+        "recommendedCredits": {"$ref": "#/$defs/positiveInteger"},
+        "pricingMode": {"$ref": "#/$defs/id"},
+        "quotedAt": {"$ref": "#/$defs/time"},
+        "validUntil": {"$ref": "#/$defs/time"},
+        "releaseId": {"$ref": "#/$defs/id"},
+        "contextSnapshotId": {"$ref": "#/$defs/id"},
+        "warnings": {"type": "array", "items": {"$ref": "#/$defs/id"}}
+      }
+    },
+    "ReleaseManifest": {
+      "type": "object", "required": ["releaseId", "entryPoint", "adapterMajor", "contextMajor", "requiredCapabilities", "featureSchemaVersion", "bounds", "provenance", "files"],
+      "properties": {
+        "releaseId": {"$ref": "#/$defs/id"},
+        "entryPoint": {"type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_.]*:load_policy$"},
+        "adapterMajor": {"const": 1}, "contextMajor": {"const": 1},
+        "requiredCapabilities": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+        "featureSchemaVersion": {"$ref": "#/$defs/id"},
+        "bounds": {
+          "type": "object", "required": ["minimum", "maximum"],
+          "properties": {
+            "minimum": {"$ref": "#/$defs/positiveInteger"},
+            "maximum": {"$ref": "#/$defs/positiveInteger"}
+          }
+        },
+        "provenance": {
+          "type": "object", "required": ["codeCommit", "datasetIds", "modelRuns"],
+          "properties": {
+            "codeCommit": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+            "datasetIds": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+            "modelRuns": {"type": "array", "items": {"$ref": "#/$defs/id"}}
+          }
+        },
+        "files": {
+          "type": "object", "minProperties": 1,
+          "additionalProperties": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "adapterMajor": 1,
+  "bounds": {
+    "maximum": 30,
+    "minimum": 5
+  },
+  "contextMajor": 1,
+  "entryPoint": "policy.formula:load_policy",
+  "featureSchemaVersion": "effort-1",
+  "files": {
+    "artifacts/config.json": "b6c584ff9819df02d4eea0ba357109d8d931b744716783c6e15d7ccc703f9476",
+    "artifacts/context.json": "387fdb91cad25bbb945446885146dfc2181ac7df2c8178577ca1455a7e715440",
+    "artifacts/warmup.json": "4dd216c53bbc09475431f117b77757c5a19d66c0c22d4a2279408c33775871f7",
+    "policy/__init__.py": "68cc3fe071e0c50918b86dd2e2c3c447f763de8ec80bd3edfd71684e3bc3afbc",
+    "policy/formula.py": "b17c13efb6b13ca9ed869f7613e5ca0d6d4187d92e806ced9d3fa5bace0fb7a2",
+    "requirements.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "provenance": {
+    "calibration": "uncalibrated-policy-assumptions",
+    "codeCommit": "dd63aeb82fc39f7c597820c8914d042f1341148e",
+    "datasetIds": [
+      "synthetic-fixture-001"
+    ],
+    "modelRuns": [],
+    "sourceCodeSha256": "b17c13efb6b13ca9ed869f7613e5ca0d6d4187d92e806ced9d3fa5bace0fb7a2"
+  },
+  "releaseId": "effort-001",
+  "requiredCapabilities": [
+    "catalogue.v1",
+    "orders.v1",
+    "routes.v1",
+    "footfall.v1"
+  ]
+}

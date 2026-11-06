@@ -1,0 +1,49 @@
+# Shared private Pricing runtime; compose.pricing.yaml selects local demo assets.
+services:
+  pricing-db:
+    image: postgres:18-bookworm
+    environment:
+      POSTGRES_USER: foc_pricing
+      POSTGRES_DB: foc_pricing
+      POSTGRES_PASSWORD: ${PRICING_POSTGRES_PASSWORD:?Run sh order_pricing/scripts/init-env.sh}
+    volumes:
+      - pricing-data:/var/lib/postgresql
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U foc_pricing -d foc_pricing"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  pricing-service:
+    build:
+      context: .
+      dockerfile: serving/Dockerfile
+      target: runtime
+    environment:
+      PRICING_DATABASE_URL: postgresql://foc_pricing:${PRICING_POSTGRES_PASSWORD}@pricing-db:5432/foc_pricing
+      PRICING_QUOTE_TOKEN: ${PRICING_QUOTE_TOKEN:?Run sh order_pricing/scripts/init-env.sh}
+      PRICING_ORDER_WRITE_TOKEN: ${PRICING_ORDER_WRITE_TOKEN:?Run sh order_pricing/scripts/init-env.sh}
+      PRICING_EXPORT_TOKEN: ${PRICING_EXPORT_TOKEN:?Run sh order_pricing/scripts/init-env.sh}
+      PRICING_SUPPLIER_URL: http://supplier-service:8080
+      PRICING_SUPPLIER_TOKEN: ${SUPPLIER_INTERNAL_TOKEN}
+      PRICING_ORDER_URL: http://order-service:8081
+      PRICING_ORDER_TOKEN: ${PRICING_ORDER_SOURCE_TOKEN:?Run sh order_pricing/scripts/init-env.sh}
+      PRICING_SOURCE_PROVENANCE: observed
+    depends_on:
+      pricing-db:
+        condition: service_healthy
+      supplier-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+

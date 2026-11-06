@@ -1,0 +1,12 @@
+{
+  "approachMinutes": 5,
+  "baseCredits": 2,
+  "creditsPerHour": 15,
+  "extraItemCredits": 0.5,
+  "footTrafficMaxPremium": 0.2,
+  "maxExtraItems": 6,
+  "maximumCredits": 30,
+  "minimumCredits": 5,
+  "pickupMinutes": 3,
+  "walkingMetresPerMinute": 75
+}

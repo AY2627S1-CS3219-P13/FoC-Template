@@ -18,8 +18,17 @@ for service in user-service supplier-service credit-service order-service schedu
   docker image tag "$image" "$ECR_REGISTRY/foc/$service:$FOC_IMAGE_TAG"
 done
 
+# Build the actual runtime target with a separate explicitly synthetic package.
+# Never retag the local-demo stage as a production runtime image.
+fixture_dir="order_pricing/.integration/ec2-policy-${FOC_IMAGE_TAG}"
+docker build -f order_pricing/serving/Dockerfile --target local-policy \
+  --output "type=local,dest=$fixture_dir" order_pricing
+docker build -f order_pricing/serving/Dockerfile --target runtime \
+  --build-arg "POLICY_PACKAGE=.integration/ec2-policy-${FOC_IMAGE_TAG}" \
+  -t "$ECR_REGISTRY/foc/pricing-service:$FOC_IMAGE_TAG" order_pricing
+
 # CI created these volumes; fresh ones exercise the PostgreSQL initialization race.
-docker compose -f compose.yaml down --volumes --remove-orphans
+docker compose -f compose.yaml -f compose.pricing.yaml down --volumes --remove-orphans
 sh scripts/deploy-ec2.sh "$FOC_IMAGE_TAG"
 
 COMPOSE_FILE=compose.yaml:compose.ec2.yaml

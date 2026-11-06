@@ -1,0 +1,32 @@
+{
+  "contractVersion": "1.0",
+  "calculatedAt": "2026-11-05T17:00:00Z",
+  "request": {
+    "draft": {"id": "11111111-1111-4111-8111-111111111111", "revision": 4},
+    "pickup": {"type": "supplier", "id": "22222222-2222-4222-8222-222222222222"},
+    "delivery": {"type": "location", "id": "utown"},
+    "orderExpiresAt": "2026-11-05T18:00:00Z",
+    "totalItemQuantity": 2
+  },
+  "resolvedPlaces": {"pickupLocationId": "com2", "deliveryLocationId": "utown"},
+  "context": {
+    "schemaVersion": "1.0",
+    "snapshotId": "synthetic-context-001",
+    "sources": [
+      {"source": "catalogue", "snapshotId": "synthetic-catalogue-001", "asOf": "2026-11-05T17:00:00Z", "provenance": "synthetic"},
+      {"source": "orders", "snapshotId": "synthetic-orders-001", "asOf": "2026-11-05T17:00:00Z", "provenance": "synthetic"},
+      {"source": "routes", "snapshotId": "synthetic-routes-001", "asOf": "2026-11-05T00:00:00Z", "provenance": "synthetic"},
+      {"source": "footfall", "snapshotId": "synthetic-footfall-001", "asOf": "2026-11-05T17:00:00Z", "provenance": "synthetic"}
+    ],
+    "catalogue": {
+      "locations": [{"id": "com2"}, {"id": "utown"}],
+      "suppliers": [{"id": "22222222-2222-4222-8222-222222222222", "locationId": "com2", "active": true}]
+    },
+    "orderContext": {
+      "state": "fresh", "windowStart": "2026-11-05T16:45:00Z", "windowEnd": "2026-11-05T17:00:00Z",
+      "areas": [{"locationId": "com2", "openRequestCount": 8, "createdOrderCount": 5}]
+    },
+    "routes": [{"pickupLocationId": "com2", "deliveryLocationId": "utown", "walkableMetres": 1800}],
+    "footfall": [{"locationId": "com2", "windowStart": "2026-11-05T16:45:00Z", "windowEnd": "2026-11-05T17:00:00Z", "estimatedPeople": 100}]
+  }
+}

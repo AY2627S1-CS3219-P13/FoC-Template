@@ -210,16 +210,16 @@ and deploys it. A manual Run workflow on `main` remains available for retries.
 If CI did not run because Actions was disabled, run CI manually on `main` first.
 
 ```text
-Merge/push main → CI checks → six ECR images → SSM command → EC2 readiness checks
+Merge/push main → CI checks → eight ECR images → SSM command → EC2 readiness checks
 ```
 
-The release uses one full commit SHA for checkout, all six image tags and the EC2
+The release uses one full commit SHA for checkout, all eight image tags and the EC2
 checkout. It rejects releases superseded by a newer `main` commit, including a
 second check on EC2 after image publishing. If a newer change arrives during a
 release, that older release may fail as outdated; wait for the newer commit's CI
 and release instead. Only one release workflow runs at a time.
 
-The publisher builds the four Go backends, frontend and gateway using their
+The publisher builds the five Go backends, Pricing, frontend and gateway using their
 existing Dockerfiles on GitHub runners. It builds Linux amd64 images for the
 current EC2 architecture and pushes them to the corresponding `foc/` ECR
 repositories. Every image uses the full Git commit SHA as its immutable tag.
@@ -230,17 +230,17 @@ To release:
 
 1. Start EC2 manually and ensure it is reachable through SSM.
 2. Merge changes into `main` and wait for CI to pass.
-3. Open Actions, select Release to AWS, and inspect the six `publish` jobs followed
+3. Open Actions, select Release to AWS, and inspect the eight `publish` jobs followed
    by `deploy`. The final summary identifies the deployed commit and instance.
 4. Check the application through the existing SSM browser tunnel.
 
 The publisher reuses tags that already exist, allowing a failed release to be
 retried without overwriting immutable images. Permission errors and missing
 repositories fail the workflow. A partial failure may leave only some images
-uploaded; do not deploy a commit until all six jobs succeed. Concurrent publisher
+uploaded; do not deploy a commit until all eight jobs succeed. Concurrent publisher
 runs are serialized, and at most two images build in parallel within a run.
 
-The `deploy` job runs only after all six publishers succeed. GitHub assumes the
+The `deploy` job runs only after all eight publishers succeed. GitHub assumes the
 existing deployment role through OIDC and uses SSM to execute the command as root
 on the configured instance. `scripts/release-ec2.py` runs on GitHub, where the AWS
 CLI is available; EC2 only needs Git, Docker, curl, flock and its ECR credential
@@ -278,7 +278,7 @@ all six application containers used ECR tag
 and the deployment helper's backend and gateway checks passed.
 
 The image deployment command combines `compose.yaml` with `compose.ec2.yaml`.
-The latter removes runtime build definitions, references the six ECR images by
+The latter removes runtime build definitions, references the eight ECR images by
 one full commit tag, retains restart policies, and checks database readiness
 over TCP. The root project name and existing database volume definitions stay
 the same. The earlier server `compose.override.yaml` is not selected by this
@@ -489,3 +489,59 @@ month at this traffic. For teardown, delete the alarms and the SNS topic; the
 ### Schedule Order rollout prerequisite
 
 Schedule Order now participates in the image-publish matrix and image-only EC2 override as `foc/schedule-order`. Provision that ECR repository and include it in the existing publish/describe IAM scope before releasing this change. Run the existing User/Credit/Order environment initializers on the deployment checkout; Order initialization creates `schedule-order/.env` and appends the shared import credential without replacing existing settings. Schedule owns the new `schedule-data` volume. Deployment stops Schedule and Order together before the Order migration, then checks Schedule readiness over the private Compose network. These code/configuration changes do not provision AWS resources or deploy automatically from this local task.
+
+
+## Pricing release wiring
+
+Pricing now participates in `Release to AWS` as the eighth application image,
+`foc/pricing-service:<commit SHA>`. Its existing publisher step builds
+`order_pricing/serving/Dockerfile --target runtime` with an explicitly selected
+`POLICY_PACKAGE`. Other services retain their existing build arguments; release
+triggers, CI gating, image publication and SSM rollout flow are unchanged. Pricing
+never selects the `local-demo` stage for publication. Application secrets are
+neither build arguments nor GitHub secrets.
+Changing the selected package requires a new commit/release; retrying an existing
+SHA reuses its immutable image even if the repository variable has changed.
+
+Before merging this rollout into main:
+
+1. Provision the `foc/pricing-service` ECR repository with the same immutable-tag
+   policy as the existing application repositories. Extend the GitHub publisher,
+   connection-check and EC2 image-pull permissions to this repository.
+2. Commit a validated policy package with the campus routes intended for the
+   deployment, then set the GitHub repository variable `PRICING_POLICY_PACKAGE`
+   to its directory relative to `order_pricing`. The Pricing image build requires
+   this variable and a tracked manifest. The existing checked-in
+   example supports only a synthetic COM2 → UTown route; it is not a complete
+   route package for the current Supplier catalogue. Local UI fixture distances
+   are not promoted automatically.
+3. Keep the existing `/opt/foc` environment and ECR credential helper in place.
+   Deployment initializes missing Pricing credentials in the ignored root `.env`
+   without replacing existing values. No inbound Pricing port is needed.
+
+The EC2 override reuses `order_pricing/compose.runtime.yaml` for private runtime
+configuration and supplies the immutable ECR image instead of a build. Pricing
+owns PostgreSQL and the new `pricing-data` volume. The source URLs point to
+Supplier's authenticated catalogue and Order's private `8081` context listener;
+quote/write/export/source credentials remain distinct. Both new containers have
+restart policies and bounded logs. Pricing has a read-only filesystem, drops all
+capabilities and uses the image's non-root user. Neither Pricing nor its database
+publishes a host port.
+
+Rollout initializes secrets, validates Compose, downloads all eight images and
+checks User configuration before stopping Pricing/Schedule/Order. User, Supplier
+and Credit become ready first. Starting the gateway brings up Order and Pricing;
+the gateway waits for Pricing readiness (including a fresh Supplier catalogue and
+quote storage). The helper explicitly checks the private Pricing health endpoint
+and verifies its image tag along with every other application image. A Pricing
+readiness or image mismatch fails the release. Pricing does not gate Order's own
+readiness; runtime quote outages still permit manual offers.
+
+CI smoke now covers real Supplier → Pricing → Order quotes and replay. The fresh
+image-only rollout check exports a separate synthetic fixture package and rebuilds
+the actual `runtime` target with it, so it tests `/opt/policy` packaging rather than
+retagging a demo-stage image. These fixtures do not validate real campus distances
+or pricing effectiveness. The original Pricing component/model/two-replica checks
+continue unchanged. Cloud resources and repository variables are not provisioned
+by these code changes; no AWS deployment is triggered until changes reach main
+and all prerequisites and CI checks succeed.
