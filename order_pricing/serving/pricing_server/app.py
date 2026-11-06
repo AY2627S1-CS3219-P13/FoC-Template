@@ -181,7 +181,7 @@ def create_app(settings=None, *, storage=None, package_loader=load_package):
             raise APIError(503, "quote_recording_unavailable") from None
         if existing is not None:
             return existing
-        if instant(normalized["orderExpiresAt"]) <= received:
+        if "orderExpiresAt" in normalized and instant(normalized["orderExpiresAt"]) <= received:
             raise APIError(400, "invalid_request")
         if app.state.stopping:
             raise APIError(503, "quote_unavailable")
@@ -205,7 +205,7 @@ def create_app(settings=None, *, storage=None, package_loader=load_package):
             response = {
                 "quoteId": str(uuid4()), "draft": normalized["draft"],
                 "recommendedCredits": result["recommendedCredits"], "pricingMode": result["pricingMode"],
-                "quotedAt": stamp(now), "validUntil": stamp(min(now + timedelta(seconds=120), instant(normalized["orderExpiresAt"]))),
+                "quotedAt": stamp(now), "validUntil": stamp(min(now + timedelta(seconds=120), instant(normalized["orderExpiresAt"])) if "orderExpiresAt" in normalized else now + timedelta(seconds=120)),
                 "releaseId": app.state.manifest["releaseId"], "contextSnapshotId": context["snapshotId"], "warnings": result["warnings"],
             }
             event = {

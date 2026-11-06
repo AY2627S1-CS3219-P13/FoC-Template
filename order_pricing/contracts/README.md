@@ -15,8 +15,9 @@ The external [API](../API.md) remains normative.
 | `QuoteResponse` | Framework -> Order, JSON | API section 3 response. Framework adds quote identity, draft, timestamps, release/context IDs; merges warnings and durably commits before responding. |
 | Model features | Inside policy only | Release-owned preprocessing output; never a shared framework or source-service contract. |
 
-`schemas/v1.json` specifies the serializable fixture representation of these
-types. `python/pricing_contracts.py` defines the Python adapter DTOs and protocol.
+`schemas/v1.1.json` specifies the current serializable representation. It makes
+quote `orderExpiresAt` optional without changing older request semantics. The
+original `schemas/v1.json` remains the compatibility baseline. `python/pricing_contracts.py` defines the Python adapter DTOs and protocol.
 Python uses snake_case attributes; serialized fixtures and HTTP use camelCase.
 The framework decodes HTTP into normalized domain values, not FastAPI objects
 passed to policies. It resolves supplier/location identity using the catalogue;
@@ -141,3 +142,8 @@ The complete local check runs the shared adapter suite against the actual formul
 and exported model, then exercises HTTP replicas and PostgreSQL with source API
 fixtures. Production source/Order/UI wiring, calibration, archival and AWS
 deployment gates remain separate; `tests/acceptance.json` records that inventory.
+
+With v1.1, an omitted quote expiry stays absent from normalized requests and
+policy input. Serving issues 120-second advice without inventing an order deadline;
+optional expiry from older clients still caps freshness. New expiry-free clients
+require updated serving; old serving returns an advisory failure after rollback.

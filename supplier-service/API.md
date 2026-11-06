@@ -112,3 +112,13 @@ or browser-visible internal credentials. `/readyz` checks only the Supplier data
 auth outages fail closed per request. Gateway `/healthz` checks only the gateway.
 
 The existing port 8080 also exposes `GET /internal/v1/suppliers/{id}` and `GET /internal/v1/locations`, using the same read JSON as the public catalogue. Require `Authorization: Bearer <SUPPLIER_INTERNAL_TOKEN>`; no writes or session cookies are supported. Deleted suppliers return 404, inactive suppliers remain readable with `active:false`. Incorrect service credentials return 401. The gateway rejects `/internal` paths. Direct internal requests still require the service credential; public catalogue routes continue requiring a User session cookie.
+
+### Internal pricing catalogue
+
+`GET /internal/v1/pricing-catalogue` requires the existing Supplier internal bearer
+credential. It exposes the existing catalogue in one read-only repeatable-read
+snapshot: `schemaVersion: 1`, `snapshotId`, database `asOf`, `locations: [{id}]`,
+and `suppliers: [{id,locationId,active}]`. Inactive suppliers are included; deleted
+suppliers are excluded. No names, user data or prices are exported. Query
+parameters are rejected. More than 1,000 locations or 10,000 suppliers returns
+503 `snapshot_too_large`, never a partial snapshot. Gateway access remains blocked.

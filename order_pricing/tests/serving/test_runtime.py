@@ -15,7 +15,7 @@ from pricing_server.app import create_app
 from pricing_server.config import Settings
 from pricing_server.context import Context
 from pricing_server.events import normalize_event
-from pricing_server.wire import APIError, decode_input, fingerprint, json_loads, normalize_request, stamp, utcnow
+from pricing_server.wire import APIError, decode_input, fingerprint, instant, json_loads, normalize_request, stamp, utcnow
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures/policy-input.json"
 
@@ -159,6 +159,22 @@ class FrameworkTests(unittest.TestCase):
         self.assertEqual(len(self.store.events), 1)
         self.body["totalItemQuantity"] += 1
         self.assertEqual(self.post().status_code, 409)
+
+    def test_expiry_is_optional_and_omission_is_preserved_for_replay(self):
+        del self.body["orderExpiresAt"]
+        first = self.post()
+        self.assertEqual(first.status_code, 200, first.text)
+        quote = first.json()
+        self.assertEqual(instant(quote["validUntil"]) - instant(quote["quotedAt"]), timedelta(seconds=120))
+        self.assertNotIn("orderExpiresAt", self.store.events[0]["data"]["request"])
+        self.assertEqual(self.post().json(), quote)
+        self.body["orderExpiresAt"] = stamp(utcnow() + timedelta(hours=1))
+        self.assertEqual(self.post().status_code, 409)
+
+    def test_null_or_invalid_optional_expiry_is_rejected(self):
+        for expiry in (None, "yesterday", "2000-01-01T00:00:00Z"):
+            self.body["orderExpiresAt"] = expiry
+            self.assertEqual(self.post().status_code, 400)
 
     def test_expired_replay_works_without_source_availability(self):
         first = self.post().json()

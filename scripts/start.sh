@@ -29,11 +29,12 @@ fi
 sh user-service/scripts/init-env.sh
 sh credit-service/scripts/init-env.sh
 sh order-service/scripts/init-env.sh
+sh order_pricing/scripts/init-env.sh
 
 # Validate without printing the resolved configuration, which contains secrets.
-docker compose config --quiet
-# Gateway dependencies start the frontend, all four services, databases and Mailpit.
-docker compose up --build -d --wait --wait-timeout 120 gateway
+docker compose -f compose.yaml -f compose.pricing.yaml config --quiet
+# Gateway dependencies also start private Pricing with the local demo policy.
+docker compose -f compose.yaml -f compose.pricing.yaml up --build -d --wait --wait-timeout 120 gateway
 
 echo 'Local stack started. Application: http://localhost:3000'
 echo 'Verification inbox: http://localhost:8025'

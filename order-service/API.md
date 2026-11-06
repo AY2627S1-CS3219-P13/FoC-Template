@@ -378,3 +378,36 @@ Schedule Order is an independent service with a child page at `/orders/schedule`
 Imported orders retain `windowStart` and derive `expiresAt` as 30 minutes later. `deliver` is rejected with 409 `delivery_too_early` before window start; at/after end existing expiry rules apply. The UI disables delivery outside the window. Pickup has no added timing check. Full-window opening-hours reconciliation can system-cancel pre-delivery scheduled assignments with durable full-refund intent; invalid text/outages are not closure evidence.
 
 Order's private listener is port 8081 and only serves the authenticated scheduled import endpoint. Configure `ORDER_SCHEDULE_INTERNAL_TOKEN` to enable it; invalid supplied tokens fail startup. No internal route is exposed by the public handler or gateway. Import uses the existing reserved escrow and records durable outcomes, so duplicate calls cannot reserve, assign or settle again.
+
+## Price suggestions
+
+`POST /api/v1/orders/price-quotes` implements the quote proxy from
+[`order_pricing/API.md`](../order_pricing/API.md#3-quote-api-order---pricing).
+It requires the current session, exact Origin, JSON and a UUID `Idempotency-Key`.
+Request fields are `draft` (`id`, `revision`), `pickup`, `delivery`,
+and optional `orderExpiresAt` and `totalItemQuantity`. The current UI omits expiry;
+it does not invent a deadline. Only normalized known fields
+are sent to Pricing; duplicate keys and null known fields are rejected. The body
+limit is 16 KiB. Unknown fields are ignored for this quote endpoint only.
+Success returns the Pricing recommendation, quote identity, draft, release/context
+identity, warnings and freshness timestamps. The total budget including session
+validation is two seconds; the private call gets at most 1500 ms. No automatic
+network retry is made. The visible editor requests a new calculation every 30
+seconds, respecting Retry-After on failures, without a manual refresh control.
+Each calculation uses a new UUID; network retries reuse that key.
+Keys are scoped per authenticated user with keyed UUID derivation. Quote limits
+are 60 requests per user per database minute, shared across replicas; excess
+returns 429 with Retry-After. Service errors are sanitized and invalid results
+are rejected. Pricing failure never prevents manual creation or changes an offer.
+
+`GET /internal/v1/pricing-context` is available only on the private listener and
+requires `ORDER_PRICING_SOURCE_TOKEN`. A read-only repeatable-read transaction
+provides database `asOf`, the preceding fifteen-minute window, and pickup-location
+aggregates: open/unexpired immediate orders and successful immediate creations.
+Scheduled imports are excluded. It returns complete areas, never truncated;
+more than 10,000 areas returns 503 `snapshot_too_large`.
+
+This change implements the quote UI and source projections. Optional creation
+quote linkage, `/pricing-interactions` and durable training-event production remain
+planned; no complete behavioural training capture is claimed. `offeredCredits`
+remains the sole selected amount used for reservation and settlement.

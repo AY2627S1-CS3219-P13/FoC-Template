@@ -1,7 +1,8 @@
-# Order Pricing integration contract — v1
+# Order Pricing integration contract — v1.1
 
 Status: Pricing serving, policy and local training implementations are available;
-Order/UI and Supplier/Order source additions below remain planned. This document
+Order quote proxy/UI and Supplier/Order source snapshots are implemented.
+Order creation linkage, interaction ingestion and training producers remain planned. This document
 is the shared contract for Pricing, Order integration, source APIs, collectors and
 training. Changes to sibling services are separate work.
 Examples use illustrative IDs/times/prices. Model algorithms are not specified.
@@ -79,7 +80,7 @@ Required header: `Idempotency-Key: <UUID>`, generated once per calculation attem
 | `draft.id` | Yes | Random per-editor-draft UUID, stable across edits; not a user identity. |
 | `draft.revision` | Yes | Safe nonnegative integer, incremented whenever quote-relevant draft inputs change. |
 | `pickup`, `delivery` | Yes | Each has required `type` (`supplier` or `location`) and `id`; same type/ID pair is invalid. |
-| `orderExpiresAt` | Yes | Deadline for accepting this immediate request, strictly after first calculation receipt time; not a scheduled delivery time. |
+| `orderExpiresAt` | No | Optional acceptance deadline for older callers. If supplied, must be strictly after first calculation receipt time and caps quote freshness. Omitted by the current Order UI; never inferred or required for price calculation. |
 | `totalItemQuantity` | No | Positive safe integer sum of item quantities. Omitted means unknown; never silently one or zero. |
 
 Only these business inputs are caller-owned. Do not send user identity, free-text
@@ -110,14 +111,14 @@ are `stale_order_context`, `order_context_unavailable`, `estimated_supply` and
 Footfall-based supply always carries `estimated_supply`.
 
 Successful quotes are durably recorded before responding. Validity is
-120 seconds from calculation, capped at order expiry; it indicates recommendation
+120 seconds from calculation, capped at order expiry only when supplied; it indicates recommendation
 freshness, not a binding financial offer. Replays retain the original timestamps.
 
 ### Retry and replica semantics
 
 - All replicas share durable issuance/idempotency storage owned by Pricing.
   Scope keys to the authenticated caller identity. Fingerprint normalized known
-  fields, including omission versus presence, canonical UUIDs and expiry instant.
+  fields, including omission versus presence, canonical UUIDs and the optional expiry instant.
 - Same key/body returns the exact original response, including after its expiry
   or a deployment. A replay does not recalculate or create another event.
   Changed known inputs with the same key return 409 `idempotency_conflict`.
@@ -150,11 +151,12 @@ freshness, not a binding financial offer. Replays retain the original timestamps
 Order never substitutes zero or an old draft's quote on failure. Since pricing
 is advisory, show “Suggestion unavailable” and allow the normal manual-offer flow.
 At most one automatic retry, with the same key, within the original deadline;
-otherwise wait for user retry or a new input revision. Never retry 4xx except a
-429 after its delay using a fresh UI opportunity. Errors need not be replayed as
+otherwise wait for the next periodic calculation or a new input revision. New
+calculations use new keys; network retries reuse the original key. Respect 429
+Retry-After before the next periodic calculation. Errors need not be replayed as
 permanent outcomes unless the key already has a successful result.
 
-## 4. Order-facing UI boundary (planned Order additions)
+## 4. Order-facing UI boundary (quote proxy/UI implemented; linkage/events planned)
 
 `POST /api/v1/orders/price-quotes` proxies the request/response in section 3 and
 authenticates through User on each call. Public idempotency keys are scoped to
@@ -166,10 +168,14 @@ It does not fetch model features or make a new quote attempt after a timeout.
 
 - Generate draft identity on editor creation; debounce valid-input edits by
   400 ms. Echo revision/identity and display only responses matching the current
-  draft. Increment revision on pickup, destination, expiry or quantity changes.
+  draft. Increment revision on pickup, destination or quantity changes; expiry edits do
+  not affect quote inputs or revision.
 - Show “Suggested credits”; the user explicitly confirms their chosen offer.
   Do not overwrite a manually edited offer when a late response arrives.
-- Recalculate after input changes, explicit refresh or freshness expiry. Expired
+- Recalculate after relevant input changes and every 30 seconds while the immediate
+  order editor is visible, or sooner at quote freshness expiry. Pause when hidden,
+  browsing another view, signed out or posting. No manual refresh control is exposed.
+  Failures retry on the same periodic schedule, respecting Retry-After. Expired
   advice never invalidates an otherwise valid manually chosen offer.
 - Add optional `pricingQuoteId` and `pricingDraft` (`id`, `revision`) together to
   regular Order creation. Omission preserves existing clients. Never trust these
@@ -186,9 +192,9 @@ its outbox. A browser reporting “displayed” is telemetry, never financial pr
 Rate-limit quote/interaction endpoints per authenticated user; do not persist
 their session credentials or user identity in Pricing's quote input.
 
-## 5. Asynchronous context APIs (planned source additions)
+## 5. Asynchronous context APIs (implemented source projections)
 
-These are authenticated internal read-only endpoints. They do not exist today.
+These are authenticated internal read-only endpoints.
 Existing browser APIs/SSE are not bulk training feeds. No direct database reads.
 Source teams implement these fixed business projections; adding derived model
 features inside Pricing does not require changing these endpoints.
@@ -434,3 +440,15 @@ behind their adapters; source teams do not implement model-specific formulas.
   per-user rate limits and infrastructure definitions. Validate config at startup.
 - Scheduled-order quotes, actual deliverer presence, mandatory floor enforcement
   and new behavioural experimentation require follow-up specifications.
+
+### v1.1 expiry compatibility
+
+`contracts/schemas/v1.1.json` relaxes quote expiry to optional; the original v1
+schema and its fixtures remain unchanged. Older requests with expiry preserve
+their normalization, freshness cap and replay fingerprints. Omitted expiry stays
+omitted in policy input, archived events and fingerprints and defaults only the
+quote freshness to 120 seconds; no artificial order deadline is generated. Null
+or malformed supplied expiry remains invalid. Deploy the updated serving API
+before an expiry-free Order client; rollback to older serving cannot quote new
+expiry-free requests, so the advisory UI falls back to manual offers. Actual
+order creation still requires its own future expiry.

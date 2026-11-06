@@ -1,5 +1,7 @@
 import copy
 import dataclasses
+import json
+from pathlib import Path
 import unittest
 
 from jsonschema import ValidationError
@@ -13,6 +15,19 @@ from tests.support import (
 class SharedContractTests(unittest.TestCase):
     def setUp(self):
         self.base = load_fixture("policy-input.json")
+
+    def test_v1_1_allows_missing_expiry_and_preserves_v1_inputs(self):
+        latest = json.loads((Path(__file__).parents[1] / "contracts/schemas/v1.1.json").read_text())
+        validate("PolicyInput", self.base, schema=latest)
+        without_expiry = copy.deepcopy(self.base)
+        del without_expiry["request"]["orderExpiresAt"]
+        validate("PolicyInput", without_expiry, schema=latest)
+        # The original schema remains a truthful rollback compatibility baseline.
+        with self.assertRaises(ValidationError):
+            validate("PolicyInput", without_expiry)
+        without_expiry["request"]["orderExpiresAt"] = None
+        with self.assertRaises(ValidationError):
+            validate("PolicyInput", without_expiry, schema=latest)
 
     def test_schema_is_valid(self):
         from jsonschema import Draft202012Validator

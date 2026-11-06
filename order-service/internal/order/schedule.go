@@ -26,6 +26,7 @@ type scheduleImportRequest struct {
 // InternalHandler is served only on the private listener, never the browser port.
 func (a *App) InternalHandler() http.Handler {
 	m := http.NewServeMux()
+	m.HandleFunc("GET /internal/v1/pricing-context", a.endpoint(a.pricingContext))
 	m.HandleFunc("PUT /internal/v1/scheduled-orders/{transfer}", a.endpoint(func(w http.ResponseWriter, r *http.Request) error {
 		if !validSecret(a.cfg.ScheduleToken) || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+a.cfg.ScheduleToken)) != 1 {
 			return problem(401, "invalid_service_credentials", "A valid service credential is required.")

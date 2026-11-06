@@ -11,7 +11,7 @@ from uuid import UUID
 from jsonschema import Draft202012Validator, FormatChecker, validators
 from pricing_contracts import PolicyInput, PolicyResult
 
-SCHEMA = json.loads((Path(__file__).parents[2] / "contracts/schemas/v1.json").read_text()) if (Path(__file__).parents[2] / "contracts").exists() else json.loads(Path("/app/contracts/schemas/v1.json").read_text())
+SCHEMA = json.loads((Path(__file__).parents[2] / "contracts/schemas/v1.1.json").read_text()) if (Path(__file__).parents[2] / "contracts").exists() else json.loads(Path("/app/contracts/schemas/v1.1.json").read_text())
 StrictValidator = validators.extend(
     Draft202012Validator,
     type_checker=Draft202012Validator.TYPE_CHECKER.redefine(
@@ -79,7 +79,8 @@ def normalize(name, value):
 
 def normalize_request(value):
     result = normalize("QuoteRequest", value)
-    result["orderExpiresAt"] = stamp(instant(result["orderExpiresAt"]))
+    if "orderExpiresAt" in result:
+        result["orderExpiresAt"] = stamp(instant(result["orderExpiresAt"]))
     if result["pickup"] == result["delivery"]:
         raise ValueError("identical places")
     return result

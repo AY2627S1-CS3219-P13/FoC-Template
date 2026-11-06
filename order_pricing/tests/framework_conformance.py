@@ -70,6 +70,13 @@ class FrameworkConformanceTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(replay, first)
 
+    def test_omitted_expiry_uses_quote_freshness_only(self):
+        del self.body["orderExpiresAt"]
+        status, response = self.request(self.body)
+        self.assertEqual(status, 200)
+        validate("QuoteResponse", response)
+        self.assertEqual(datetime.fromisoformat(response["validUntil"]) - datetime.fromisoformat(response["quotedAt"]), timedelta(seconds=120))
+
     def test_omitted_quantity_is_supported(self):
         del self.body["totalItemQuantity"]
         status, response = self.request(self.body)

@@ -91,3 +91,8 @@ This Compose setup binds public ports to loopback for local use. EC2 deployment 
 Order’s recovery worker uses Supplier’s authenticated internal read-only catalogue on its existing port 8080 with a separate `SUPPLIER_INTERNAL_TOKEN`. Order’s environment initializer adds that token to the root `.env` without changing existing credentials, and root Compose shares it; browser cookies are never retained for background work. Each sweep checks up to 100 orders, rotating oldest checks first. Inactive/deleted places cancel open, accepted and picked-up orders and durably queue refunds; Credit performs the idempotent release. Delivered, disputed and terminal orders are protected. Outages or malformed responses do not imply deactivation. Default recovery runs every 30 seconds; refund delivery may occur on the following tick. Standalone Order must configure `ORDER_SUPPLIER_INTERNAL_URL` and `ORDER_SUPPLIER_INTERNAL_TOKEN` to enable the sweep.
 
 The internal catalogue routes reuse Supplier’s existing HTTP listener; there is no additional port or service. The gateway rejects `/internal` paths, and the routes require their service credential even when called directly. Run `sh order-service/scripts/init-env.sh` after initializing User and Credit for the root stack.
+
+Pricing reuses the existing catalogue through authenticated
+`GET /internal/v1/pricing-catalogue`. The compact snapshot includes place IDs,
+supplier location mappings and active status from one consistent database read;
+it does not introduce another catalogue or price storage. See API.md for limits.

@@ -235,3 +235,42 @@ Use **Schedule order** from the main `/orders` screen to open `/orders/schedule`
 The scheduling form highlights **Schedule order** and previews its **Scheduled** status with a distinct dark navy badge. **New errand** returns to regular order creation; no separate back tab is needed.
 
 The courier cap is now three accepted/picked-up orders combined, including regular and future scheduled orders. Delivery frees only the corresponding slot. Migration 010 replaces the former unique one-slot index with serialized three-slot enforcement and adds scheduled delivery-window metadata/import outcomes. Stop old Order writers before migration; old and new capacity semantics must not run together. `ORDER_SCHEDULE_INTERNAL_TOKEN` authenticates imports on private port 8081 and is supplied by the root initializer/Compose setup. No second escrow reserve occurs on import. See the [Schedule API contract](../schedule-order/API.md).
+
+## Live price suggestions
+
+Start the local application with `sh scripts/start.sh` from the repository root,
+then open `http://localhost:3000/orders`. This selects `compose.pricing.yaml` in
+addition to root Compose and initializes separate Pricing credentials without
+replacing existing values. Plain root Compose and EC2 deployment remain usable
+without Pricing; the form then offers manual credit entry.
+
+Choose pickup and delivery; expiry is not needed for suggestions. The form requests suggestions after
+400 ms without relevant edits, including changes to the sum of added item
+quantities. Item text and the item input awaiting Add do not affect pricing.
+Use suggestion copies the current recommendation into Offered credits. Further
+recommendations never replace the selected offer. Suggestions refresh automatically
+every 30 seconds while the immediate-order editor is visible, or sooner when a
+quote expires. There is no manual refresh button. Failures retry automatically,
+respecting rate-limit delays, while manual offers remain available. Obsolete
+responses are ignored. Polling pauses while hidden, browsing other views, signed
+out or posting. Scheduled orders do not request quotes. A future expiry is still
+required to post an immediate order, but expiry edits never trigger price requests.
+
+Order optionally accepts `ORDER_PRICING_URL`, `ORDER_PRICING_TOKEN` and
+`ORDER_PRICING_SOURCE_TOKEN`; configure all three or leave all unset. Startup
+validates URL and distinct tokens of at least 32 characters. The source token
+protects only the private aggregate endpoint. The quote token also keys opaque
+per-user idempotency derivation; keep it stable across ordinary releases. Token
+rotation ends continuity for old mapped keys and needs coordinated retry handling.
+Order readiness does not depend on advisory Pricing availability.
+
+The local-only policy uses synthetic route distances across the fifteen current
+catalogue locations. The form shows the credits and freshness without a demo
+label. This policy is
+for testing the interaction, not a calibrated campus map. Production Pricing
+images, ECR provisioning and EC2 release wiring are not added by this change.
+Training interactions and creation/outcome linkage remain follow-up work.
+
+Run backend checks with `docker compose --profile test run --build --rm order-tests`.
+Run controller and browser checks with
+`docker compose --profile ui-test run --build --rm order-ui-tests`.

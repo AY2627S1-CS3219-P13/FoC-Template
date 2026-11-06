@@ -148,3 +148,30 @@ demonstrates the pipeline and cannot establish real pricing effectiveness.
 - Define measured availability targets, promotion criteria, archival/retention,
   rate limits and AWS budget/region. See the contract and component documents for
   narrower decisions. Scheduled pricing and mandatory floors remain follow-ups.
+
+## Local Order form integration
+
+From the repository root, `sh scripts/start.sh` now starts the optional local
+Pricing stack with `compose.yaml` and `compose.pricing.yaml`. Order proxies quotes
+and serves a debounced suggestion panel at `http://localhost:3000/orders`.
+Supplier provides the full internal catalogue projection; Order provides immediate
+activity aggregates on its private listener. Browser requests carry only the
+session cookie; service credentials stay private. Quote and source credentials
+are initialized by `sh order_pricing/scripts/init-env.sh` in the ignored root `.env`.
+
+The `local-demo` serving image builds a separate policy with synthetic distances
+for all fifteen existing location IDs. Their ordering and 150 m steps are arbitrary
+UI fixtures, not campus geography. Package provenance stays synthetic for routes;
+live Supplier/Order projections remain observed. The form displays credits and
+freshness without a demo label. Existing immutable policy packages are unchanged. The demo
+stage must not be used for cloud publishing. EC2 release wiring, calibrated routes,
+creation quote linkage and durable Order training producers remain outstanding.
+
+Inspect with `docker compose -f compose.yaml -f compose.pricing.yaml ps`.
+Pricing has no published host port. Its database persists in the `pricing-data`
+volume. Continue using both Compose files for local restarts; plain root Compose
+starts the application without Pricing integration.
+
+Price suggestions need no expiry input and update automatically every 30 seconds
+while the immediate-order editor is visible. The manual suggestion-refresh button
+has been removed; expiry remains required only for actual order creation.

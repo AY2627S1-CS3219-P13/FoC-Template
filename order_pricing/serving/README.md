@@ -5,8 +5,8 @@ the shared Python policy adapter, PostgreSQL issuance/events, health/readiness a
 immutable policy-image packaging. The [API contract](../API.md) and
 [adapter/context contract](../contracts/README.md) define its boundaries.
 
-Order-facing proxy/UI and source API changes in sibling services remain separate
-work. The local Pricing integration stack uses explicitly synthetic source mocks;
+Order-facing quote proxy/UI and Supplier/Order snapshots are implemented.
+Creation linkage and durable Order training producers remain planned. The local Pricing integration stack uses explicitly synthetic source mocks;
 it does not establish a production campus map, real outcome capture or model quality.
 
 ## Boundary and policy replacement
@@ -123,7 +123,7 @@ integration stack. The [shared HTTP suite](../tests/README.md) can target a read
 test app. In-memory storage is only a test double; runtime uses PostgreSQL.
 
 Still required before production pilot: authoritative sibling source endpoints,
-Order proxy/UI/outbox integration, real campus references, deployment secrets and
+Order creation linkage/training outbox integration, real campus references, deployment secrets and
 networks, backup/export archival and operational retention/reconciliation policy.
 Indefinite database retention is not a backup strategy. AWS infrastructure,
 promotion/rollback automation and service-level latency/quality alarms are not
