@@ -71,7 +71,7 @@ assume gRPC, Redis, RabbitMQ or an external broker exists.
   be 1–128 characters without surrounding whitespace. Do not assign the
   requester as courier. Post-pickup cancellation penalties are not implemented
   by Credit and require agreed rules.
-- Order writes only its own PostgreSQL database. Never read another service's
+- Order writes only its own PostgreSQL database. Scheduling is now an embedded sibling module (`../schedule-order/`) sharing that database with a separate migration ledger and durable event journal. Never read another service's
   tables, alter wallet balances, grant initial credits, or duplicate credentials.
   Design recoverable handling for a successful reservation followed by an Order
   write failure, and durable retries for release/payout after transient errors.

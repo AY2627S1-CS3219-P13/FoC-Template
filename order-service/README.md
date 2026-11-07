@@ -230,11 +230,11 @@ Uncertain creation cleanup no longer reserves funds to establish a retry record.
 
 ## Scheduled orders and three-order capacity
 
-Use **Schedule order** from the main `/orders` screen to open `/orders/schedule`. The independent [Schedule Order Service](../schedule-order/README.md) owns the request until its asynchronous acceptance transfer succeeds. Scheduling-specific backend code remains outside this service; Order integrates private import, normal accepted lifecycle and shared courier capacity.
+Use **Schedule order** from the main `/orders` screen to open `/orders/schedule`. The embedded [Schedule Order module](../schedule-order/README.md) owns the scheduling record until its asynchronous acceptance event is consumed. Scheduling backend code stays in the sibling folder; Order hosts its routes/workers and owns the accepted lifecycle and shared courier capacity.
 
 The scheduling form highlights **Schedule order** and previews its **Scheduled** status with a distinct dark navy badge. **New errand** returns to regular order creation; no separate back tab is needed.
 
-The courier cap is now three accepted/picked-up orders combined, including regular and future scheduled orders. Delivery frees only the corresponding slot. Migration 010 replaces the former unique one-slot index with serialized three-slot enforcement and adds scheduled delivery-window metadata/import outcomes. Stop old Order writers before migration; old and new capacity semantics must not run together. `ORDER_SCHEDULE_INTERNAL_TOKEN` authenticates imports on private port 8081 and is supplied by the root initializer/Compose setup. No second escrow reserve occurs on import. See the [Schedule API contract](../schedule-order/API.md).
+The courier cap is now three accepted/picked-up orders combined, including regular and future scheduled orders. Delivery frees only the corresponding slot. Migration 010 replaces the former unique one-slot index with serialized three-slot enforcement and adds scheduled delivery-window metadata/import outcomes. Stop old Order writers before migration; old and new capacity semantics must not run together. `ORDER_SCHEDULE_INTERNAL_TOKEN` optionally authenticates the retained legacy import adapter on private port 8081; the embedded event workflow does not require it. No second escrow reserve occurs on import. See the [Schedule API contract](../schedule-order/API.md).
 
 ## Live price suggestions
 
@@ -275,3 +275,9 @@ Training interactions and creation/outcome linkage remain follow-up work.
 Run backend checks with `docker compose --profile test run --build --rm order-tests`.
 Run controller and browser checks with
 `docker compose --profile ui-test run --build --rm order-ui-tests`.
+
+## Embedded scheduling
+
+Order hosts the scheduling routes and workers from the sibling `schedule-order/` Go module. Both use Order's database; scheduling has its own migration ledger and event journal. Durable acceptance commits import, assignment, lifecycle events, Schedule handoff state and receipt atomically. Supplier requests are prepared before that transaction. The shared `/readyz` covers the combined database. Background scheduling requires Order's internal Supplier URL/token.
+
+Docker builds now use the repository root as context: `docker build -f order-service/Dockerfile .`. Compose commands remain unchanged. The module's [README](../schedule-order/README.md) documents mandatory offline cutover from the legacy database and the `import-schedules` maintenance command. Do not start old Schedule/Order writers alongside the new runtime.

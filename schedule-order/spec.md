@@ -1,5 +1,6 @@
 # Scheduled orders
 
+Architecture update (7 November 2026): scheduling is an embedded Order module in the separate top-level `schedule-order/` folder. This supersedes the independent-service, separate-database and HTTP-handoff decisions below; the remaining product rules are preserved. Acceptance uses a durable scheduling journal, independent consumer receipts/retries and a shared Order database transaction for assignment, outcome and receipt. See [current runtime and cutover](README.md). Earlier architecture text below is historical context.
 Status: **Ready** — product decisions and acceptance criteria are confirmed. Concrete HTTP contracts and the recoverable asynchronous handoff protocol must be detailed in the implementation plan before coding.
 
 ## Source and user story

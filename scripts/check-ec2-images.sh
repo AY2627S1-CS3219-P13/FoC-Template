@@ -13,7 +13,7 @@ export ECR_REGISTRY FOC_IMAGE_TAG
 
 # The normal smoke step already built these runtime images. Give them the same
 # references the EC2 configuration expects, without any private-registry access.
-for service in user-service supplier-service credit-service order-service schedule-order frontend gateway; do
+for service in user-service supplier-service credit-service order-service frontend gateway; do
   image=$(docker compose -f compose.yaml images -q "$service")
   docker image tag "$image" "$ECR_REGISTRY/foc/$service:$FOC_IMAGE_TAG"
 done

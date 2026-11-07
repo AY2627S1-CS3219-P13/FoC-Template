@@ -20,7 +20,7 @@ export ECR_REGISTRY FOC_IMAGE_TAG
 for tool in docker curl flock; do
   command -v "$tool" >/dev/null 2>&1 || { echo "$tool is required." >&2; exit 1; }
 done
-for file in .env credit-service/.env order-service/.env schedule-order/.env; do
+for file in .env credit-service/.env order-service/.env; do
   if [ ! -f "$file" ]; then
     echo "Missing $file; initialize the deployment environment first." >&2
     exit 1
@@ -46,16 +46,21 @@ ready() {
 
 sh order_pricing/scripts/init-env.sh
 compose config --quiet
+# The legacy runtime must be cut over offline; never start two schedule writers.
+if compose ps --all --format '{{.Service}}' | grep -qx schedule-order; then
+  echo 'Legacy Schedule container found. Complete schedule-order/README.md offline cutover and remove that application container before deploying.' >&2
+  exit 1
+fi
 # Immutable tags cannot change; existing cached images can safely be reused.
 # A missing image or failed download aborts before any running service is stopped.
-compose pull --policy missing user-service supplier-service credit-service order-service schedule-order pricing-service frontend gateway
+compose pull --policy missing user-service supplier-service credit-service order-service pricing-service frontend gateway
 
 # Catch origin/cookie/SMTP mismatches before changing any running service.
 # This command validates settings only; it does not contact or migrate databases.
 compose run --rm --no-deps user-service check-config
 
 # Order upgrades prohibit old writers and require the new Credit endpoint first.
-compose stop pricing-service schedule-order order-service
+compose stop pricing-service order-service
 compose up --no-build --pull never -d --wait --wait-timeout 120 user-service supplier-service credit-service
 for service in user-service supplier-service credit-service; do
   ready "$service"
@@ -63,7 +68,6 @@ done
 compose up --no-build --pull never -d --wait --wait-timeout 120 gateway
 ready order-service
 compose exec -T pricing-service python -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/readyz", timeout=3)'
-compose exec -T user-service curl --fail --silent --show-error --retry 10 --retry-delay 2 --retry-all-errors --connect-timeout 3 --max-time 5 http://schedule-order:8080/readyz
 
 address=$(compose port gateway 8080)
 case "$address" in
@@ -72,7 +76,7 @@ esac
 curl --fail --silent --show-error --output /dev/null --retry 10 --retry-delay 2 \
   --retry-all-errors --connect-timeout 3 --max-time 5 "http://$address/"
 
-for service in user-service supplier-service credit-service order-service schedule-order pricing-service frontend gateway; do
+for service in user-service supplier-service credit-service order-service pricing-service frontend gateway; do
   container=$(compose ps -q "$service")
   actual=$(docker inspect --format '{{.Config.Image}}' "$container")
   expected="$ECR_REGISTRY/foc/$service:$FOC_IMAGE_TAG"

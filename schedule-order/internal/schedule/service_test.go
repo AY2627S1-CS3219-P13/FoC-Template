@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -119,8 +120,27 @@ func fixture(t *testing.T) (*App, *dependencies) {
 		}
 	}))
 	t.Cleanup(f.server.Close)
-	c := Config{DatabaseURL: "unused", Origin: "http://localhost:3000", SessionCookie: "foc_session", UserServiceURL: f.server.URL, UserServiceToken: strings.Repeat("u", 32), SupplierServiceURL: f.server.URL, SupplierServiceToken: strings.Repeat("s", 32), CreditServiceURL: f.server.URL, CreditServiceToken: strings.Repeat("c", 32), OrderServiceURL: f.server.URL, OrderServiceToken: strings.Repeat("o", 32), DependencyTimeout: time.Second}
+	c := Config{DatabaseURL: "unused", Origin: "http://localhost:3000", SessionCookie: "foc_session", UserServiceURL: f.server.URL, UserServiceToken: strings.Repeat("u", 32), SupplierServiceURL: f.server.URL, SupplierServiceToken: strings.Repeat("s", 32), CreditServiceURL: f.server.URL, CreditServiceToken: strings.Repeat("c", 32), DependencyTimeout: time.Second}
 	a := New(db, c, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.SetImporter(func(ctx context.Context, transfer string, raw []byte) (Effect, error) {
+		return func(ctx context.Context, tx pgx.Tx) (string, error) {
+			req, _ := http.NewRequestWithContext(ctx, "PUT", f.server.URL+"/internal/v1/scheduled-orders/"+transfer, bytes.NewReader(raw))
+			resp, err := a.client.Do(req)
+			if err != nil {
+				return "", err
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != 200 {
+				return "", errors.New("import unavailable")
+			}
+			var result struct{ Outcome string }
+			dec := json.NewDecoder(resp.Body)
+			if dec.Decode(&result) != nil || dec.Decode(new(any)) != io.EOF {
+				return "", errors.New("invalid outcome")
+			}
+			return result.Outcome, nil
+		}, nil
+	})
 	a.now = func() time.Time { return instant("2026-11-03T08:00:00+08:00") }
 	return a, f
 }
@@ -172,7 +192,7 @@ func TestCreateRetryCancellationAndExpiry(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	for i := 0; i < 2; i++ {
-		if e := a.Recover(context.Background()); e != nil {
+		if e := recoverFixture(t, a, context.Background()); e != nil {
 			t.Fatal(e)
 		}
 	}
@@ -187,7 +207,7 @@ func TestAsyncTransferLostResponseFencesCancellationAndRestart(t *testing.T) {
 	if w := call(t, a, "POST", "/api/v1/scheduled-orders/"+id+"/actions", "courier", "", map[string]string{"action": "accept"}); w.Code != 202 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	_ = a.Recover(context.Background())
+	_ = recoverFixture(t, a, context.Background())
 	if f.imports == 0 {
 		t.Fatal("no asynchronous dispatch")
 	}
@@ -196,11 +216,12 @@ func TestAsyncTransferLostResponseFencesCancellationAndRestart(t *testing.T) {
 	}
 	f.outage = false
 	f.lost = true
-	_ = a.Recover(context.Background())
+	_ = recoverFixture(t, a, context.Background())
 	f.lost = false
 	restarted := New(a.db, a.cfg, a.log)
 	restarted.now = a.now
-	if e := restarted.Recover(context.Background()); e != nil {
+	restarted.SetImporter(a.importer)
+	if e := recoverFixture(t, restarted, context.Background()); e != nil {
 		t.Fatal(e)
 	}
 	var state string
@@ -225,7 +246,7 @@ func TestValidationAuthorizationAndLateExpiry(t *testing.T) {
 	}
 	id := create(t, a, "expiry")
 	a.now = func() time.Time { return instant("2026-11-03T09:30:00+08:00") }
-	if e := a.Recover(context.Background()); e != nil {
+	if e := recoverFixture(t, a, context.Background()); e != nil {
 		t.Fatal(e)
 	}
 	if w := call(t, a, "POST", "/api/v1/scheduled-orders/"+id+"/actions", "courier", "", map[string]string{"action": "accept"}); w.Code != 409 {
@@ -252,7 +273,7 @@ func TestFailedSaveAbortsReservationAndCannotCompleteOnRetry(t *testing.T) {
 	if w := call(t, a, "POST", "/api/v1/scheduled-orders", "requester", "failed-save", validBody()); w.Code != 503 || !strings.Contains(w.Body.String(), "creation_cleanup_pending") {
 		t.Fatalf("unconfirmed cleanup claimed abandoned: %d %s", w.Code, w.Body.String())
 	}
-	if e = a.Recover(ctx); e != nil {
+	if e = recoverFixture(t, a, ctx); e != nil {
 		t.Fatal(e)
 	}
 	if f.release != 1 {
@@ -290,7 +311,7 @@ func TestMalformedTransferReplyKeepsOwnershipUnresolved(t *testing.T) {
 		t.Fatal(w.Code)
 	}
 	f.malformed = true
-	if e := a.Recover(context.Background()); e == nil {
+	if e := recoverFixture(t, a, context.Background()); e == nil {
 		t.Fatal("malformed reply finalized ownership")
 	}
 	var state string
@@ -298,7 +319,7 @@ func TestMalformedTransferReplyKeepsOwnershipUnresolved(t *testing.T) {
 		t.Fatal(state, e)
 	}
 	f.malformed = false
-	if e := a.Recover(context.Background()); e != nil {
+	if e := recoverFixture(t, a, context.Background()); e != nil {
 		t.Fatal(e)
 	}
 }
@@ -309,11 +330,19 @@ func TestCreationReplayAfterTransferUsesAuthoritativeOrder(t *testing.T) {
 	if w := call(t, a, "POST", "/api/v1/scheduled-orders/"+id+"/actions", "courier", "", map[string]string{"action": "accept"}); w.Code != 202 {
 		t.Fatal(w.Code)
 	}
-	if e := a.Recover(context.Background()); e != nil {
+	if e := recoverFixture(t, a, context.Background()); e != nil {
 		t.Fatal(e)
 	}
 	w := call(t, a, "POST", "/api/v1/scheduled-orders", "requester", "authoritative-retry", validBody())
 	if w.Code != 303 || w.Header().Get("Location") != "/api/v1/orders/"+id {
 		t.Fatalf("replayed stale Schedule-owned state after transfer: %d %s", w.Code, w.Body.String())
 	}
+}
+
+func recoverFixture(t *testing.T, a *App, ctx context.Context) error {
+	t.Helper()
+	if _, err := a.db.Exec(ctx, "UPDATE schedule_retries SET next_attempt_at=clock_timestamp()"); err != nil {
+		t.Fatal(err)
+	}
+	return errors.Join(a.ConsumeEvents(ctx), a.Recover(ctx))
 }

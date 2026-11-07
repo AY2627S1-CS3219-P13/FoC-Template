@@ -1,0 +1,11 @@
+**
+!order-service/
+!order-service/**
+!schedule-order/
+!schedule-order/**
+**/.env
+**/.env.*
+**/.git
+**/node_modules
+**/test-results
+**/playwright-report

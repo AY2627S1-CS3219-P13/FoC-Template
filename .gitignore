@@ -22,3 +22,6 @@ Thumbs.db
 playwright-report/
 test-results/
 .ec2-deploy.lock
+
+# Private database cutover backups
+.migration-backups/

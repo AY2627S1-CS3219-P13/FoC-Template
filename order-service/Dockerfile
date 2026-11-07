@@ -1,18 +1,19 @@
 FROM golang:1.27.1-bookworm AS development
 WORKDIR /app
-COPY go.mod go.sum ./
+COPY order-service/go.mod order-service/go.sum ./
+COPY schedule-order/ /schedule-order/
 RUN go mod download
-COPY . .
+COPY order-service/ .
 
 FROM development AS build
 RUN CGO_ENABLED=0 go build -trimpath -o /order-service ./cmd/server
 
 FROM mcr.microsoft.com/playwright:v1.58.2-noble AS ui-tests
 WORKDIR /app/ui-tests
-COPY ui-tests/package*.json ./
+COPY order-service/ui-tests/package*.json ./
 RUN npm ci
-COPY ui-tests/ ./
-COPY internal/order/web/ /app/internal/order/web/
+COPY order-service/ui-tests/ ./
+COPY order-service/internal/order/web/ /app/internal/order/web/
 CMD ["npm", "test"]
 
 FROM debian:bookworm-slim AS runtime

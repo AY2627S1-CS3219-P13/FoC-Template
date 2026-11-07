@@ -10,7 +10,7 @@ import unittest
 
 
 TAG = "a" * 40
-SERVICES = ["user-service", "supplier-service", "credit-service", "order-service", "schedule-order", "pricing-service", "frontend", "gateway"]
+SERVICES = ["user-service", "supplier-service", "credit-service", "order-service", "pricing-service", "frontend", "gateway"]
 STUB = r'''#!/usr/bin/env python3
 import json
 import os
@@ -39,6 +39,8 @@ if action == "port":
              "order-service": 8084, "gateway": 3000}
     host = "0.0.0.0" if args[6] == "gateway" and os.environ.get("PUBLIC_BIND") == "1" else "127.0.0.1"
     print(host + ":" + str(ports[args[6]]))
+elif action == "ps" and "--all" in args and os.environ.get("LEGACY_SCHEDULE") == "1":
+    print("schedule-order")
 elif action == "ps" and "-q" in args:
     print("container-" + args[-1])
 '''
@@ -51,7 +53,7 @@ class DeployTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         (self.root / "scripts").mkdir()
         shutil.copy(Path(__file__).with_name("deploy-ec2.sh"), self.root / "scripts/deploy-ec2.sh")
-        for name in [".env", "credit-service/.env", "order-service/.env", "schedule-order/.env"]:
+        for name in [".env", "credit-service/.env", "order-service/.env"]:
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("# disposable test configuration\n")
@@ -94,16 +96,22 @@ class DeployTests(unittest.TestCase):
         self.assertLess(stop, credit)
         self.assertLess(credit, gateway)
         self.assertEqual(calls[pull][-len(SERVICES):], SERVICES)
-        self.assertIn("schedule-order",calls[stop])
+        self.assertIn("order-service",calls[stop])
         self.assertIn("pricing-service",calls[stop])
         self.assertTrue(any(self.action(c)=="exec" and "pricing-service" in c and "python" in c for c in calls))
-        self.assertTrue(any(self.action(c)=="exec" and "http://schedule-order:8080/readyz" in c for c in calls))
+        self.assertTrue(any(self.action(c)=="port" and "order-service" in c for c in calls))
         self.assertFalse(any(self.action(c) == "down" or "--volumes" in c for c in calls))
         for call in calls:
             if self.action(call) == "up":
                 self.assertIn("--no-build", call)
                 self.assertIn("never", call)
         self.assertEqual(sum(c[0] == "docker" and c[1] == "inspect" for c in calls), len(SERVICES))
+
+    def test_legacy_schedule_blocks_deployment_before_download_or_stop(self):
+        result = self.run_deploy(LEGACY_SCHEDULE="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("offline cutover", result.stderr)
+        self.assertFalse(any(self.action(c) in ["pull", "stop", "up"] for c in self.calls()))
 
     def test_failed_download_does_not_stop_running_services(self):
         result = self.run_deploy(FAIL_ACTION="pull")

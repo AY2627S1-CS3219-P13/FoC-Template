@@ -1,7 +1,6 @@
 package schedule
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,7 +9,6 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -257,7 +255,18 @@ func (a *App) action(w http.ResponseWriter, r *http.Request) error {
 		return e
 	}
 	transfer := fmt.Sprintf("%s-%d", id, s.generation+1)
-	if _, e = c.Exec(r.Context(), "UPDATE schedules SET state='transfer_pending',courier_id=$2,transfer_id=$3,generation=generation+1,updated_at=clock_timestamp() WHERE id=$1", id, user, transfer); e != nil {
+	tx, e := c.Begin(r.Context())
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(r.Context())
+	if _, e = tx.Exec(r.Context(), "UPDATE schedules SET state='transfer_pending',courier_id=$2,transfer_id=$3,generation=generation+1,updated_at=clock_timestamp() WHERE id=$1", id, user, transfer); e != nil {
+		return e
+	}
+	if _, e = tx.Exec(r.Context(), "INSERT INTO schedule_events(event_id,schedule_id,event_type) VALUES($1,$2,'ScheduledOrderAcceptanceRequested')", transfer, id); e != nil {
+		return e
+	}
+	if e = tx.Commit(r.Context()); e != nil {
 		return e
 	}
 	s.order.TransferPending = true
@@ -391,40 +400,7 @@ func (a *App) recoverOne(ctx context.Context, c *pgxpool.Conn, s stored) error {
 		return e
 	}
 	if s.state == "transfer_pending" {
-		payload := map[string]any{"id": s.id, "requesterId": s.user, "courierId": s.courier, "pickup": s.request.Pickup, "delivery": s.request.Delivery, "items": s.request.Items, "offeredCredits": s.request.OfferedCredits, "windowStart": s.request.WindowStart, "expiresAt": s.order.ExpiresAt}
-		raw, _ := json.Marshal(payload)
-		req, e := http.NewRequestWithContext(ctx, "PUT", a.cfg.OrderServiceURL+"/internal/v1/scheduled-orders/"+url.PathEscape(s.transfer), bytes.NewReader(raw))
-		if e != nil {
-			return e
-		}
-		req.Header.Set("Authorization", "Bearer "+a.cfg.OrderServiceToken)
-		req.Header.Set("Content-Type", "application/json")
-		resp, e := a.client.Do(req)
-		if e != nil {
-			return e
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != 200 {
-			return errors.New("order transfer unavailable")
-		}
-		var result struct {
-			Outcome string `json:"outcome"`
-		}
-		decoder := json.NewDecoder(io.LimitReader(resp.Body, 4096))
-		if decoder.Decode(&result) != nil || decoder.Decode(new(any)) != io.EOF {
-			return errors.New("invalid transfer outcome")
-		}
-		if result.Outcome == "accepted" {
-			_, e = c.Exec(ctx, "UPDATE schedules SET state='transferred',refund_pending=false WHERE id=$1", s.id)
-			return e
-		}
-		if result.Outcome != "rejected" {
-			return errors.New("unknown transfer outcome")
-		}
-		if _, e = c.Exec(ctx, "UPDATE schedules SET state='scheduled',courier_id=NULL,transfer_id=NULL WHERE id=$1", s.id); e != nil {
-			return e
-		}
-		s.state = "scheduled"
+		return nil
 	}
 	if s.state == "scheduled" {
 		status := ""

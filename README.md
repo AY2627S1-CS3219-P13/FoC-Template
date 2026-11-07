@@ -240,7 +240,7 @@ See [Supplier API](supplier-service/API.md) for CRUD and catalogue queries, [ver
 
 This repository follows a **one-service-per-folder** structure: each
 microservice (`user-service/`, `supplier-service/`, `order-service/`,
-`credit-service/`, `schedule-order/`) lives in its own top-level folder.
+`credit-service/`) lives in its own top-level folder. `schedule-order/` is a separate source module embedded in Order.
 
 ```text
 .
@@ -269,9 +269,9 @@ Smoke setup waits up to 65 seconds for initial wallet allocation after successfu
 
 ### Scheduled orders
 
-The main [Orders page](http://localhost:3000/orders) links to [Schedule order](http://localhost:3000/orders/schedule). The backend runs independently in `schedule-order/` with its own PostgreSQL database. Order's initializer also initializes its generated environment without replacing existing settings. The gateway starts and routes the service with the rest of the application.
+The main [Orders page](http://localhost:3000/orders) links to [Schedule order](http://localhost:3000/orders/schedule). The backend stays in `schedule-order/` as an embedded Order module. Order serves its routes and workers from the same container and database. Existing installations require the offline data cutover documented in the module README.
 
-See [Schedule Order setup/recovery](schedule-order/README.md), [API](schedule-order/API.md) and [requirements](schedule-order/spec.md). Its isolated check is `docker compose --profile test run --build --rm schedule-tests`. Accepted regular and scheduled orders share a three-order courier cap; scheduled requests transfer asynchronously to Order Service on acceptance.
+See [Schedule Order setup/recovery](schedule-order/README.md), [API](schedule-order/API.md) and [requirements](schedule-order/spec.md). Its isolated check is `docker compose --profile test run --build --rm schedule-tests`. Accepted regular and scheduled orders share a three-order courier cap; scheduled acceptance uses a durable event consumer within Order Service.
 
 ## Local price suggestions
 
