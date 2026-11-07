@@ -13,6 +13,7 @@ import (
 )
 
 type Config struct {
+	PricingURL, PricingToken, PricingSourceToken             string
 	ScheduleToken                                            string
 	SupplierInternalURL, SupplierInternalToken               string
 	DatabaseURL, Origin, SessionCookie                       string
@@ -59,6 +60,7 @@ func validVAPIDSubject(subject string) bool {
 
 func LoadConfig() (Config, error) {
 	c := Config{
+		PricingURL: os.Getenv("ORDER_PRICING_URL"), PricingToken: os.Getenv("ORDER_PRICING_TOKEN"), PricingSourceToken: os.Getenv("ORDER_PRICING_SOURCE_TOKEN"),
 		ScheduleToken:       os.Getenv("ORDER_SCHEDULE_INTERNAL_TOKEN"),
 		SupplierInternalURL: os.Getenv("ORDER_SUPPLIER_INTERNAL_URL"), SupplierInternalToken: os.Getenv("ORDER_SUPPLIER_INTERNAL_TOKEN"),
 		DatabaseURL: os.Getenv("ORDER_DATABASE_URL"), Origin: os.Getenv("ORDER_APP_ORIGIN"),
@@ -66,6 +68,12 @@ func LoadConfig() (Config, error) {
 		UserServiceToken: os.Getenv("ORDER_USER_INTERNAL_TOKEN"), SupplierServiceURL: os.Getenv("ORDER_SUPPLIER_SERVICE_URL"),
 		CreditServiceURL: os.Getenv("ORDER_CREDIT_SERVICE_URL"), CreditServiceToken: os.Getenv("ORDER_CREDIT_INTERNAL_TOKEN"),
 		DependencyTimeout: 3 * time.Second, RecoveryInterval: 30 * time.Second, RecoveryStaleAfter: time.Minute,
+	}
+	if c.PricingURL != "" || c.PricingToken != "" || c.PricingSourceToken != "" {
+		u, err := url.Parse(c.PricingURL)
+		if err != nil || u.Hostname() == "" || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") || !validSecret(c.PricingToken) || !validSecret(c.PricingSourceToken) || c.PricingToken == c.PricingSourceToken {
+			return c, errors.New("configure ORDER_PRICING_URL and distinct valid Pricing quote/source tokens")
+		}
 	}
 	if c.ScheduleToken != "" && !validSecret(c.ScheduleToken) {
 		return c, errors.New("ORDER_SCHEDULE_INTERNAL_TOKEN must be at least 32 characters")

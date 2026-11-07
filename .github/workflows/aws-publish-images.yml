@@ -76,11 +76,12 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        service: [user-service, supplier-service, credit-service, order-service, schedule-order, frontend, gateway]
+        service: [user-service, supplier-service, credit-service, order-service, pricing-service, frontend, gateway]
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
       ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
       SERVICE: ${{ matrix.service }}
+      PRICING_POLICY_PACKAGE: ${{ vars.PRICING_POLICY_PACKAGE }}
       RELEASE_SHA: ${{ needs.verify-ci.outputs.sha }}
     steps:
       - name: Check out the selected commit
@@ -125,10 +126,20 @@ jobs:
         if: steps.image.outputs.exists == 'false'
         shell: bash
         run: |
+          if [ "$SERVICE" = pricing-service ]; then
+            : "${PRICING_POLICY_PACKAGE:?Set PRICING_POLICY_PACKAGE to the tracked Pricing release directory}"
+            git ls-files --error-unmatch -- "order_pricing/$PRICING_POLICY_PACKAGE/manifest.json" > /dev/null
+            set -- --file order_pricing/serving/Dockerfile --target runtime \
+              --build-arg "POLICY_PACKAGE=$PRICING_POLICY_PACKAGE" ./order_pricing
+          elif [ "$SERVICE" = order-service ]; then
+            set -- --file order-service/Dockerfile .
+          else
+            set -- "./$SERVICE"
+          fi
           docker build --platform linux/amd64 \
             --label "org.opencontainers.image.revision=$RELEASE_SHA" \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-            --tag "$ECR_REGISTRY/foc/$SERVICE:$RELEASE_SHA" "./$SERVICE"
+            --tag "$ECR_REGISTRY/foc/$SERVICE:$RELEASE_SHA" "$@"
 
       - name: Publish the image
         if: steps.image.outputs.exists == 'false'

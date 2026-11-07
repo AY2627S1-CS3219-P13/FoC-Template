@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "datasetId": "nus-relative-foot-traffic-001",
+  "provenance": "estimated",
+  "timezone": "Asia/Singapore",
+  "referenceAsOf": "2026-11-06T00:00:00Z",
+  "unit": "relative activity index, not people or available couriers",
+  "basis": "Uncalibrated policy assumptions based on campus land use. Official sources support facility descriptions, not numerical scores or time factors.",
+  "locations": [
+    {"locationId": "blk-as8", "label": "Blk AS8", "relativePeakIndex": 80, "activityCluster": "central", "rationale": "Academic/cafe activity near the central library corridor."},
+    {"locationId": "com2", "label": "COM2", "relativePeakIndex": 65, "activityCluster": "computing", "rationale": "Computing teaching, printing and snack activity; less concentrated dining than Terrace."},
+    {"locationId": "com3", "label": "COM3", "relativePeakIndex": 85, "activityCluster": "terrace", "rationale": "Teaching and shared activity around The Terrace @ COM3."},
+    {"locationId": "central-library", "label": "Central Library", "relativePeakIndex": 95, "activityCluster": "central", "rationale": "Central study, retail and campus circulation hub."},
+    {"locationId": "engineering-block-e3", "label": "Engineering Block E3", "relativePeakIndex": 60, "activityCluster": "engineering", "rationale": "Academic building activity rather than a campus-wide dining hub."},
+    {"locationId": "engineering-block-e4", "label": "Engineering Block E4", "relativePeakIndex": 65, "activityCluster": "engineering", "rationale": "Teaching/cafe circulation in the engineering cluster."},
+    {"locationId": "engineering-block-ea", "label": "Engineering Block EA", "relativePeakIndex": 70, "activityCluster": "engineering", "rationale": "Lecture/auditorium activity and nearby food outlet."},
+    {"locationId": "frontier", "label": "Frontier", "relativePeakIndex": 100, "activityCluster": "science", "rationale": "Shared Science/Medicine dining hub; chosen as the relative lunch reference."},
+    {"locationId": "hon-sui-sen-memorial-library", "label": "Hon Sui Sen Memorial Library", "relativePeakIndex": 60, "activityCluster": "business", "rationale": "Business-school study activity; smaller circulation assumption than Central Library."},
+    {"locationId": "medicine-science-library", "label": "Medicine+Science Library", "relativePeakIndex": 75, "activityCluster": "science", "rationale": "Shared Medicine/Science study destination."},
+    {"locationId": "prince-george-s-park", "label": "Prince George's Park", "relativePeakIndex": 80, "activityCluster": "pgp", "rationale": "Residential cluster with shared canteen and amenities."},
+    {"locationId": "terrace", "label": "Terrace", "relativePeakIndex": 85, "activityCluster": "terrace", "rationale": "The same broad activity catchment as COM3; do not add their indices together."},
+    {"locationId": "the-ridge", "label": "The Ridge", "relativePeakIndex": 45, "activityCluster": "computing", "rationale": "Smaller food stop near COM2 in the current catalogue."},
+    {"locationId": "yusof-ishak-house", "label": "Yusof Ishak House", "relativePeakIndex": 90, "activityCluster": "central", "rationale": "Student-life, dining and connecting pedestrian activity."},
+    {"locationId": "innovation4-0", "label": "innovation4.0", "relativePeakIndex": 35, "activityCluster": "research", "rationale": "Research/innovation building; lower general student circulation assumption."}
+  ],
+  "timeBands": [
+    {"startHour": 0, "endHour": 6, "factor": 0.1},
+    {"startHour": 6, "endHour": 8, "factor": 0.3},
+    {"startHour": 8, "endHour": 10, "factor": 0.6},
+    {"startHour": 10, "endHour": 12, "factor": 0.8},
+    {"startHour": 12, "endHour": 14, "factor": 1.0},
+    {"startHour": 14, "endHour": 16, "factor": 0.8},
+    {"startHour": 16, "endHour": 18, "factor": 0.7},
+    {"startHour": 18, "endHour": 20, "factor": 0.6},
+    {"startHour": 20, "endHour": 22, "factor": 0.4},
+    {"startHour": 22, "endHour": 24, "factor": 0.2}
+  ],
+  "sources": [
+    "https://www.nus.edu.sg/nuslibraries/spaces/our-libraries/central-library",
+    "https://osa.nus.edu.sg/yih/",
+    "https://news.nus.edu.sg/not-just-for-dining-the-new-terrace-offers-common-spaces-e-sports-and-more/",
+    "https://www.science.nus.edu.sg/student-life-and-services/wellness-academic-financial-support/pitstopscience/",
+    "https://uci.nus.edu.sg/campus-life/housing-services/general-information-for-student-housing/facilities-amenities/",
+    "https://nus.edu.sg/nuslibraries/spaces/our-libraries/hon-sui-sen-memorial-library",
+    "https://nus.edu.sg/research/key-areas/smart-nation"
+  ]
+}

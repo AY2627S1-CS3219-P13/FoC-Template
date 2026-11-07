@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"foc/order-service/internal/order"
+	schedule "foc/schedule-order"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -45,6 +46,27 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return errors.New("database migration failed")
 	}
+	scheduleStartup, scheduleCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer scheduleCancel()
+	if err := schedule.Migrate(scheduleStartup, db); err != nil {
+		return errors.New("schedule migration failed")
+	}
+	if len(os.Args) > 1 && os.Args[1] == "import-schedules" {
+		source := os.Getenv("ORDER_LEGACY_SCHEDULE_DATABASE_URL")
+		if source == "" {
+			return errors.New("ORDER_LEGACY_SCHEDULE_DATABASE_URL required for offline import")
+		}
+		work, done := context.WithTimeout(ctx, 5*time.Minute)
+		defer done()
+		if err := schedule.ImportLegacy(work, db, source); err != nil {
+			return errors.New("offline schedule import failed; target must be empty and legacy database reachable")
+		}
+		log.Info("legacy schedules imported; source retained")
+		return nil
+	}
+	if cfg.SupplierInternalURL == "" || cfg.SupplierInternalToken == "" {
+		return errors.New("Order scheduling requires ORDER_SUPPLIER_INTERNAL_URL and ORDER_SUPPLIER_INTERNAL_TOKEN")
+	}
 	admissionConfig := poolConfig.Copy()
 	admissionConfig.MaxConns = 4
 	admissions, err := pgxpool.NewWithConfig(ctx, admissionConfig)
@@ -53,10 +75,19 @@ func run(log *slog.Logger) error {
 	}
 	defer admissions.Close()
 	app := order.NewWithAdmissionPool(db, admissions, cfg, log)
+	scheduling := schedule.New(db, schedule.Config{
+		Origin: cfg.Origin, SessionCookie: cfg.SessionCookie,
+		UserServiceURL: cfg.UserServiceURL, UserServiceToken: cfg.UserServiceToken,
+		SupplierServiceURL: cfg.SupplierInternalURL, SupplierServiceToken: cfg.SupplierInternalToken,
+		CreditServiceURL: cfg.CreditServiceURL, CreditServiceToken: cfg.CreditServiceToken,
+		DependencyTimeout: cfg.DependencyTimeout,
+	}, log, app.PrepareScheduledEvent)
 	// Old instances must be stopped before this resumable upgrade pass.
 	if err := app.BootstrapWorkflow(ctx); err != nil {
 		return errors.New("workflow bootstrap failed; legacy repair remains pending")
 	}
+	go scheduleLoop(ctx, scheduling.Recover, "schedule recovery pending", log)
+	go scheduleLoop(ctx, scheduling.ConsumeEvents, "schedule acceptance pending", log)
 	go recoveryLoop(ctx, app, cfg.RecoveryInterval, log)
 	for _, consumer := range []string{"workflow-timers", "workflow-settlement", "workflow-nearby-alerts"} {
 		go workflowLoop(ctx, app, consumer, log)
@@ -64,7 +95,7 @@ func run(log *slog.Logger) error {
 	go lifecycleLoop(ctx, app, log)
 	go publicationLoop(ctx, app, log)
 	go pushLoop(ctx, app, log)
-	server := &http.Server{Addr: ":8080", Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Addr: ":8080", Handler: schedule.Handler(app.Handler(), scheduling), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second}
 	private := &http.Server{Addr: ":8081", Handler: app.InternalHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second}
 	failure := make(chan error, 2)
 	go func() { failure <- server.ListenAndServe() }()
@@ -169,6 +200,23 @@ func workflowLoop(ctx context.Context, app *order.App, consumer string, log *slo
 		work, cancel := context.WithTimeout(ctx, 5*time.Second)
 		if err := app.ConsumeWorkflow(work, consumer); err != nil {
 			log.Warn("workflow consumption pending; retrying", "consumer", consumer)
+		}
+		cancel()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func scheduleLoop(ctx context.Context, run func(context.Context) error, pending string, log *slog.Logger) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		work, cancel := context.WithTimeout(ctx, 10*time.Second)
+		if err := run(work); err != nil {
+			log.Warn(pending)
 		}
 		cancel()
 		select {

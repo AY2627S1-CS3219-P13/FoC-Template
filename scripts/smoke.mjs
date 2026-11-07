@@ -117,12 +117,39 @@ if (process.argv[2] === "setup") {
     const orderUI = await fetch(base + "/orders");
     assert.equal(orderUI.status, 200);
     assert((await orderUI.text()).includes("/orders/app.js"), "Order UI missing");
-    for (const asset of ["app.js", "core.mjs", "style.css"]) {
+    for (const asset of ["app.js", "core.mjs", "pricing.mjs", "style.css"]) {
       assert.equal((await fetch(base + "/orders/" + asset)).status, 200);
     }
     await call("/api/v1/orders/session", "GET", undefined, cookie);
     const places = await (await call("/api/v1/orders/places", "GET", undefined, cookie)).json();
     assert(places.places.length > 0, "Order could not resolve Supplier catalogue");
+    if (process.env.SMOKE_PRICING === "1") {
+      const pickup = places.places.find(place => place.type === "supplier" && place.locationId === "com2");
+      assert(pickup, "Expected an existing COM2 supplier");
+      const body = {
+        draft: {id: crypto.randomUUID(), revision: 1},
+        pickup: {type: "supplier", id: pickup.id},
+        delivery: {type: "location", id: "central-library"},
+        totalItemQuantity: 2,
+      };
+      const key = crypto.randomUUID();
+      const quote = async () => {
+        const response = await fetch(base + "/api/v1/orders/price-quotes", {
+          method: "POST", headers: {Origin: origin, Cookie: cookie, "Content-Type": "application/json", "Idempotency-Key": key},
+          body: JSON.stringify(body), signal: AbortSignal.timeout(5000),
+        });
+        assert.equal(response.status, 200, "Live price quote failed");
+        return response.json();
+      };
+      const first = await quote();
+      assert(Number.isSafeInteger(first.recommendedCredits) && first.recommendedCredits > 0);
+      assert.deepEqual(first.draft, body.draft);
+      assert.deepEqual(await quote(), first, "Quote retries must replay the original result");
+      await call("/internal/v1/pricing-catalogue", "GET", undefined, cookie, 404);
+      await call("/internal/v1/pricing-context", "GET", undefined, cookie, 404);
+      console.log("Verified live Supplier → Pricing → Order suggestions, durable replay and private source isolation.");
+    }
+
     const orders = await (await call("/api/v1/orders?scope=mine", "GET", undefined, cookie)).json();
     assert(Array.isArray(orders.orders), "Order list missing");
     // Reach Order validation through the trusted origin with a body above the

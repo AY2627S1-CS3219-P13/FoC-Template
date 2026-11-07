@@ -11,3 +11,7 @@ require (
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 )
+
+require foc/schedule-order v0.0.0
+
+replace foc/schedule-order => ../schedule-order

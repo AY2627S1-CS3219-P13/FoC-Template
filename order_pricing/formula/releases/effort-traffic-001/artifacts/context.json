@@ -1,0 +1,31 @@
+{
+  "footfall": [
+    {
+      "estimatedPeople": 100,
+      "locationId": "com2",
+      "windowEnd": "2026-11-05T17:00:00Z",
+      "windowStart": "2026-11-05T16:45:00Z"
+    }
+  ],
+  "routes": [
+    {
+      "deliveryLocationId": "utown",
+      "pickupLocationId": "com2",
+      "walkableMetres": 1800
+    }
+  ],
+  "sources": [
+    {
+      "asOf": "2026-11-05T00:00:00Z",
+      "provenance": "synthetic",
+      "snapshotId": "synthetic-routes-001",
+      "source": "routes"
+    },
+    {
+      "asOf": "2026-11-05T17:00:00Z",
+      "provenance": "synthetic",
+      "snapshotId": "synthetic-footfall-001",
+      "source": "footfall"
+    }
+  ]
+}

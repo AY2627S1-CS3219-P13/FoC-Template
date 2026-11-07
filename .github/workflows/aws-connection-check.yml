@@ -46,7 +46,7 @@ jobs:
         run: |
           aws ecr get-login-password --region "$AWS_REGION" |
             docker login --username AWS --password-stdin "$ECR_REGISTRY"
-          for service in user-service supplier-service credit-service order-service schedule-order frontend gateway; do
+          for service in user-service supplier-service credit-service order-service pricing-service frontend gateway; do
             printf 'Checking foc/%s\n' "$service"
             aws ecr describe-images --repository-name "foc/$service" \
               --query 'imageDetails[].imageTags' --output json
@@ -63,7 +63,8 @@ jobs:
               "curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8082/readyz",
               "curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8083/readyz",
               "curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8084/readyz",
-              "curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/healthz"
+              "curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/healthz",
+              "docker exec \"$(docker ps --filter label=com.docker.compose.project=foc --filter label=com.docker.compose.service=pricing-service --format '{{.ID}}')\" python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/readyz\", timeout=3)'"
             ],
             "executionTimeout": ["60"]
           }

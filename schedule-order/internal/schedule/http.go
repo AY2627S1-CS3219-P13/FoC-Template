@@ -14,6 +14,7 @@ import (
 
 type receivedKey struct{}
 type App struct {
+	importer  Importer
 	db        *pgxpool.Pool
 	cfg       Config
 	log       *slog.Logger

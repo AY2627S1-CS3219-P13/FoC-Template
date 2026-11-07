@@ -1,6 +1,6 @@
 # Nearby errand alerts (Web Push) — design
 
-Status: implemented (migration 012, `alerts.go`, `webpush.go`, `web/sw.js`); API.md has the contract. Builds on nearest-pickup sorting
+Status: implemented (migration 013, `alerts.go`, `webpush.go`, `web/sw.js`); API.md has the contract. Builds on nearest-pickup sorting
 (campus coordinates from Supplier, `distanceMeters` in `internal/order/proximity.go`).
 
 ## 1. Purpose and scope
@@ -58,7 +58,7 @@ order ordering, per-consumer receipts, advisory locks and exponential retry are
 reused unchanged. As with settlement, network calls never run inside a workflow
 transaction; the consumer only writes delivery jobs and a separate loop sends them.
 
-## 4. Data model (migration `012_nearby_alerts.sql`)
+## 4. Data model (migration `013_nearby_alerts.sql`)
 
 ```sql
 CREATE TABLE nearby_alert_preferences (
@@ -252,19 +252,21 @@ invalidates every subscription, so a rotation must also clear
 
 ## 11. Scheduled requests (not covered)
 
-Scheduled requests live in Schedule Order Service, in status `scheduled`, from
-creation until a courier accepts them. Order Service first sees one at
-acceptance: `importScheduled` (`schedule.go`) records `OrderCreated` and moves
-it to `accepted` in the same transaction. That `OrderCreated` therefore
-describes an errand that is already taken. The consumer's "still open" check
-skips it, so no wrong alert is sent, but scheduled requests do not trigger
-alerts either.
+Scheduling is now a module embedded in Order (`schedule-order/`, same process
+and database, its own tables and migration ledger). A scheduled request stays in
+the module's `schedules` table, in state `scheduled`, until a courier accepts
+it; publishing it records no event. Acceptance records
+`ScheduledOrderAcceptanceRequested`, and the module's consumer calls Order's
+importer, which writes `OrderCreated` and moves the order to `accepted` in the
+same transaction. That `OrderCreated` describes an errand that is already taken,
+so the alert consumer's "still open" check skips it: no wrong alert is sent, but
+scheduled requests do not trigger alerts either.
 
-Covering them would need Schedule Order Service to notify Order (for example a
-private, service-authenticated "scheduled request published" call from its own
-durable worker), which Order would match through the same preferences and
-sender. That is a cross-service contract owned by the Schedule feature, left as
-a follow-up.
+Covering them no longer needs a cross-service call. The module would record a
+"scheduled request published" event when a request reaches `scheduled`, and
+Order would match it through a callback, as it already does for acceptance
+(`Importer`), reusing the same preferences, cooldown and sender. That change
+belongs to the scheduling module, so it is left as a follow-up.
 
 ## 12. Failure handling and observability
 
@@ -311,7 +313,7 @@ CloudFront URL.
 
 ## 15. Build order
 
-1. Migration 012, configuration and `init-env.sh`.
+1. Migration 013, configuration and `init-env.sh`.
 2. Web Push crypto (RFC 8291/8292) with its test vectors.
 3. Alerts API and subscription validation.
 4. Matching consumer.

@@ -18,7 +18,9 @@ services:
       retries: 20
 
   order-service:
-    build: .
+    build:
+      context: ..
+      dockerfile: order-service/Dockerfile
     environment:
       ORDER_DATABASE_URL: postgres://foc_order:${ORDER_POSTGRES_PASSWORD:-}@order-db:5432/foc_order?sslmode=disable
       ORDER_SCHEDULE_INTERNAL_TOKEN: ${SCHEDULE_INTERNAL_TOKEN:-}
@@ -27,10 +29,12 @@ services:
       ORDER_USER_SERVICE_URL: ${ORDER_USER_SERVICE_URL:-http://user-service:8081}
       ORDER_USER_INTERNAL_TOKEN: ${ORDER_USER_INTERNAL_TOKEN:-}
       ORDER_SUPPLIER_SERVICE_URL: ${ORDER_SUPPLIER_SERVICE_URL:-http://supplier-service:8080}
-      ORDER_SUPPLIER_INTERNAL_URL: ${ORDER_SUPPLIER_INTERNAL_URL:-}
+      ORDER_SUPPLIER_INTERNAL_URL: ${ORDER_SUPPLIER_INTERNAL_URL:-http://supplier-service:8080}
       ORDER_SUPPLIER_INTERNAL_TOKEN: ${ORDER_SUPPLIER_INTERNAL_TOKEN:-}
       ORDER_CREDIT_SERVICE_URL: ${ORDER_CREDIT_SERVICE_URL:-http://credit-service:8081}
       ORDER_CREDIT_INTERNAL_TOKEN: ${ORDER_CREDIT_INTERNAL_TOKEN:-}
+      ORDER_VAPID_PRIVATE_KEY: ${ORDER_VAPID_PRIVATE_KEY:-}
+      ORDER_VAPID_SUBJECT: ${ORDER_VAPID_SUBJECT:-}
     ports:
       - "127.0.0.1:${ORDER_PUBLIC_PORT:-8084}:8080"
     depends_on:
@@ -59,7 +63,8 @@ services:
   order-tests:
     profiles: [test]
     build:
-      context: .
+      context: ..
+      dockerfile: order-service/Dockerfile
       target: development
     environment:
       ORDER_TEST_DATABASE_URL: postgres://test:test@order-test-db:5432/order_service_test?sslmode=disable
@@ -73,7 +78,8 @@ services:
   order-ui-fixture:
     profiles: [ui-test]
     build:
-      context: .
+      context: ..
+      dockerfile: order-service/Dockerfile
       target: development
     environment:
       ORDER_TEST_DATABASE_URL: postgres://test:test@order-test-db:5432/order_service_test?sslmode=disable
@@ -95,7 +101,8 @@ services:
   order-ui-tests:
     profiles: [ui-test]
     build:
-      context: .
+      context: ..
+      dockerfile: order-service/Dockerfile
       target: ui-tests
     environment:
       ORDER_UI_URL: http://order-ui-fixture:8080

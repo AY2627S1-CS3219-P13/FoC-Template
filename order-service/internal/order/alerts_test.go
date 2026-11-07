@@ -17,6 +17,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	schedule "foc/schedule-order"
 )
 
 // fakePushService plays a browser push service. Each endpoint path selects the
@@ -402,14 +404,14 @@ func TestPushSenderRetriesRemovesAndSkips(t *testing.T) {
 	}
 }
 
-// Migration 012 marks every existing event as handled, so a deploy never
+// Migration 013 marks every existing event as handled, so a deploy never
 // announces errands that were already open.
 func TestNearbyAlertsMigrationNeverAnnouncesExistingErrands(t *testing.T) {
 	a, push := alertsApp(t)
 	existing := createdForTest(t, a, "before-upgrade")
 	workflowSQL(t, a, "DROP TABLE push_deliveries, push_subscriptions, nearby_alert_preferences")
 	workflowSQL(t, a, "DELETE FROM workflow_receipts WHERE consumer_name=$1", nearbyAlertConsumer)
-	workflowSQL(t, a, "DELETE FROM schema_migrations WHERE name='012_nearby_alerts.sql'")
+	workflowSQL(t, a, "DELETE FROM schema_migrations WHERE name='013_nearby_alerts.sql'")
 	if err := Migrate(context.Background(), a.db); err != nil {
 		t.Fatal(err)
 	}
@@ -422,5 +424,38 @@ func TestNearbyAlertsMigrationNeverAnnouncesExistingErrands(t *testing.T) {
 	runAlerts(t, a)
 	if len(push.messages()) != 1 {
 		t.Fatal("new errand not announced after upgrade")
+	}
+}
+
+// Scheduled requests reach Order only when a courier accepts them: the import
+// commits OrderCreated and acceptance together, so it must never alert.
+func TestScheduledImportNeverAlertsNearbyCouriers(t *testing.T) {
+	a, push := alertsApp(t)
+	ctx := context.Background()
+	if err := schedule.Migrate(ctx, a.db); err != nil {
+		t.Fatal(err)
+	}
+	a.backgroundCatalogue = resolverFunc(func(_ context.Context, r PlaceRef, _ string) (Place, error) {
+		return Place{Type: r.Type, ID: r.ID, Name: r.ID}, nil
+	})
+	enableAlerts(t, a, "courier", "central-library", 500, push.device(t, "courier"))
+	start := time.Date(time.Now().Year()+1, 1, 2, 9, 0, 0, 0, time.FixedZone("SGT", 28800))
+	request, _ := json.Marshal(map[string]any{"pickup": PlaceRef{"location", "com2"}, "delivery": PlaceRef{"location", "utown"}, "items": []Item{{Name: "Tea", Quantity: 1}}, "offeredCredits": 10, "windowStart": start})
+	data, _ := json.Marshal(map[string]any{"id": "scheduled-alert-test", "requesterId": testUserID, "status": "scheduled", "expiresAt": start.Add(30 * time.Minute), "windowStart": start})
+	workflowSQL(t, a, `INSERT INTO schedules(id,requester_id,idempotency_key,fingerprint,request,order_data,state,courier_id,transfer_id,generation)
+ VALUES('scheduled-alert-test',$1,'alerts','fingerprint',$2,$3,'transfer_pending',$4,'alert-event',1)`, testUserID, request, data, otherUser)
+	workflowSQL(t, a, `INSERT INTO schedule_events(event_id,schedule_id,event_type) VALUES('alert-event','scheduled-alert-test','ScheduledOrderAcceptanceRequested')`)
+	if err := schedule.New(a.db, schedule.Config{}, a.log, a.PrepareScheduledEvent).ConsumeEvents(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if workflowCount(t, a, "SELECT count(*) FROM orders WHERE id='scheduled-alert-test' AND status='accepted'") != 1 {
+		t.Fatal("scheduled request was not imported")
+	}
+	runAlerts(t, a)
+	if deliveries(t, a, "true") != 0 || len(push.messages()) != 0 {
+		t.Fatal("an already accepted scheduled order alerted nearby couriers")
+	}
+	if workflowCount(t, a, "SELECT count(*) FROM order_events e WHERE NOT EXISTS(SELECT 1 FROM workflow_receipts r WHERE r.consumer_name=$1 AND r.event_id=e.event_id)", nearbyAlertConsumer) != 0 {
+		t.Fatal("imported events left unacknowledged")
 	}
 }

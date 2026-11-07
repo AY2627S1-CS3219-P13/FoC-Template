@@ -163,7 +163,7 @@ Compose defaults `ORDER_PUBLIC_PORT=8084` and `ORDER_APP_ORIGIN=http://localhost
 
 Order’s recovery worker uses Supplier’s authenticated internal read-only catalogue on its existing port 8080 with a separate `SUPPLIER_INTERNAL_TOKEN`. Order’s environment initializer adds that token to the root `.env` without changing existing credentials, and root Compose shares it; browser cookies are never retained for background work. Each sweep checks up to 100 orders, rotating oldest checks first. Inactive/deleted places cancel open, accepted and picked-up orders and durably record refund intent; Credit performs the idempotent release. Delivered, disputed and terminal orders are protected. Outages or malformed responses do not imply deactivation. Default recovery runs every 30 seconds; event consumption materializes settlement queues before an independent financial retry tick delivers refunds. Standalone Order must configure `ORDER_SUPPLIER_INTERNAL_URL` and `ORDER_SUPPLIER_INTERNAL_TOKEN` to enable the sweep.
 
-Nearby alerts are enabled by `ORDER_VAPID_PRIVATE_KEY` (base64 PKCS#8 DER P-256 key) and `ORDER_VAPID_SUBJECT` (`mailto:` with a real address, or an `https://` URL). Both or neither must be set, and they need the Supplier internal catalogue above; invalid values stop startup. `scripts/init-env.sh` adds a key to `order-service/.env`, including on existing installations, with the subject `https://github.com/AY2627S1-CS3219-P13/FoC-Template`. Only root Compose passes them to Order, because standalone Order has no internal catalogue by default. Keep the key stable: a new key invalidates every browser subscription, so rotating it must also clear `push_subscriptions`. The container needs outbound HTTPS to the push services. If the repository becomes private or is renamed, set the subject to a team mailbox.
+Nearby alerts are enabled by `ORDER_VAPID_PRIVATE_KEY` (base64 PKCS#8 DER P-256 key) and `ORDER_VAPID_SUBJECT` (`mailto:` with a real address, or an `https://` URL). Both or neither must be set, and they need the Supplier internal catalogue above; invalid values stop startup. `scripts/init-env.sh` adds a key to `order-service/.env`, including on existing installations, with the subject `https://github.com/AY2627S1-CS3219-P13/FoC-Template`. Order's Compose file passes them in both the root stack and standalone runs. Keep the key stable: a new key invalidates every browser subscription, so rotating it must also clear `push_subscriptions`. The container needs outbound HTTPS to the push services. If the repository becomes private or is renamed, set the subject to a team mailbox.
 
 The internal catalogue routes reuse Supplier’s existing HTTP listener; there is no additional port or service. The gateway rejects `/internal` paths, and the routes require their service credential even when called directly. Run `sh order-service/scripts/init-env.sh` after initializing User and Credit for the root stack.
 
@@ -236,8 +236,54 @@ Uncertain creation cleanup no longer reserves funds to establish a retry record.
 
 ## Scheduled orders and three-order capacity
 
-Use **Schedule order** from the main `/orders` screen to open `/orders/schedule`. The independent [Schedule Order Service](../schedule-order/README.md) owns the request until its asynchronous acceptance transfer succeeds. Scheduling-specific backend code remains outside this service; Order integrates private import, normal accepted lifecycle and shared courier capacity.
+Use **Schedule order** from the main `/orders` screen to open `/orders/schedule`. The embedded [Schedule Order module](../schedule-order/README.md) owns the scheduling record until its asynchronous acceptance event is consumed. Scheduling backend code stays in the sibling folder; Order hosts its routes/workers and owns the accepted lifecycle and shared courier capacity.
 
 The scheduling form highlights **Schedule order** and previews its **Scheduled** status with a distinct dark navy badge. **New errand** returns to regular order creation; no separate back tab is needed.
 
-The courier cap is now three accepted/picked-up orders combined, including regular and future scheduled orders. Delivery frees only the corresponding slot. Migration 010 replaces the former unique one-slot index with serialized three-slot enforcement and adds scheduled delivery-window metadata/import outcomes. Stop old Order writers before migration; old and new capacity semantics must not run together. `ORDER_SCHEDULE_INTERNAL_TOKEN` authenticates imports on private port 8081 and is supplied by the root initializer/Compose setup. No second escrow reserve occurs on import. See the [Schedule API contract](../schedule-order/API.md).
+The courier cap is now three accepted/picked-up orders combined, including regular and future scheduled orders. Delivery frees only the corresponding slot. Migration 010 replaces the former unique one-slot index with serialized three-slot enforcement and adds scheduled delivery-window metadata/import outcomes. Stop old Order writers before migration; old and new capacity semantics must not run together. `ORDER_SCHEDULE_INTERNAL_TOKEN` optionally authenticates the retained legacy import adapter on private port 8081; the embedded event workflow does not require it. No second escrow reserve occurs on import. See the [Schedule API contract](../schedule-order/API.md).
+
+## Live price suggestions
+
+Start the local application with `sh scripts/start.sh` from the repository root,
+then open `http://localhost:3000/orders`. This selects `compose.pricing.yaml` in
+addition to root Compose and initializes separate Pricing credentials without
+replacing existing values. Plain root Compose and EC2 deployment remain usable
+without Pricing; the form then offers manual credit entry.
+
+Choose pickup and delivery; expiry is not needed for suggestions. The form requests suggestions after
+400 ms without relevant edits, including changes to the sum of added item
+quantities. Item text and the item input awaiting Add do not affect pricing.
+Use suggestion copies the current recommendation into Offered credits. Further
+recommendations never replace the selected offer. Suggestions refresh automatically
+every 30 seconds while the immediate-order editor is visible, or sooner when a
+quote expires. There is no manual refresh button. Failures retry automatically,
+respecting rate-limit delays, while manual offers remain available. Obsolete
+responses are ignored. Polling pauses while hidden, browsing other views, signed
+out or posting. Scheduled orders do not request quotes. A future expiry is still
+required to post an immediate order, but expiry edits never trigger price requests.
+
+Order optionally accepts `ORDER_PRICING_URL`, `ORDER_PRICING_TOKEN` and
+`ORDER_PRICING_SOURCE_TOKEN`; configure all three or leave all unset. Startup
+validates URL and distinct tokens of at least 32 characters. The source token
+protects only the private aggregate endpoint. The quote token also keys opaque
+per-user idempotency derivation; keep it stable across ordinary releases. Token
+rotation ends continuity for old mapped keys and needs coordinated retry handling.
+Order readiness does not depend on advisory Pricing availability.
+
+The local-only policy uses synthetic route distances across the fifteen current
+catalogue locations. The form shows the credits and freshness without a demo
+label. This policy is
+for testing the interaction, not a calibrated campus map. Pricing runtime image publication and EC2 wiring are described in
+[deployment notes](../docs/aws-deployment-notes.md#pricing-release-wiring). Cloud
+ECR provisioning and selection of a validated route package remain prerequisites.
+Training interactions and creation/outcome linkage remain follow-up work.
+
+Run backend checks with `docker compose --profile test run --build --rm order-tests`.
+Run controller and browser checks with
+`docker compose --profile ui-test run --build --rm order-ui-tests`.
+
+## Embedded scheduling
+
+Order hosts the scheduling routes and workers from the sibling `schedule-order/` Go module. Both use Order's database; scheduling has its own migration ledger and event journal. Durable acceptance commits import, assignment, lifecycle events, Schedule handoff state and receipt atomically. Supplier requests are prepared before that transaction. The shared `/readyz` covers the combined database. Background scheduling requires Order's internal Supplier URL/token.
+
+Docker builds now use the repository root as context: `docker build -f order-service/Dockerfile .`. Compose commands remain unchanged. The module's [README](../schedule-order/README.md) documents mandatory offline cutover from the legacy database and the `import-schedules` maintenance command. Do not start old Schedule/Order writers alongside the new runtime.

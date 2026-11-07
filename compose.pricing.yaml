@@ -1,0 +1,31 @@
+# Local-only price suggestions. Do not apply this synthetic route package to EC2.
+services:
+  pricing-db:
+    extends:
+      file: ./order_pricing/compose.runtime.yaml
+      service: pricing-db
+
+  pricing-service:
+    extends:
+      file: ./order_pricing/compose.runtime.yaml
+      service: pricing-service
+    build:
+      target: local-demo
+
+  order-service:
+    environment:
+      ORDER_PRICING_URL: http://pricing-service:8080
+      ORDER_PRICING_TOKEN: ${PRICING_QUOTE_TOKEN}
+      ORDER_PRICING_SOURCE_TOKEN: ${PRICING_ORDER_SOURCE_TOKEN}
+
+  gateway:
+    depends_on:
+      pricing-service:
+        condition: service_healthy
+
+  smoke:
+    environment:
+      SMOKE_PRICING: "1"
+
+volumes:
+  pricing-data:

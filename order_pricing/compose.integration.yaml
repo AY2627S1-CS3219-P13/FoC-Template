@@ -1,0 +1,142 @@
+name: foc-pricing-integration
+
+# All credentials and data in this isolated stack are disposable test fixtures.
+# No ports are published and no existing FoC databases or networks are used.
+x-pricing: &pricing
+  build:
+    context: .
+    dockerfile: serving/Dockerfile
+    target: runtime
+    args:
+      POLICY_PACKAGE: formula/releases/effort-traffic-001
+  environment: &pricing-env
+    PRICING_DATABASE_URL: postgresql://pricing_test:pricing_test@database:5432/pricing_test
+    PRICING_PACKAGE_DIR: /opt/policy
+    PRICING_QUOTE_TOKEN: fixture-quote-only
+    PRICING_ORDER_WRITE_TOKEN: fixture-order-write-only
+    PRICING_EXPORT_TOKEN: fixture-export-only
+    PRICING_SUPPLIER_URL: http://sources:8090
+    PRICING_SUPPLIER_TOKEN: fixture-source-only
+    PRICING_ORDER_URL: http://sources:8090
+    PRICING_ORDER_TOKEN: fixture-source-only
+    PRICING_CATALOGUE_REFRESH_SECONDS: "1"
+    PRICING_ORDER_REFRESH_SECONDS: "1"
+    PRICING_SOURCE_PROVENANCE: synthetic
+  depends_on:
+    database:
+      condition: service_healthy
+    sources:
+      condition: service_started
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+
+services:
+  database:
+    image: postgres:18-bookworm
+    environment:
+      POSTGRES_USER: pricing_test
+      POSTGRES_PASSWORD: pricing_test
+      POSTGRES_DB: pricing_test
+    tmpfs: [/var/lib/postgresql]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U pricing_test -d pricing_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  sources:
+    build:
+      context: .
+      dockerfile: tests/Dockerfile
+    environment:
+      SOURCE_TOKEN: fixture-source-only
+    command: [python, -m, tests.integration.sources]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  pricing-a:
+    <<: *pricing
+
+  pricing-b:
+    <<: *pricing
+
+  pricing-legacy:
+    <<: *pricing
+    build:
+      context: .
+      dockerfile: serving/Dockerfile
+      target: runtime
+      args:
+        POLICY_PACKAGE: formula/package
+
+  pricing-model:
+    <<: *pricing
+    build:
+      context: .
+      dockerfile: serving/Dockerfile
+      target: runtime
+      args:
+        POLICY_PACKAGE: ${PRICING_MODEL_PACKAGE:-.integration/model}
+
+  pricing-fallback:
+    <<: *pricing
+    build:
+      context: .
+      dockerfile: serving/Dockerfile
+      target: runtime
+      args:
+        POLICY_PACKAGE: ${PRICING_MODEL_PACKAGE:-.integration/model}
+    environment:
+      <<: *pricing-env
+      PRICING_ORDER_URL: http://sources:8090/unavailable
+
+  pricing-unready:
+    <<: *pricing
+    environment:
+      <<: *pricing-env
+      PRICING_SUPPLIER_URL: http://sources:8090/unavailable
+
+  checks:
+    build:
+      context: .
+      dockerfile: tests/Dockerfile
+    environment:
+      PRICING_BASE_URL: http://pricing-a:8080
+      PRICING_SERVICE_TOKEN: fixture-quote-only
+      PRICING_ORDER_WRITE_TOKEN: fixture-order-write-only
+      PRICING_EXPORT_TOKEN: fixture-export-only
+    command: [python, -m, tests.integration.run]
+    volumes:
+      - ./.integration/state:/state:ro
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  feed-checks:
+    build:
+      context: .
+      dockerfile: mlflow/Dockerfile
+    environment:
+      PRICING_BASE_URL: http://pricing-a:8080
+      PRICING_ORDER_WRITE_TOKEN: fixture-order-write-only
+      PRICING_EXPORT_TOKEN: fixture-export-only
+    command: [python, -m, unittest, tests.integration.feed_conformance, -v]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  serving-checks:
+    <<: *pricing
+    build:
+      context: .
+      dockerfile: serving/Dockerfile
+      target: tests
+      args:
+        POLICY_PACKAGE: formula/releases/effort-traffic-001
+    command: [python, -m, unittest, discover, -s, tests/serving, -v]

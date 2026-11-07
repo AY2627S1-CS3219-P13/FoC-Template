@@ -1,0 +1,19 @@
+{
+  "releaseId": "test-only-001",
+  "entryPoint": "policy.example:load_policy",
+  "adapterMajor": 1,
+  "contextMajor": 1,
+  "requiredCapabilities": ["catalogue.v1", "orders.v1", "routes.v1", "footfall.v1"],
+  "featureSchemaVersion": "test-only-1",
+  "bounds": {"minimum": 5, "maximum": 30},
+  "provenance": {
+    "codeCommit": "0000000000000000000000000000000000000000",
+    "datasetIds": ["synthetic-fixture-001"],
+    "modelRuns": []
+  },
+  "files": {
+    "policy/__init__.py": "e7b131daa337f018af4c9c2d2f17e1d2131c8254fa59236005c8a7b7812cecaa",
+    "policy/example.py": "ab0e5a3514f1724f2bedebf3616154d847435c675fc761ee0d43ea93fdd2c918",
+    "requirements.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

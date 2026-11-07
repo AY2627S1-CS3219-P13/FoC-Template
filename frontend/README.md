@@ -77,6 +77,10 @@ Those checks promote temporary admin fixtures and consume the one-time claim.
 
 - Signed-in users, including admins, can open Orders from the catalogue header.
   This uses a full-page link to `/orders`, served by Order Service through the gateway.
+  With `sh scripts/start.sh`, the immediate-order form includes live credit suggestions
+  after place and added-item quantity changes. Use suggestion explicitly
+  copies the recommendation; manual offers stay editable. The local route package
+  uses synthetic distances for local UI testing.
 - The Wallet link beside Orders opens `/wallet`, a full page matching the
   catalogue header and navy hero. Three cards show available, frozen and total
   credits and the ten newest transactions. Show more appends ten older entries
@@ -147,3 +151,7 @@ The [D2 demo guide](../docs/d2-supplier-demo.md) includes roles, schema, compone
 sequence diagrams, API-only verification and the live presentation flow. Browser
 checks run in a dedicated Playwright container with Linux/WSL host networking;
 screenshots/results are saved under ignored `.agent/tmp/d2-browser/`.
+
+Price suggestions need no expiry input and update automatically every 30 seconds
+while the immediate-order editor is visible. The manual suggestion-refresh button
+has been removed; expiry remains required only for actual order creation.

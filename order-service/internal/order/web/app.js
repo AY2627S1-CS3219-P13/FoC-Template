@@ -1,3 +1,4 @@
+import { createSuggestions } from "/orders/pricing.mjs";
 import {
   positiveInteger,
   encodeJSON,
@@ -86,6 +87,44 @@ const show = (id, text, kind = "notice") => {
   el.hidden = !text;
 };
 
+const suggestions = createSuggestions({
+  request: (body, key, signal) => api("/price-quotes", {
+    method: "POST", body: JSON.stringify(body), headers: {"Idempotency-Key": key}, signal,
+  }),
+  render({state, quote, sessionExpired}) {
+    $("pricing-suggestion").hidden = scheduleMode;
+    $("use-suggestion").disabled = state !== "ready" || !!attempt || posting || !user;
+    $("pricing-message").textContent = state === "ready"
+      ? `${quote.recommendedCredits} credits · fresh until ${time(quote.validUntil)} SGT.`
+      : state === "loading" ? "Calculating suggestion…"
+      : state === "unavailable" ? "Suggestion unavailable. We’ll retry automatically. You can enter your own offered credits."
+      : "Choose pickup and delivery to see a suggestion.";
+    if (sessionExpired) clearSessionUI();
+  },
+});
+function updateSuggestion() {
+  if (scheduleMode || !user || !placesReady || attempt || posting || document.hidden || view !== "create") { suggestions.update(null); return; }
+  try {
+    const place = value => {
+      const selected = places.find(p => `${p.type}:${p.id}` === value);
+      if (!selected) throw new Error("Select a place");
+      return {type: selected.type, id: selected.id};
+    };
+    const pickup = place(draft.pickup), delivery = place(draft.delivery);
+    if (draft.pickup === draft.delivery) throw new Error("Choose different places");
+    const total = draft.items.reduce((sum, item) => sum + positiveInteger(item.quantity), 0n);
+    if (total > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Quantity exceeds quote range");
+    suggestions.update({pickup, delivery, ...(total > 0n ? {totalItemQuantity: Number(total)} : {})});
+  } catch { suggestions.update(null); }
+}
+$("use-suggestion").addEventListener("click", () => {
+  const quote = suggestions.current();
+  if (!quote || !user || attempt || posting) return;
+  draft.offer = String(quote.recommendedCredits);
+  $("offer").value = draft.offer;
+  persist(); preview();
+});
+
 async function api(path, options = {}) {
   const response = await fetch(`${options.schedule ? "/api/v1/scheduled-orders" : "/api/v1/orders"}${path}`, {
     credentials: "same-origin",
@@ -102,6 +141,8 @@ async function api(path, options = {}) {
     );
     error.code = data.error?.code;
     error.status = response.status;
+    const retryAfter = Number(response.headers.get("Retry-After"));
+    if (Number.isFinite(retryAfter) && retryAfter > 0 && retryAfter <= 3600) error.retryAfterMs = retryAfter * 1000;
     throw error;
   }
   return data;
@@ -125,6 +166,7 @@ function persist(required = false) {
   }
 }
 function readDraft() {
+  suggestions.reset();
   draft = emptyDraft();
   attempt = null;
   pending = {};
@@ -160,6 +202,7 @@ function readDraft() {
     );
 }
 function clearSessionUI() {
+  suggestions.reset();
   document.querySelectorAll(".action-dialog").forEach(dialog => dialog.close());
   eventSource?.close();
   eventSource = null;
@@ -589,6 +632,7 @@ function placeDetails(p) {
     : "Choose a place to see its details.";
 }
 function preview() {
+  updateSuggestion();
   for (const id of ["pickup", "delivery"]) {
     const p = places.find((p) => `${p.type}:${p.id}` === draft[id]);
     $(`preview-${id}`).textContent = p ? placeLabel(p) : `Choose a ${id}`;
@@ -607,6 +651,8 @@ function preview() {
 }
 function controls() {
   $("creation-fields").disabled = !user || !!attempt || posting;
+  $("use-suggestion").disabled = !user || !!attempt || posting || !suggestions.current();
+  if (attempt || posting) updateSuggestion();
   $("submit").disabled =
     !user || posting || itemsBusy || (!attempt && !placesReady);
   $("submit").textContent = posting
@@ -1169,6 +1215,7 @@ function setView(next) {
     return;
   }
   view = next;
+  updateSuggestion();
   selected = null;
   detailStale = true;
   renderDetail();
@@ -1267,6 +1314,7 @@ async function tick() {
   }
 }
 document.addEventListener("visibilitychange", () => {
+  updateSuggestion();
   if (!document.hidden) void tick();
 });
 window.addEventListener("focus", () => void tick());

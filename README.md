@@ -240,7 +240,7 @@ See [Supplier API](supplier-service/API.md) for CRUD and catalogue queries, [ver
 
 This repository follows a **one-service-per-folder** structure: each
 microservice (`user-service/`, `supplier-service/`, `order-service/`,
-`credit-service/`, `schedule-order/`) lives in its own top-level folder.
+`credit-service/`) lives in its own top-level folder. `schedule-order/` is a separate source module embedded in Order.
 
 ```text
 .
@@ -269,6 +269,26 @@ Smoke setup waits up to 65 seconds for initial wallet allocation after successfu
 
 ### Scheduled orders
 
-The main [Orders page](http://localhost:3000/orders) links to [Schedule order](http://localhost:3000/orders/schedule). The backend runs independently in `schedule-order/` with its own PostgreSQL database. Order's initializer also initializes its generated environment without replacing existing settings. The gateway starts and routes the service with the rest of the application.
+The main [Orders page](http://localhost:3000/orders) links to [Schedule order](http://localhost:3000/orders/schedule). The backend stays in `schedule-order/` as an embedded Order module. Order serves its routes and workers from the same container and database. Existing installations require the offline data cutover documented in the module README.
 
-See [Schedule Order setup/recovery](schedule-order/README.md), [API](schedule-order/API.md) and [requirements](schedule-order/spec.md). Its isolated check is `docker compose --profile test run --build --rm schedule-tests`. Accepted regular and scheduled orders share a three-order courier cap; scheduled requests transfer asynchronously to Order Service on acceptance.
+See [Schedule Order setup/recovery](schedule-order/README.md), [API](schedule-order/API.md) and [requirements](schedule-order/spec.md). Its isolated check is `docker compose --profile test run --build --rm schedule-tests`. Accepted regular and scheduled orders share a three-order courier cap; scheduled acceptance uses a durable event consumer within Order Service.
+
+## Local price suggestions
+
+Run `sh scripts/start.sh` and open `http://localhost:3000/orders`. The startup
+script now also applies `compose.pricing.yaml`, which adds private Pricing and
+its database. Suggestions update as pickup, delivery and added-item
+quantities change. Use suggestion explicitly selects the recommended offer.
+The local-only policy uses synthetic route distances for UI testing.
+Plain root Compose and EC2 deployment do not enable this demo package. See
+[Order integration](order-service/README.md#live-price-suggestions) for behaviour
+and [Pricing](order_pricing/README.md#local-order-form-integration) for limitations.
+
+Price suggestions need no expiry input and update automatically every 30 seconds
+while the immediate-order editor is visible. The manual suggestion-refresh button
+has been removed; expiry remains required only for actual order creation.
+
+Pricing now has an EC2 runtime image and deployment wiring alongside its existing
+CI checks. Cloud activation requires the Pricing ECR repository/access and an
+explicit `PRICING_POLICY_PACKAGE` repository variable selecting a committed,
+validated policy package. See [deployment prerequisites](docs/aws-deployment-notes.md#pricing-release-wiring).

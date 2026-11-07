@@ -115,6 +115,7 @@ func (a *App) Handler() http.Handler {
 		return nil
 	}))
 	mux.HandleFunc("POST /api/v1/orders", a.endpoint(a.protected(a.create)))
+	mux.HandleFunc("POST /api/v1/orders/price-quotes", a.endpoint(a.quoteBudget(a.protected(a.priceQuote))))
 	mux.HandleFunc("POST /api/v1/orders/items/add", a.endpoint(a.protected(a.addItem)))
 	mux.HandleFunc("GET /api/v1/orders/session", a.endpoint(a.protected(a.session)))
 	mux.HandleFunc("GET /api/v1/orders/stream", a.endpoint(a.protected(a.streamOrders)))

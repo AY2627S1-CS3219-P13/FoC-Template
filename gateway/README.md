@@ -1,9 +1,9 @@
 # Shared gateway
 
-Nginx routes browser requests to User, Supplier, Credit, Order, Schedule Order and the frontend
+Nginx routes browser requests to User, Supplier, Credit, Order and the frontend
 using their normal service names on the existing Compose network.
 
-`/api/v1/scheduled-orders` routes to the independent Schedule Order Service with
+`/api/v1/scheduled-orders` routes to the embedded scheduling module in Order with
 the same 1 MiB request limit as Order. `/orders/schedule` is a child page served
 by the main Order frontend. Order's scheduled-import listener stays private on
 container port 8081; the gateway continues rejecting every `/internal` path.
@@ -79,3 +79,5 @@ limit shared across two client IPs. The unique pending signup fixture and client
 are removed on exit; no admin promotion or bootstrap claim is needed by this check.
 User's backend suite separately checks removal of the shared proxy-address quota,
 retained account limits and password-work capacity.
+
+Scheduled-order API routes are proxied to Order Service, which embeds the backend module from `schedule-order/`. No standalone Schedule backend is required.

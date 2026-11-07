@@ -1,7 +1,7 @@
 import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: ".",
-  testMatch: ["browser.spec.mjs", "capacity.spec.mjs", "schedule.spec.mjs", "alerts.spec.mjs"],
+  testMatch: ["browser.spec.mjs", "capacity.spec.mjs", "schedule.spec.mjs", "pricing.spec.mjs", "alerts.spec.mjs"],
   workers: 1,
   use: {
     baseURL: process.env.ORDER_UI_URL || "http://order-ui-fixture:8080",

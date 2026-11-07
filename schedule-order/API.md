@@ -1,5 +1,7 @@
 # Schedule Order API
 
+These routes are served by Order Service. Scheduling is an embedded module; all public paths and response semantics remain unchanged.
+
 Public routes use the current User session cookie, never browser-supplied actor IDs. Mutations require the configured exact Origin, JSON, and creation requires a requester-scoped `Idempotency-Key` (1–128 characters, no surrounding whitespace/control characters). Errors use `{"error":{"code","message"}}`. There is no editing route.
 
 | Method/path | Result |
@@ -10,7 +12,7 @@ Public routes use the current User session cookie, never browser-supplied actor 
 | `GET /api/v1/scheduled-orders/slots?date=2030-11-04&pickupType=location&pickupId=com2&deliveryType=location&deliveryId=utown` | `{slots:[RFC3339 start,...]}` filtered against notice and both places' full-window hours |
 | `GET /api/v1/scheduled-orders/{id}` | Authorized snapshot; transferred records redirect to Order's protected detail route |
 | `POST /api/v1/scheduled-orders/{id}/actions` | `{"action":"accept"}` returns 202 transfer pending; `{"action":"cancel"}` returns 200 with refund intent |
-| `GET /healthz`, `GET /readyz` | Liveness / Schedule database readiness |
+| `GET /healthz`, `GET /readyz` | Combined Order process liveness / database readiness |
 
 Creation body:
 
@@ -32,10 +34,8 @@ After transfer, an identical creation retry uses **303 See Other** to `/api/v1/o
 
 While cleanup of an uncertain reservation or failed save remains unresolved, retries return 503 `creation_cleanup_pending` and must keep the same key. Only after Credit confirms the abort fence does a retry return 409 `creation_abandoned`, allowing a fresh attempt. Neither response claims successful scheduling.
 
-## Private Order import contract
+## Internal acceptance events
 
-Order listens on container port 8081. Schedule sends `PUT /internal/v1/scheduled-orders/{transferId}` with `Authorization: Bearer <SCHEDULE_INTERNAL_TOKEN>`, JSON and the immutable fields above plus `id`, `requesterId`, `courierId`, derived `expiresAt`. Order configuration calls this credential `ORDER_SCHEDULE_INTERNAL_TOKEN`. It is distinct from User/Supplier/Credit credentials. Schedule constructs identities from its validated command and stored requester, never from browser actor fields. This is a durable delegated command; no session cookie is retained or replayed by the worker.
+Acceptance commits `ScheduledOrderAcceptanceRequested` (schema 1) to `schedule_events` alongside pending state. The event identity is the stable transfer ID; its schedule reference points to immutable stored request/courier data. The private `workflow-schedule-acceptance` consumer resolves Supplier dependencies before its SQL transaction and applies Order's import using that same transaction. Import, assignment, lifecycle events, transfer state and receipt commit atomically. Transient failures leave pending work and sanitized retry metadata; definitive rejections are persisted. The public API still returns 202 pending, and transferred details/creation retries retain their 307/303 redirects.
 
-The transfer ID is stable for one acceptance attempt. Order stores the normalized complete payload fingerprint and a durable outcome. It returns 200 `{outcome:"accepted"}` or `{outcome:"rejected",reason:"courier_busy"|"order_expired"|"invalid_place"|"place_closed"|"order_already_imported"}`. Replays return the stored outcome, even if the accepted order later progresses or capacity subsequently frees. Changed payload under the same transfer ID conflicts with 409. Dependency failures return 503 without a definitive outcome and must be retried with the same ID. Missing/incorrect credentials return 401; malformed data returns 400. HTTP failure or lost response is not a rejection.
-
-Schedule fences cancellation/expiry while a transfer is unresolved, retries/reconciles it, and releases control only after a definitive outcome. Order atomically checks the shared three-slot cap and imports the accepted assignment before the original window end. No wallet reservation occurs during import. The local creation journal and acceptance event commit in the same transaction; consumers see only the committed final assignment. Subsequent public actions use `/api/v1/orders/{id}/actions`.
+The previous authenticated private HTTP import adapter remains available for compatibility and existing regression coverage, with `ORDER_SCHEDULE_INTERNAL_TOKEN` if explicitly configured. The embedded module does not call it or require this token. It uses the same durable `scheduled_imports` outcome records, so pending legacy transfers can safely replay after offline migration. This adapter is never routed through the gateway.
