@@ -200,6 +200,10 @@ older than 7 days.
   `PUT /alerts`.
 - **Turn off on this device** unsubscribes the browser and deletes its row; when
   it was the last device, the account preference is switched off too.
+- The saved preference fills the location and radius until the courier changes
+  them, even when this browser has a different **Start from**. Browsers can drop
+  a subscription themselves (site permission reset, "turn off" from a
+  notification); the two-second refresh notices it and offers to turn alerts on again.
 - The panel shows clear states: unsupported browser, insecure origin,
   permission blocked (with how to re-enable), service unavailable, on for this
   device, and on for the account but not this device.

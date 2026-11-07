@@ -122,6 +122,23 @@ test("a courier turns nearby alerts on, changes them and turns them off on this 
   await expect(page.locator("#alerts-enable")).toBeVisible();
 });
 
+test("a subscription the browser drops is noticed without a reload", async ({ page }) => {
+  await stubPush(page);
+  await start(page);
+  await page.getByRole("button", { name: "Help a friend", exact: true }).click();
+  await page.locator("#alerts-location").selectOption("central-library");
+  await page.locator("#alerts-radius").selectOption("500");
+  await page.locator("#alerts-enable").click();
+  await expect(page.locator("#alerts-state")).toHaveText("On for this device · within 500 m of Central Library");
+  // Chrome discards subscriptions when site permission is reset or turned off
+  // from a notification; the stub models that by forgetting its subscription.
+  await page.evaluate(() => localStorage.removeItem("ui-test-push-subscription"));
+  await expect(page.locator("#alerts-state")).toContainText("On for another of your devices", { timeout: 6000 });
+  await expect(page.locator("#alerts-enable")).toBeVisible();
+  await page.locator("#alerts-enable").click();
+  await expect(page.locator("#alerts-state")).toHaveText("On for this device · within 500 m of Central Library");
+});
+
 test("blocked notifications explain how to recover and keep alerts off", async ({ page }) => {
   await stubPush(page);
   await page.addInitScript(() => Object.defineProperty(Notification, "permission", { get: () => "denied" }));
@@ -145,6 +162,8 @@ test("a server without push says alerts are unavailable", async ({ page }) => {
 
 test("another device's alerts are reported, and other views hide the panel", async ({ page }) => {
   await stubPush(page);
+  // This browser's Start from must not replace the account's saved alert location.
+  await page.addInitScript(() => localStorage.setItem("foc-orders-start-from", "central-library"));
   await page.route("**/api/v1/orders/alerts", (route) =>
     route.fulfill({
       json: { pushAvailable: true, vapidPublicKey: "B".padEnd(87, "A"), preference: { enabled: true, locationId: "com2", radiusMeters: 200 }, devices: 1 },
@@ -153,7 +172,14 @@ test("another device's alerts are reported, and other views hide the panel", asy
   await start(page);
   await page.getByRole("button", { name: "Help a friend", exact: true }).click();
   await expect(page.locator("#alerts-state")).toContainText("On for another of your devices");
+  await expect(page.locator("#open-from")).toHaveValue("central-library");
   await expect(page.locator("#alerts-location")).toHaveValue("com2");
+  // Until the courier picks another location, refreshed settings keep the saved one.
+  await page.locator("#reload-list").click();
+  await expect(page.locator("#alerts-location")).toHaveValue("com2");
+  await page.locator("#alerts-location").selectOption("central-library");
+  await page.locator("#reload-list").click();
+  await expect(page.locator("#alerts-location")).toHaveValue("central-library");
   await expect(page.locator("#alerts-radius")).toHaveValue("200");
   await page.getByRole("button", { name: "My deliveries", exact: true }).click();
   await expect(page.locator("#alerts-panel")).toBeHidden();

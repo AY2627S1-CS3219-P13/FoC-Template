@@ -429,7 +429,7 @@ function pickupDistance(order) {
 // Nearby alerts (Web Push). The server keeps one preference per account; each
 // browser keeps its own push subscription, registered with the server.
 const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
-const noAlerts = (revision) => ({ loaded: false, busy: false, pushAvailable: false, key: null, preference: null, devices: 0, subscription: null, radiusTouched: false, revision });
+const noAlerts = (revision) => ({ loaded: false, busy: false, pushAvailable: false, key: null, preference: null, devices: 0, subscription: null, locationTouched: false, radiusTouched: false, revision });
 let alerts = noAlerts(0);
 async function alertRegistration(register = false) {
   if (!register) return navigator.serviceWorker.getRegistration("/orders/");
@@ -469,7 +469,7 @@ function alertMessage(text) {
 }
 function fillAlertLocations() {
   const select = $("alerts-location"),
-    wanted = select.value || alerts.preference?.locationId || $("open-from").value;
+    wanted = (!alerts.locationTouched && alerts.preference?.locationId) || select.value || $("open-from").value;
   select.replaceChildren(new Option("Choose a location", ""));
   for (const place of places.filter(placeable)) select.append(new Option(place.name, place.id));
   select.value = places.some((p) => placeable(p) && p.id === wanted) ? wanted : "";
@@ -493,7 +493,7 @@ function renderAlerts() {
       ? `On for this device · ${radiusLabel(preference.radiusMeters)} of ${where.name}`
       : state.message;
   $("alerts-panel").dataset.state = alerts.loaded ? state.key : "loading";
-  if (preference && !$("alerts-location").value) fillAlertLocations();
+  if (preference && !alerts.locationTouched && $("alerts-location").value !== preference.locationId) fillAlertLocations();
   if (preference && !alerts.radiusTouched) $("alerts-radius").value = String(preference.radiusMeters);
   const usable = alerts.loaded && ["on", "off", "elsewhere"].includes(state.key);
   $("alerts-location").disabled = $("alerts-radius").disabled = !usable || alerts.busy;
@@ -509,7 +509,7 @@ async function savePreference(enabled) {
     body: JSON.stringify({ enabled, locationId: $("alerts-location").value, radiusMeters: Number($("alerts-radius").value) }),
   });
   alerts.preference = data.preference;
-  alerts.radiusTouched = false;
+  alerts.locationTouched = alerts.radiusTouched = false;
 }
 async function alertAction(work) {
   if (alerts.busy) return;
@@ -1234,6 +1234,16 @@ $("next").addEventListener("click", () => {
   void loadList();
 });
 let ticking = false;
+async function checkAlertDevice() {
+  if (view !== "open" || !alerts.loaded || alerts.busy || !alerts.subscription) return;
+  const known = alerts.subscription.endpoint;
+  try {
+    const current = await (await alertRegistration())?.pushManager.getSubscription();
+    if (current?.endpoint !== known && alerts.subscription?.endpoint === known) await loadAlerts();
+  } catch {
+    // Unavailable now; the next tick checks again.
+  }
+}
 async function tick() {
   if (document.hidden) return;
   // Each list request validates its own session. A slow session/catalogue
@@ -1241,6 +1251,7 @@ async function tick() {
   if (user) {
     void loadList();
     if (view !== "create") void syncDetail();
+    void checkAlertDevice();
   }
   if (ticking) return;
   ticking = true;
@@ -1272,7 +1283,10 @@ $("open-from").addEventListener("change", () => {
   void loadList();
 });
 $("request-filter").addEventListener("change", () => setView("mine"));
-$("alerts-location").addEventListener("change", renderAlerts);
+$("alerts-location").addEventListener("change", () => {
+  alerts.locationTouched = true;
+  renderAlerts();
+});
 $("alerts-radius").addEventListener("change", () => {
   alerts.radiusTouched = true;
   renderAlerts();
