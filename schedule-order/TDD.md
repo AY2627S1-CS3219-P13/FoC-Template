@@ -26,3 +26,7 @@ The initial service red baselines were compile failures for absent APIs, not beh
 An overloaded parallel runtime build caused timing failures and an overall timeout in an intermediate Order run, plus a browser-fixture startup failure. That build was cancelled and images built serially; existing timing assertions were preserved. The isolated full Order run and final browser rerun above passed. AWS resources were not provisioned or deployed.
 
 Final failed-save retry review: the extended test failed because unresolved cleanup returned 409 creation_abandoned. It now returns 503 creation_cleanup_pending until Credit's abort fence is confirmed, preserving the same-key retry flow; confirmed abandonment still returns 409 afterward. The complete Schedule check suite then passed (race tests: 1.910 seconds), and the final runtime readiness check returned ready.
+
+## Embedded event migration (7 November 2026)
+
+Scheduling now uses a durable journal in Order's database. Added regression coverage for atomic event/pending-state writes, effect/receipt rollback, concurrent replay and legacy copy/refusal to overwrite. Existing scheduling failure/financial tests explicitly drive both consumers and recovery. Original HTTP fake responses remain test-only fault injection; production scheduling has no Order HTTP client. Container validation results are reported in the implementation chat.

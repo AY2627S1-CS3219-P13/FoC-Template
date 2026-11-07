@@ -86,8 +86,8 @@ assert.equal((await action(requester, cancelled.id, 'cancel')).status, 'cancelle
 await until(async () => { const w = await wallet(requester); return w.available === 70 && w.reserved === 0; }, 'Real Credit refund did not complete');
 assert.equal((await history(requester)).filter(t => t.kind === 'release' && t.orderId === cancelled.id).length, 1);
 console.log('PASS: repeated cancellation produces exactly one refund');
-// Scheduled creation and asynchronous ownership transfer use the real separate
-// Schedule database/runtime, Order's private import listener and Credit escrow.
+// Scheduled creation and asynchronous acceptance use the embedded Schedule module,
+// its durable event consumer in Order's database and real Credit escrow.
 const locations=places.filter(p=>p.type==='location');
 assert(locations.length>=2);
 const dateParts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Singapore',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(Date.now()+86400000));

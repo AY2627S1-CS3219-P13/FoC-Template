@@ -3,11 +3,4 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-FROM development AS build
-RUN CGO_ENABLED=0 go build -trimpath -o /schedule-order ./cmd/server
-FROM debian:bookworm-slim AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=build /schedule-order /usr/local/bin/schedule-order
-USER 10001:10001
-EXPOSE 8080
-ENTRYPOINT ["schedule-order"]
+CMD ["sh", "scripts/check.sh"]

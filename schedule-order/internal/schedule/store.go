@@ -20,7 +20,7 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(321912)"); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, "CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY)"); err != nil {
+	if _, err = tx.Exec(ctx, "CREATE TABLE IF NOT EXISTS schedule_schema_migrations (name text PRIMARY KEY)"); err != nil {
 		return err
 	}
 	files, err := migrations.ReadDir("migrations")
@@ -30,7 +30,7 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	sort.Slice(files, func(i, j int) bool { return files[i].Name() < files[j].Name() })
 	for _, file := range files {
 		var exists bool
-		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name=$1)", file.Name()).Scan(&exists); err != nil {
+		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schedule_schema_migrations WHERE name=$1)", file.Name()).Scan(&exists); err != nil {
 			return err
 		}
 		if exists {
@@ -43,7 +43,7 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 		if _, err = tx.Exec(ctx, string(data)); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, "INSERT INTO schema_migrations(name) VALUES($1)", file.Name()); err != nil {
+		if _, err = tx.Exec(ctx, "INSERT INTO schedule_schema_migrations(name) VALUES($1)", file.Name()); err != nil {
 			return err
 		}
 	}

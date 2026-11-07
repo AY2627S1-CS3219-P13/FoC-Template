@@ -1,7 +1,7 @@
 # Repository guidance
 
 Friend on Campus (FoC) is a microservice project: one service per top-level
-folder, a Next.js frontend and a shared Nginx gateway. Each service has its own
+folder (except `schedule-order/`, an embedded Order module sharing its database), a Next.js frontend and a shared Nginx gateway. Each service has its own
 `AGENTS.md` with service-specific rules — read it before touching that folder.
 
 ## Container-first

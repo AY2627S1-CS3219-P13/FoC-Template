@@ -76,7 +76,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        service: [user-service, supplier-service, credit-service, order-service, schedule-order, pricing-service, frontend, gateway]
+        service: [user-service, supplier-service, credit-service, order-service, pricing-service, frontend, gateway]
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
       ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
@@ -131,6 +131,8 @@ jobs:
             git ls-files --error-unmatch -- "order_pricing/$PRICING_POLICY_PACKAGE/manifest.json" > /dev/null
             set -- --file order_pricing/serving/Dockerfile --target runtime \
               --build-arg "POLICY_PACKAGE=$PRICING_POLICY_PACKAGE" ./order_pricing
+          elif [ "$SERVICE" = order-service ]; then
+            set -- --file order-service/Dockerfile .
           else
             set -- "./$SERVICE"
           fi
