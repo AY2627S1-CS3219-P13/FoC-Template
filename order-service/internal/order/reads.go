@@ -266,9 +266,25 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) error {
 // Refresh every eligible row, not just the selected card. Resolve each place once
 // per snapshot using this request's session; no authentication is cached.
 func (a *App) openOrders(w http.ResponseWriter, r *http.Request) error {
-	ordering := r.URL.Query().Get("sort")
-	if ordering != "" && ordering != "expiry" && ordering != "credits" {
-		return problem(400, "invalid_sort", "Choose expiry or credits.")
+	ordering, from := r.URL.Query().Get("sort"), r.URL.Query().Get("from")
+	if ordering != "" && ordering != "expiry" && ordering != "credits" && ordering != "distance" {
+		return problem(400, "invalid_sort", "Choose expiry, credits or distance.")
+	}
+	if ordering == "distance" && from == "" {
+		return problem(400, "starting_location_required", "Choose a starting campus location to sort by distance.")
+	}
+	cookie, _ := r.Cookie(a.cfg.SessionCookie)
+	// A starting location adds distances under any sort; it never filters the list.
+	var start *Coordinate
+	var coordinates map[string]*Coordinate
+	if from != "" {
+		var err error
+		if coordinates, err = a.locator.Coordinates(r.Context(), cookie.Value); err != nil {
+			return err
+		}
+		if start = coordinates[from]; start == nil {
+			return problem(400, "invalid_location", "Choose a starting location from the campus list.")
+		}
 	}
 	rows, err := a.db.Query(r.Context(), "SELECT "+orderColumns+" FROM orders WHERE status='open' AND requester_id<>$1 AND expires_at>$2 ORDER BY id", actor(r), a.now())
 	if err != nil {
@@ -287,7 +303,6 @@ func (a *App) openOrders(w http.ResponseWriter, r *http.Request) error {
 	if err = rows.Err(); err != nil {
 		return err
 	}
-	cookie, _ := r.Cookie(a.cfg.SessionCookie)
 	resolved, missing, err := a.snapshotPlaces(r.Context(), observed, cookie.Value)
 	if err != nil {
 		return err
@@ -305,19 +320,34 @@ func (a *App) openOrders(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	defer rows.Close()
-	result := []Order{}
+	result := []openOrder{}
 	for rows.Next() {
 		o, err := scanOrder(rows)
 		if err != nil {
 			return err
 		}
-		result = append(result, o)
+		entry := openOrder{Order: o}
+		// Pickups whose location has no coordinates keep a nil distance.
+		if pickup := coordinates[pickupLocationID(o)]; start != nil && pickup != nil {
+			d := distanceMeters(*start, *pickup)
+			entry.PickupDistanceMeters = &d
+		}
+		result = append(result, entry)
 	}
 	if err = rows.Err(); err != nil {
 		return err
 	}
 	sort.Slice(result, func(i, j int) bool {
 		x, y := result[i], result[j]
+		if ordering == "distance" {
+			dx, dy := x.PickupDistanceMeters, y.PickupDistanceMeters
+			if (dx == nil) != (dy == nil) {
+				return dx != nil
+			}
+			if dx != nil && *dx != *dy {
+				return *dx < *dy
+			}
+		}
 		if ordering == "credits" && x.OfferedCredits != y.OfferedCredits {
 			return x.OfferedCredits > y.OfferedCredits
 		}

@@ -61,6 +61,7 @@ Log in again after promotion. Supplier enforces permissions independently on eve
 - Database constraints enforce allowed categories, controlled locations and case-insensitive active-name uniqueness at a location, including concurrent writes.
 - Numbered migrations run in a transaction under an advisory lock. Seed migration imports all 21 records from the repository CSV once; restarts do not reinsert records or undo admin edits.
 - Seed normalization maps `Shopping` to `retail`, `Food/Coffee` to `food`, `Com 2`/`Com2` to `COM2`, and curly apostrophes in building names to straight apostrophes. Location means building in this skeleton; floor and pickup directions are stored in the description.
+- Migration `004_location_coordinates.sql` gives every campus location a required latitude/longitude: the mean of its seed suppliers' CSV coordinates. Engineering Block E3's CSV longitude is about 2 km off campus, so E3 reuses the adjacent E4 longitude as an estimate. New locations must supply both values.
 
 See [API.md](API.md) for request/response contracts. `internal/supplier/auth.go` is the User integration; `http.go` owns routes and middleware; `suppliers.go` owns CRUD; `catalogue.go` owns server queries; `store.go` applies migrations; `cmd/server/main.go` owns startup/shutdown.
 

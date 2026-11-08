@@ -1,6 +1,10 @@
 package order
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/x509"
+	"encoding/base64"
 	"errors"
 	"net/url"
 	"os"
@@ -16,6 +20,42 @@ type Config struct {
 	UserServiceURL, UserServiceToken                         string
 	SupplierServiceURL, CreditServiceURL, CreditServiceToken string
 	DependencyTimeout, RecoveryInterval, RecoveryStaleAfter  time.Duration
+	// Nearby alerts are enabled only when both VAPID values are configured.
+	VAPIDKey     *ecdsa.PrivateKey
+	VAPIDSubject string
+}
+
+// loadVAPID accepts a base64 PKCS#8 DER P-256 key and a mailto:/https: contact.
+func loadVAPID(rawKey, subject string) (*ecdsa.PrivateKey, error) {
+	if rawKey == "" && subject == "" {
+		return nil, nil
+	}
+	invalid := errors.New("set ORDER_VAPID_PRIVATE_KEY to a base64 PKCS#8 P-256 key and ORDER_VAPID_SUBJECT to a mailto: or https: contact")
+	der, err := base64.StdEncoding.DecodeString(rawKey)
+	if err != nil {
+		return nil, invalid
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(der)
+	key, ok := parsed.(*ecdsa.PrivateKey)
+	if err != nil || !ok || key.Curve != elliptic.P256() {
+		return nil, invalid
+	}
+	if !validVAPIDSubject(subject) {
+		return nil, invalid
+	}
+	return key, nil
+}
+
+func validVAPIDSubject(subject string) bool {
+	if len(subject) > 256 || strings.ContainsAny(subject, " \t\r\n") {
+		return false
+	}
+	if address, ok := strings.CutPrefix(subject, "mailto:"); ok {
+		local, domain, found := strings.Cut(address, "@")
+		return found && local != "" && strings.Contains(domain, ".") && !strings.ContainsAny(domain, "@/?#")
+	}
+	u, err := url.Parse(subject)
+	return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.Fragment == ""
 }
 
 func LoadConfig() (Config, error) {
@@ -42,6 +82,16 @@ func LoadConfig() (Config, error) {
 		u, err := url.Parse(c.SupplierInternalURL)
 		if !validSecret(c.SupplierInternalToken) || err != nil || u.Hostname() == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
 			return c, errors.New("configure a valid ORDER_SUPPLIER_INTERNAL_URL and separate service token")
+		}
+	}
+	var err error
+	if c.VAPIDKey, err = loadVAPID(os.Getenv("ORDER_VAPID_PRIVATE_KEY"), os.Getenv("ORDER_VAPID_SUBJECT")); err != nil {
+		return c, err
+	}
+	if c.VAPIDKey != nil {
+		c.VAPIDSubject = os.Getenv("ORDER_VAPID_SUBJECT")
+		if c.SupplierInternalURL == "" {
+			return c, errors.New("nearby alerts need ORDER_SUPPLIER_INTERNAL_URL and its service token")
 		}
 	}
 	if c.DatabaseURL == "" {

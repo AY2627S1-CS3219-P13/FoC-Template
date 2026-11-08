@@ -537,12 +537,46 @@ dd {
 }
 .list-toolbar {
   display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
 }
 .list-toolbar p {
   margin: 0;
+}
+/* Nearby alerts sit above the open-errand toolbar. */
+.alerts-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  justify-content: space-between;
+  align-items: end;
+  padding: 18px 20px;
+  margin-bottom: 18px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.alerts-panel[hidden] {
+  display: none;
+}
+.alerts-panel h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+.alerts-panel p {
+  margin: 0;
+}
+.alerts-panel .error {
+  flex-basis: 100%;
+}
+.alerts-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
 }
 .list-grid {
   display: grid;
@@ -577,6 +611,11 @@ dd {
 }
 .order-card .pill {
   margin-right: 10px;
+}
+.order-card .distance {
+  display: block;
+  margin-top: 8px;
+  font-weight: 600;
 }
 .detail {
   position: sticky;

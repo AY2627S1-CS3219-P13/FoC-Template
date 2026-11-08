@@ -24,6 +24,8 @@ const (
 	testSupplierID     = "22222222-2222-4222-8222-222222222222"
 	inactiveSupplierID = "33333333-3333-4333-8333-333333333333"
 	secondSupplierID   = "44444444-4444-4444-8444-444444444444"
+
+	testSupplierInternalToken = "supplier-internal-token-for-tests-1234"
 )
 
 type fakeDependencies struct {
@@ -68,12 +70,22 @@ func (f *fakeDependencies) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, Identity{UserID: testUserID, Roles: []string{"user"}, ExpiresAt: time.Now().Add(time.Hour)})
-	case r.URL.Path == "/api/v1/locations":
-		if cookie, _ := r.Cookie("foc_session"); cookie == nil {
+	case r.URL.Path == "/api/v1/locations" || r.URL.Path == "/internal/v1/locations":
+		if cookie, _ := r.Cookie("foc_session"); r.URL.Path == "/api/v1/locations" && cookie == nil {
 			w.WriteHeader(401)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"locations": []map[string]string{{"id": "com2", "name": "COM2"}, {"id": "utown", "name": "UTown"}}})
+		if r.URL.Path == "/internal/v1/locations" && r.Header.Get("Authorization") != "Bearer "+testSupplierInternalToken {
+			w.WriteHeader(401)
+			return
+		}
+		// Annex deliberately has no coordinates, like a location from an older catalogue.
+		writeJSON(w, 200, map[string]any{"locations": []map[string]any{
+			{"id": "com2", "name": "COM2", "latitude": 1.293925, "longitude": 103.774153},
+			{"id": "utown", "name": "UTown", "latitude": 1.304, "longitude": 103.7735},
+			{"id": "central-library", "name": "Central Library", "latitude": 1.296558, "longitude": 103.773111},
+			{"id": "annex", "name": "Annex"},
+		}})
 	case r.URL.Path == "/api/v1/suppliers":
 		writeJSON(w, 200, map[string]any{"suppliers": []map[string]any{{"id": testSupplierID, "name": "Campus Cafe", "locationId": "com2", "description": "Level 1", "openingHours": "09:00-17:00", "active": true}}, "page": 1, "pageSize": 100, "total": 1, "totalPages": 1})
 	case strings.HasPrefix(r.URL.Path, "/api/v1/suppliers/"):

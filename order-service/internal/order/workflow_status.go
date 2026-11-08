@@ -15,7 +15,7 @@ type consumerStatus struct {
 
 func (a *App) workflowStatus(ctx context.Context) (map[string]any, error) {
 	consumers := []consumerStatus{}
-	for _, name := range []string{timerConsumer, settlementConsumer, publicationConsumer} {
+	for _, name := range []string{timerConsumer, settlementConsumer, publicationConsumer, nearbyAlertConsumer} {
 		s := consumerStatus{Consumer: name}
 		err := a.db.QueryRow(ctx, `SELECT count(*),count(r.event_id),min(e.created_at) FROM order_events e
  LEFT JOIN workflow_retries r ON r.consumer_name=$1 AND r.event_id=e.event_id
@@ -37,7 +37,11 @@ func (a *App) workflowStatus(ctx context.Context) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"consumers": consumers, "timers": timers, "dueTimers": due, "overdueTimers": due, "failedTimers": failedTimers, "pendingRefunds": refunds, "pendingPayouts": payouts, "failedRefunds": failedRefunds, "failedPayouts": failedPayouts, "legacyUninitialized": legacy}, nil
+	push, err := a.pushStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"pushDeliveries": push, "consumers": consumers, "timers": timers, "dueTimers": due, "overdueTimers": due, "failedTimers": failedTimers, "pendingRefunds": refunds, "pendingPayouts": payouts, "failedRefunds": failedRefunds, "failedPayouts": failedPayouts, "legacyUninitialized": legacy}, nil
 }
 
 func financialCategory(err error) string {

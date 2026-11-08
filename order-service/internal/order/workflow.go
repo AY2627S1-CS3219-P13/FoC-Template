@@ -18,8 +18,15 @@ const (
 // transaction lock, receipt and retry record; another consumer cannot ack it.
 // Missing-receipt discovery is commit-safe even when older inserts commit late.
 func (a *App) ConsumeWorkflow(ctx context.Context, consumer string) error {
+	var coordinates map[string]*Coordinate
 	switch consumer {
 	case timerConsumer, settlementConsumer, publicationConsumer:
+	case nearbyAlertConsumer:
+		// Network reads stay outside workflow transactions; events wait if Supplier is down.
+		var err error
+		if coordinates, err = a.alertSnapshot(ctx); err != nil {
+			return err
+		}
 	default:
 		return errors.New("unknown workflow consumer")
 	}
@@ -52,7 +59,7 @@ func (a *App) ConsumeWorkflow(ctx context.Context, consumer string) error {
 		}
 		progressed := false
 		for _, id := range ids {
-			done, err := a.consumeOrder(ctx, consumer, id)
+			done, err := a.consumeOrder(ctx, consumer, id, coordinates)
 			failures = errors.Join(failures, err)
 			progressed = progressed || done
 			budget--
@@ -64,7 +71,7 @@ func (a *App) ConsumeWorkflow(ctx context.Context, consumer string) error {
 	return failures
 }
 
-func (a *App) consumeOrder(ctx context.Context, consumer, id string) (bool, error) {
+func (a *App) consumeOrder(ctx context.Context, consumer, id string, coordinates map[string]*Coordinate) (bool, error) {
 	tx, err := a.db.Begin(ctx)
 	if err != nil {
 		return false, err
@@ -113,6 +120,8 @@ func (a *App) consumeOrder(ctx context.Context, consumer, id string) (bool, erro
 			err = settleEvent(ctx, effect, e)
 		case publicationConsumer:
 			err = publishEvent(ctx, effect, e.ID)
+		case nearbyAlertConsumer:
+			err = matchNearby(ctx, effect, e, coordinates)
 		}
 	}
 	if err == nil {

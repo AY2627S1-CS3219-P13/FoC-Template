@@ -9,6 +9,15 @@ import {
   creationKey,
   newestFirst,
   scheduledHistoryPage,
+  distanceMeters,
+  pickupLocationId,
+  formatDistance,
+  openComparator,
+  alertState,
+  radiusLabel,
+  base64UrlBytes,
+  subscriptionBody,
+  deepLink,
 } from "/orders/core.mjs";
 
 // The server rotates the event stream every 8s, so a stream error alone is not
@@ -123,7 +132,9 @@ async function api(path, options = {}) {
     headers: { "Content-Type": "application/json", ...options.headers },
     signal: options.signal ?? AbortSignal.timeout(18000),
   });
-  const data = decodeJSON(await response.text());
+  // 204 No Content (alert subscription changes) has an empty body.
+  const text = await response.text();
+  const data = text ? decodeJSON(text) : {};
   if (!response.ok) {
     const error = new Error(
       data.error?.message || "The request could not be confirmed.",
@@ -206,6 +217,10 @@ function clearSessionUI() {
   $("account-balance").textContent = "";
   places = [];
   placesReady = false;
+  alerts = noAlerts(alerts.revision + 1);
+  $("alerts-panel").hidden = true;
+  $("alerts-location").replaceChildren();
+  alertMessage("");
   draft = emptyDraft();
   attempt = null;
   pending = {};
@@ -381,6 +396,9 @@ async function loadPlaces() {
     }
     places = loaded;
     placesReady = true;
+    fillStartingLocations();
+    fillAlertLocations();
+    renderAlerts();
     for (const id of ["pickup", "delivery"]) {
       const select = $(id);
       select.replaceChildren(new Option(`Choose ${id}`, ""));
@@ -408,6 +426,197 @@ async function loadPlaces() {
     }
   }
 }
+// The courier's starting point is a per-browser convenience, kept across reloads.
+const FROM_KEY = "foc-orders-start-from";
+function savedStart() {
+  try {
+    return localStorage.getItem(FROM_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+function saveStart(value) {
+  try {
+    if (value) localStorage.setItem(FROM_KEY, value);
+    else localStorage.removeItem(FROM_KEY);
+  } catch {
+    // Storage may be blocked; the selection still applies to this page.
+  }
+}
+const placeable = (p) => p.type === "location" && typeof p.latitude === "number" && typeof p.longitude === "number";
+function startingLocation() {
+  const id = $("open-from").value;
+  return id ? places.find((p) => placeable(p) && p.id === id) || null : null;
+}
+function fillStartingLocations() {
+  const select = $("open-from"),
+    wanted = select.value || savedStart();
+  select.replaceChildren(new Option("No starting location", ""));
+  for (const place of places.filter(placeable)) select.append(new Option(place.name, place.id));
+  select.value = places.some((p) => placeable(p) && p.id === wanted) ? wanted : "";
+  startingLocationChanged();
+  // Show restored distance labels now; the next poll also sends `from`.
+  if (view === "open") renderList();
+}
+// Nearest pickup needs a starting point; fall back to expiry when it is cleared.
+function startingLocationChanged() {
+  const hasStart = Boolean(startingLocation());
+  $("open-sort").querySelector('option[value="distance"]').disabled = !hasStart;
+  if (!hasStart && $("open-sort").value === "distance") $("open-sort").value = "expiry";
+}
+function pickupDistance(order) {
+  const start = startingLocation();
+  const pickup = start && places.find((p) => placeable(p) && p.id === pickupLocationId(order));
+  return pickup ? distanceMeters(start, pickup) : null;
+}
+// Nearby alerts (Web Push). The server keeps one preference per account; each
+// browser keeps its own push subscription, registered with the server.
+const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const noAlerts = (revision) => ({ loaded: false, busy: false, pushAvailable: false, key: null, preference: null, devices: 0, subscription: null, locationTouched: false, radiusTouched: false, revision });
+let alerts = noAlerts(0);
+async function alertRegistration(register = false) {
+  if (!register) return navigator.serviceWorker.getRegistration("/orders/");
+  const registration = await navigator.serviceWorker.register("/orders/sw.js", { scope: "/orders/" });
+  // This page is outside the worker's scope, so wait for activation directly.
+  const worker = registration.installing || registration.waiting;
+  if (!registration.active && worker)
+    await new Promise((resolve, reject) => {
+      worker.addEventListener("statechange", () => {
+        if (worker.state === "activated") resolve();
+        if (worker.state === "redundant") reject(new Error("The alert service could not start in this browser."));
+      });
+    });
+  return registration;
+}
+async function loadAlerts() {
+  if (!user) return;
+  const generation = epoch,
+    revision = ++alerts.revision;
+  try {
+    const data = await api("/alerts");
+    let subscription = null;
+    if (pushSupported() && window.isSecureContext) subscription = (await (await alertRegistration())?.pushManager.getSubscription()) || null;
+    if (generation !== epoch || revision !== alerts.revision) return;
+    alerts = { ...alerts, loaded: true, pushAvailable: data.pushAvailable, key: data.vapidPublicKey, preference: data.preference, devices: data.devices, subscription };
+    if (!alerts.busy) alertMessage("");
+  } catch (err) {
+    if (generation !== epoch || revision !== alerts.revision) return;
+    alerts.loaded = false;
+    alertMessage(err.status === 401 ? "" : "Alert settings could not be loaded. Use Refresh to try again.");
+  }
+  renderAlerts();
+}
+function alertMessage(text) {
+  $("alerts-message").textContent = text;
+  $("alerts-message").hidden = !text;
+}
+function fillAlertLocations() {
+  const select = $("alerts-location"),
+    wanted = (!alerts.locationTouched && alerts.preference?.locationId) || select.value || $("open-from").value;
+  select.replaceChildren(new Option("Choose a location", ""));
+  for (const place of places.filter(placeable)) select.append(new Option(place.name, place.id));
+  select.value = places.some((p) => placeable(p) && p.id === wanted) ? wanted : "";
+}
+function renderAlerts() {
+  $("alerts-panel").hidden = view !== "open" || !user;
+  const preference = alerts.preference;
+  const state = alertState({
+    supported: pushSupported(),
+    secure: window.isSecureContext,
+    permission: "Notification" in window ? Notification.permission : "default",
+    pushAvailable: alerts.pushAvailable,
+    preference,
+    subscribed: Boolean(alerts.subscription),
+    devices: alerts.devices,
+  });
+  const where = preference && places.find((p) => p.type === "location" && p.id === preference.locationId);
+  $("alerts-state").textContent = !alerts.loaded
+    ? "Checking alert settings…"
+    : state.key === "on" && where
+      ? `On for this device · ${radiusLabel(preference.radiusMeters)} of ${where.name}`
+      : state.message;
+  $("alerts-panel").dataset.state = alerts.loaded ? state.key : "loading";
+  if (preference && !alerts.locationTouched && $("alerts-location").value !== preference.locationId) fillAlertLocations();
+  if (preference && !alerts.radiusTouched) $("alerts-radius").value = String(preference.radiusMeters);
+  const usable = alerts.loaded && ["on", "off", "elsewhere"].includes(state.key);
+  $("alerts-location").disabled = $("alerts-radius").disabled = !usable || alerts.busy;
+  $("alerts-enable").hidden = state.key === "on";
+  $("alerts-enable").disabled = !usable || alerts.busy || !$("alerts-location").value;
+  $("alerts-save").hidden = $("alerts-disable").hidden = state.key !== "on";
+  $("alerts-save").disabled = alerts.busy || !$("alerts-location").value;
+  $("alerts-disable").disabled = alerts.busy;
+}
+async function savePreference(enabled) {
+  const data = await api("/alerts", {
+    method: "PUT",
+    body: JSON.stringify({ enabled, locationId: $("alerts-location").value, radiusMeters: Number($("alerts-radius").value) }),
+  });
+  alerts.preference = data.preference;
+  alerts.locationTouched = alerts.radiusTouched = false;
+}
+async function alertAction(work) {
+  if (alerts.busy) return;
+  const generation = epoch;
+  alerts.busy = true;
+  alertMessage("");
+  renderAlerts();
+  let failure = "";
+  try {
+    await work();
+  } catch (err) {
+    failure = err.message || "Alerts could not be updated. Try again.";
+  } finally {
+    alerts.busy = false;
+  }
+  if (generation !== epoch) return;
+  await loadAlerts();
+  alertMessage(failure);
+}
+async function enableAlerts() {
+  if ((await Notification.requestPermission()) !== "granted")
+    throw new Error("Notifications were not allowed, so alerts stay off. Allow them for this site to turn alerts on.");
+  const registration = await alertRegistration(true);
+  const options = { userVisibleOnly: true, applicationServerKey: base64UrlBytes(alerts.key) };
+  let subscription;
+  try {
+    subscription = await registration.pushManager.subscribe(options);
+  } catch (err) {
+    // A subscription made with an older server key must be replaced.
+    const existing = await registration.pushManager.getSubscription();
+    if (!existing) throw err;
+    await existing.unsubscribe();
+    subscription = await registration.pushManager.subscribe(options);
+  }
+  await api("/alerts/subscription", { method: "PUT", body: JSON.stringify(subscriptionBody(subscription.toJSON())) });
+  await savePreference(true);
+}
+async function disableAlerts() {
+  const subscription = alerts.subscription;
+  if (subscription) {
+    await api("/alerts/subscription", { method: "DELETE", body: JSON.stringify({ endpoint: subscription.endpoint }) });
+    await subscription.unsubscribe();
+  }
+  // With no device left, also switch the account preference off.
+  if (alerts.devices <= 1) await savePreference(false);
+}
+// Open Help a friend with one errand selected: a notification link or click.
+function openErrand(id) {
+  if (view !== "open") setView("open");
+  if (id) {
+    selected = id;
+    detailStale = true;
+    renderList();
+    renderDetail();
+    void syncDetail();
+  }
+}
+const pendingLink = deepLink(location.search);
+if (pendingLink) history.replaceState(null, "", location.pathname);
+if ("serviceWorker" in navigator)
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.origin !== location.origin || event.data?.type !== "open-errand" || !user) return;
+    openErrand(typeof event.data.orderId === "string" ? event.data.orderId : null);
+  });
 function placeLabel(p) {
   return p.type === "supplier" ? `Supplier: ${p.name} · ${p.locationName}` : `Campus: ${p.name}`;
 }
@@ -632,6 +841,11 @@ function renderList() {
       node("small", `Expires ${time(o.expiresAt)} SGT`),
     );
     if (o.windowStart) card.append(node("p",`Delivery ${time(o.windowStart)} – ${time(o.expiresAt)} SGT`));
+    const distance = view === "open" ? pickupDistance(o) : null;
+    if (distance !== null) {
+      const away = formatDistance(distance), start = startingLocation().name;
+      card.append(node("small", away ? `Approximately ${away} from ${start}` : `Pickup at ${start}`, "distance"));
+    }
     card.addEventListener("click", () => {
       selected = o.id;
       detailStale = true;
@@ -643,6 +857,8 @@ function renderList() {
   }
   $("pagination").hidden = view === "open";
   $("open-sort-label").hidden = view !== "open";
+  $("open-from-label").hidden = view !== "open";
+  $("alerts-panel").hidden = view !== "open" || !user;
   $("request-filter-label").hidden = view !== "mine";
   $("page-label").textContent = `Page ${page}`;
   $("previous").disabled = page === 1;
@@ -659,11 +875,13 @@ async function loadList() {
     currentPage = page,
     revision = listGeneration,
     sort = $("open-sort").value,
+    from = current === "open" ? $("open-from").value : "",
     started = Date.now();
   listing = true;
   try {
     const filter = current === "mine" ? $("request-filter").value : "all";
-    const data = await api(`?scope=${current}&page=${currentPage}&sort=${sort}&filter=${filter}`, {
+    const start = from ? `&from=${encodeURIComponent(from)}` : "";
+    const data = await api(`?scope=${current}&page=${currentPage}&sort=${sort}&filter=${filter}${start}`, {
       signal: AbortSignal.timeout(2500),
     });
     if (current === "mine" || (current === "open" && currentPage === 1)) {
@@ -678,10 +896,8 @@ async function loadList() {
     lastListSync = started;
     rows = [...new Map(data.orders.map(o=>[o.id,remember(o)])).values()];
     if(current==="mine") rows.sort(newestFirst);
-    if(current==="open") rows.sort((a,b)=>{
-      if(sort==="credits" && BigInt(a.offeredCredits)!==BigInt(b.offeredCredits)) return BigInt(a.offeredCredits)>BigInt(b.offeredCredits) ? -1 : 1;
-      return Date.parse(a.expiresAt)-Date.parse(b.expiresAt) || Date.parse(a.createdAt)-Date.parse(b.createdAt) || a.id.localeCompare(b.id);
-    });
+    // Re-sort after merging scheduled requests, which Order Service did not rank.
+    if(current==="open") rows.sort(openComparator(sort, pickupDistance));
     hasMore = data.hasMore;
     stale = false;
     if (rows.some((o) => o.id === selected)) detailStale = false;
@@ -1022,6 +1238,7 @@ function setView(next) {
     renderList();
     void loadList();
   }
+  if (view === "open") void loadAlerts();
 }
 for (const [id, key] of [
   ["pickup", "pickup"],
@@ -1048,6 +1265,7 @@ $("reload-places").addEventListener("click", () => void loadPlaces());
 $("reload-list").addEventListener("click", () => {
   void loadList();
   void syncDetail();
+  if (view === "open") void loadAlerts();
 });
 document
   .querySelectorAll("[data-view]")
@@ -1063,6 +1281,16 @@ $("next").addEventListener("click", () => {
   void loadList();
 });
 let ticking = false;
+async function checkAlertDevice() {
+  if (view !== "open" || !alerts.loaded || alerts.busy || !alerts.subscription) return;
+  const known = alerts.subscription.endpoint;
+  try {
+    const current = await (await alertRegistration())?.pushManager.getSubscription();
+    if (current?.endpoint !== known && alerts.subscription?.endpoint === known) await loadAlerts();
+  } catch {
+    // Unavailable now; the next tick checks again.
+  }
+}
 async function tick() {
   if (document.hidden) return;
   // Each list request validates its own session. A slow session/catalogue
@@ -1070,12 +1298,15 @@ async function tick() {
   if (user) {
     void loadList();
     if (view !== "create") void syncDetail();
+    void checkAlertDevice();
   }
   if (ticking) return;
   ticking = true;
   try {
     const hadUser = !!user;
     if (await session() && !hadUser) {
+      if (pendingLink && view !== "open") openErrand(pendingLink.order);
+      else if (view === "open") void loadAlerts();
       void loadList();
     }
   } finally {
@@ -1093,7 +1324,24 @@ $("open-sort").addEventListener("change", () => {
   listGeneration++;
   void loadList();
 });
+$("open-from").addEventListener("change", () => {
+  saveStart($("open-from").value);
+  startingLocationChanged();
+  listGeneration++;
+  void loadList();
+});
 $("request-filter").addEventListener("change", () => setView("mine"));
+$("alerts-location").addEventListener("change", () => {
+  alerts.locationTouched = true;
+  renderAlerts();
+});
+$("alerts-radius").addEventListener("change", () => {
+  alerts.radiusTouched = true;
+  renderAlerts();
+});
+$("alerts-enable").addEventListener("click", () => void alertAction(enableAlerts));
+$("alerts-save").addEventListener("click", () => void alertAction(() => savePreference(true)));
+$("alerts-disable").addEventListener("click", () => void alertAction(disableAlerts));
 window.addEventListener("offline", () => {
   stale = true;
   show("sync-notice", "List is not updated", "warning");

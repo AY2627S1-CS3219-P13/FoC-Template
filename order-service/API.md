@@ -15,6 +15,10 @@ Public base: `http://localhost:8084` when run standalone. Browser requests use t
 | `GET /api/v1/orders?scope=user&userId={id}&page=1` | 200 | Admin-only orders where the user is requester or courier |
 | `GET /api/v1/orders/stream` | 200 | Authenticated creation and eligible lifecycle SSE invalidations |
 | `GET /api/v1/orders/publication-status` | 200 | Admin-only publication/workflow backlog monitoring |
+| `GET /api/v1/orders/alerts` | 200 | Nearby-alert availability, VAPID public key, the caller's preference and device count |
+| `PUT /api/v1/orders/alerts` | 200 | Save the caller's nearby-alert preference |
+| `PUT /api/v1/orders/alerts/subscription` | 204 | Register this browser's Web Push subscription for the caller |
+| `DELETE /api/v1/orders/alerts/subscription` | 204 | Remove one of the caller's push subscriptions |
 | `GET /api/v1/orders/{id}` | 200 | Authorized detail snapshot |
 | `POST /api/v1/orders/{id}/refresh` | 200 | Reconcile current Supplier details/cancellation |
 | `POST /api/v1/orders/{id}/actions` | 200; 202 for pending confirmation | Authorized courier, requester and dispute-resolution actions |
@@ -91,7 +95,21 @@ Catalogue outages return 503 rather than a falsely synchronized list. History
 on other pages is not refreshed. A dispute resolved concurrently is omitted
 from the admin snapshot.
 
-`scope=open` returns all eligible orders as `{orders: [], hasMore: false}` without pagination (`page` is ignored). Sort with `sort=expiry` (default) or `sort=credits` (highest first); ties use expiry, creation time ascending, then ID. Unsupported sort values return `400 invalid_sort`. Each snapshot refreshes every listed order’s places using the current session, sharing lookups only within that request. Inactive/deleted places remove orders and record refund-intent events; Supplier outages fail the snapshot with 503.
+`scope=open` returns all eligible orders as `{orders: [], hasMore: false}` without pagination (`page` is ignored). Sort with `sort=expiry` (default), `sort=credits` (highest first) or `sort=distance` (nearest pickup first); ties use expiry, creation time ascending, then ID. Unsupported sort values return `400 invalid_sort`.
+
+`from={campus location ID}` sets the courier's starting point, e.g.
+`GET /api/v1/orders?scope=open&sort=distance&from=central-library`. With it,
+each order gains `pickupDistanceMeters`: the straight-line (Haversine) distance,
+rounded to a metre, from that location to the pickup's campus location (a
+supplier's registered location, or the location itself). Coordinates come from
+Supplier's `GET /api/v1/locations` using the current session; they ignore paths
+and entrances, so the value is an estimate for ranking. `from` never filters the
+list and may accompany any sort. `sort=distance` without `from` returns
+`400 starting_location_required`; an unknown location, or one without
+coordinates, returns `400 invalid_location`. A pickup whose location has no
+coordinates omits `pickupDistanceMeters` and sorts after every known distance.
+Location places from `/api/v1/orders/places` include `latitude`/`longitude` so
+the browser can rank merged scheduled requests with the same formula. Each snapshot refreshes every listed order’s places using the current session, sharing lookups only within that request. Inactive/deleted places remove orders and record refund-intent events; Supplier outages fail the snapshot with 503.
 
 An open order is readable by authenticated users. Administrators can also inspect disputed orders and their events. Otherwise only its requester or assigned courier may read it, its events or refresh it; other users receive the same `404 order_not_found` as an unknown ID. No arbitrary requester/courier IDs are accepted from the browser. Reads do not contact Credit.
 
@@ -307,6 +325,82 @@ pruning, external broker or per-user inbox is configured. The browser keeps
 snapshot polling for status changes and Supplier refresh alongside lifecycle SSE.
 `OrderStatusChanged` and `OrderDetailsChanged` listeners coalesce authoritative
 snapshot refreshes. Notifications never directly overwrite cached order state.
+
+### Nearby alerts
+
+A courier chooses one campus location and a radius of 200, 500 or 1000 m. When
+a new errand's pickup is within that straight-line distance, each of their
+registered browsers receives a Web Push notification, even with the site closed.
+The design is in `NEARBY-ALERTS.md`.
+
+`GET /api/v1/orders/alerts` returns `pushAvailable`, `vapidPublicKey` (base64url
+uncompressed P-256 point for `PushManager.subscribe`, or `null`), `preference`
+(`{enabled, locationId, radiusMeters}` or `null`) and `devices`. Endpoints and
+keys are never returned.
+
+`PUT /api/v1/orders/alerts` takes `{"enabled":true,"locationId":"central-library","radiusMeters":500}`
+and returns `{"preference":{...}}`. All three fields are required. Other radii
+return `400 invalid_radius`. The location is checked through Supplier with the
+caller's session; an unknown location or one without coordinates returns
+`400 invalid_location`.
+
+`PUT /api/v1/orders/alerts/subscription` takes the browser's
+`{"endpoint":"https://…","keys":{"p256dh":"…","auth":"…"}}` (base64url; send no
+other fields). Endpoints must be `https` on port 443, at most 1024 characters,
+without credentials or an IP address, on `fcm.googleapis.com`,
+`updates.push.services.mozilla.com`, `*.notify.windows.com` or
+`web.push.apple.com`. `p256dh` must be a valid P-256 point and `auth` 16 bytes;
+otherwise `400 invalid_subscription`. Registering is an upsert by endpoint. A
+browser belongs to one account: registering it for another account drops the
+previous owner's pending alerts. Each account keeps its five newest devices.
+`DELETE` takes `{"endpoint":"…"}` and removes only the caller's own row; it is
+idempotent.
+
+Mutations require the trusted Origin like every other Order mutation. When push
+is not configured, `GET` reports `pushAvailable:false` and the `PUT` routes return
+`503 push_unavailable`.
+
+Matching is a fourth workflow consumer, `workflow-nearby-alerts`. It reads
+campus coordinates from Supplier's internal catalogue before each pass; if that
+fails, events stay pending and retry. Only `OrderCreated` has an effect. It alerts
+when the errand is still open, unexpired and created under 10 minutes ago, and
+only couriers who:
+
+- are not the requester;
+- have alerts enabled and at least one device;
+- have fewer than three accepted or picked-up orders;
+- were last alerted at least 2 minutes ago;
+- are within their radius of the pickup's campus location.
+
+Matching writes one delivery job per device in the consumer transaction. Each
+event can create a job for a device only once. Migration 013 marks every event
+that existed before it as handled, so a deploy never announces existing errands.
+
+A sender loop runs every second. It claims up to 20 due jobs with a 30-second
+lease and checks again that each errand is still open; if not, the job is skipped.
+It encrypts the payload per RFC 8291 (`aes128gcm`) and signs a VAPID JWT per
+RFC 8292 (ES256, one-hour expiry, reused for 30 minutes per push service). The
+POST carries:
+
+- `TTL`: seconds until the errand expires;
+- `Urgency: high`;
+- `Topic`: a 32-character hash of the order ID.
+
+The payload is
+`{"v":1,"orderId","title":"New errand nearby","body":"Campus Cafe (COM2) · about 320 m from your alert location. …","url":"/orders?view=open&order=…"}`.
+It never contains items, credits or user IDs.
+
+| Push service response | Result |
+| --- | --- |
+| 404 or 410 | The device has unsubscribed; its subscription is deleted |
+| 429, 5xx or no response | Retried after `min(60, 2^attempts)` seconds, or `Retry-After` capped at 60 seconds; failed after five attempts |
+| 401 or 403 | Failed as `push_unauthorized` |
+| Other errors | Failed as `push_rejected` |
+
+Delivery is at least once. After a crash, a rare resend is collapsed on the
+device by `Topic` and the notification tag. Finished delivery records are deleted
+after seven days. Publication status adds `workflow.pushDeliveries`
+(`pending`, `sent` and `failed` counts within that window).
 
 ### Add item
 

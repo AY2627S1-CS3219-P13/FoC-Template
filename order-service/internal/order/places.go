@@ -19,7 +19,7 @@ func (c *CatalogueClient) List(ctx context.Context, session string, page int) ([
 	for _, l := range locations.Locations {
 		names[l.ID] = l.Name
 		if page == 1 {
-			places = append(places, Place{Type: "location", ID: l.ID, Name: l.Name})
+			places = append(places, Place{Type: "location", ID: l.ID, Name: l.Name, Latitude: l.Latitude, Longitude: l.Longitude})
 		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/api/v1/suppliers?status=active&pageSize=100&page="+strconv.Itoa(page), nil)

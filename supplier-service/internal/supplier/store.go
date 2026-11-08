@@ -64,8 +64,10 @@ type Supplier struct {
 }
 
 type Location struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
 }
 
 const supplierColumns = "id,name,category,location_id,description,opening_hours,active,created_at,updated_at"

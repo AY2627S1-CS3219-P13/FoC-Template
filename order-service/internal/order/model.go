@@ -25,6 +25,9 @@ type Place struct {
 	LocationName string `json:"locationName,omitempty"`
 	Description  string `json:"description,omitempty"`
 	OpeningHours string `json:"openingHours,omitempty"`
+	// Set only on campus locations in the selector catalogue, never on order snapshots.
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
 }
 
 type Item struct {

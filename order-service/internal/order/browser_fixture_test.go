@@ -2,6 +2,9 @@ package order
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"net/http"
 	"os"
 	"testing"
@@ -17,6 +20,13 @@ func TestBrowserFixture(t *testing.T) {
 	a, f := testApp(t)
 	a.auth = actorAuth{}
 	a.cfg.Origin = "http://order-ui-fixture:8080"
+	// Alerts use a real VAPID key; no sender runs, so nothing leaves the fixture.
+	vapid, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.push = newPushService(Config{VAPIDKey: vapid, VAPIDSubject: "https://github.com/AY2627S1-CS3219-P13/FoC-Template",
+		SupplierInternalURL: f.server.URL, SupplierInternalToken: testSupplierInternalToken}, http.DefaultClient)
 	handler := a.Handler()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -49,7 +59,7 @@ func TestBrowserFixture(t *testing.T) {
 			return
 		}
 		if r.Method == "POST" && r.URL.Path == "/__test/reset" {
-			if _, err := a.db.Exec(r.Context(), "TRUNCATE workflow_receipts,workflow_retries,workflow_timers,workflow_projections,order_admissions,order_publications,order_payouts,order_actions,order_refunds,order_events,orders,creation_attempts"); err != nil {
+			if _, err := a.db.Exec(r.Context(), "TRUNCATE push_deliveries,push_subscriptions,nearby_alert_preferences,workflow_receipts,workflow_retries,workflow_timers,workflow_projections,order_admissions,order_publications,order_payouts,order_actions,order_refunds,order_events,orders,creation_attempts"); err != nil {
 				w.WriteHeader(500)
 				return
 			}

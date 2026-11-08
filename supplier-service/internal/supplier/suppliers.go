@@ -183,7 +183,7 @@ func storeError(err error) error {
 }
 
 func (a *App) locations(w http.ResponseWriter, r *http.Request) error {
-	rows, err := a.db.Query(r.Context(), "SELECT id,name FROM locations ORDER BY name")
+	rows, err := a.db.Query(r.Context(), "SELECT id,name,latitude,longitude FROM locations ORDER BY name")
 	if err != nil {
 		return err
 	}
@@ -191,7 +191,7 @@ func (a *App) locations(w http.ResponseWriter, r *http.Request) error {
 	items := []Location{}
 	for rows.Next() {
 		var l Location
-		if err = rows.Scan(&l.ID, &l.Name); err != nil {
+		if err = rows.Scan(&l.ID, &l.Name, &l.Latitude, &l.Longitude); err != nil {
 			return err
 		}
 		items = append(items, l)

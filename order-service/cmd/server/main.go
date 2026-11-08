@@ -89,11 +89,12 @@ func run(log *slog.Logger) error {
 	go scheduleLoop(ctx, scheduling.Recover, "schedule recovery pending", log)
 	go scheduleLoop(ctx, scheduling.ConsumeEvents, "schedule acceptance pending", log)
 	go recoveryLoop(ctx, app, cfg.RecoveryInterval, log)
-	for _, consumer := range []string{"workflow-timers", "workflow-settlement"} {
+	for _, consumer := range []string{"workflow-timers", "workflow-settlement", "workflow-nearby-alerts"} {
 		go workflowLoop(ctx, app, consumer, log)
 	}
 	go lifecycleLoop(ctx, app, log)
 	go publicationLoop(ctx, app, log)
+	go pushLoop(ctx, app, log)
 	server := &http.Server{Addr: ":8080", Handler: schedule.Handler(app.Handler(), scheduling), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second}
 	private := &http.Server{Addr: ":8081", Handler: app.InternalHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second}
 	failure := make(chan error, 2)
@@ -121,6 +122,33 @@ func publicationLoop(ctx context.Context, app *order.App, log *slog.Logger) {
 		work, cancel := context.WithTimeout(ctx, 5*time.Second)
 		if err := app.PublishEvents(work); err != nil {
 			log.Warn("event publication pending; retrying")
+		}
+		cancel()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// pushLoop sends nearby-alert notifications every second and removes finished
+// delivery records older than seven days every ten minutes.
+func pushLoop(ctx context.Context, app *order.App, log *slog.Logger) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	var cleaned time.Time
+	for {
+		work, cancel := context.WithTimeout(ctx, 10*time.Second)
+		if err := app.SendPushAlerts(work); err != nil {
+			log.Warn("push delivery pending; retrying")
+		}
+		if time.Since(cleaned) >= 10*time.Minute {
+			if err := app.CleanupPushDeliveries(work); err != nil {
+				log.Warn("push delivery cleanup failed")
+			} else {
+				cleaned = time.Now()
+			}
 		}
 		cancel()
 		select {
