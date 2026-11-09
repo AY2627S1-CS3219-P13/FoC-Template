@@ -290,5 +290,5 @@ has been removed; expiry remains required only for actual order creation.
 
 Pricing now has an EC2 runtime image and deployment wiring alongside its existing
 CI checks. Cloud activation requires the Pricing ECR repository/access and an
-explicit `PRICING_POLICY_PACKAGE` repository variable selecting a committed,
-validated policy package. See [deployment prerequisites](docs/aws-deployment-notes.md#pricing-release-wiring).
+`order_pricing/RELEASE_PACKAGE` file selecting a committed, validated policy
+package. See [deployment prerequisites](docs/aws-deployment-notes.md#pricing-release-wiring).

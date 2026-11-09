@@ -133,8 +133,8 @@ those missing integrations.
 ## Release image
 
 The existing AWS publish job includes `pricing-service`. Its build step selects
-`order_pricing/serving/Dockerfile --target runtime` and passes the required
-`PRICING_POLICY_PACKAGE` repository variable as `POLICY_PACKAGE`. The selected
+`order_pricing/serving/Dockerfile --target runtime` and passes the directory named in the tracked
+`order_pricing/RELEASE_PACKAGE` file as `POLICY_PACKAGE`. The selected
 manifest must be tracked. Existing Pricing checks remain in CI. `local-demo` and
 the `local-policy` fixture export are reserved for local/disposable CI checks.
 EC2 image configuration is in `compose.ec2.yaml`, sharing private source/storage

@@ -8,6 +8,11 @@ docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --securit
 
 docker build -f order_pricing/formula/Dockerfile -t foc-pricing-formula-tests order_pricing
 docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges foc-pricing-formula-tests
+# The package the next AWS release will publish must pass the adapter suite.
+release_package=$(sh order_pricing/scripts/release-package.sh)
+docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
+  -e PRICING_PACKAGE_DIR="/checks/$release_package" foc-pricing-formula-tests \
+  python -m unittest tests.test_policy_conformance tests.formula_conformance -v
 
 docker build -f order_pricing/mlflow/Dockerfile -t foc-pricing-mlops order_pricing
 docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges foc-pricing-mlops python -m unittest discover -s tests/mlops -v

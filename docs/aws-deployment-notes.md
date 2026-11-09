@@ -500,8 +500,9 @@ Pricing now participates in `Release to AWS` as the eighth application image,
 triggers, CI gating, image publication and SSM rollout flow are unchanged. Pricing
 never selects the `local-demo` stage for publication. Application secrets are
 neither build arguments nor GitHub secrets.
-Changing the selected package requires a new commit/release; retrying an existing
-SHA reuses its immutable image even if the repository variable has changed.
+The package is selected by the tracked `order_pricing/RELEASE_PACKAGE` file, so
+changing it is a reviewed commit and each SHA's image is reproducible. Retrying an
+existing SHA reuses its immutable image.
 
 Before merging this rollout into main:
 
@@ -509,9 +510,9 @@ Before merging this rollout into main:
    policy as the existing application repositories. Extend the GitHub publisher,
    connection-check and EC2 image-pull permissions to this repository.
 2. Commit a validated policy package with the campus routes intended for the
-   deployment, then set the GitHub repository variable `PRICING_POLICY_PACKAGE`
-   to its directory relative to `order_pricing`. The Pricing image build requires
-   this variable and a tracked manifest. The existing checked-in
+   deployment, then write its directory relative to `order_pricing` into
+   `order_pricing/RELEASE_PACKAGE`. The Pricing image build requires that file
+   to name a tracked manifest. The existing checked-in
    example supports only a synthetic COM2 → UTown route; it is not a complete
    route package for the current Supplier catalogue. Local UI fixture distances
    are not promoted automatically.
@@ -556,10 +557,18 @@ development did not show this because `compose.pricing.yaml` builds the
 
 `formula/releases/effort-traffic-002` estimates walking distance from Supplier's
 location coordinates (haversine × 1.3 detour) whenever no reference route exists.
-To deploy it, set the GitHub repository variable
-`PRICING_POLICY_PACKAGE=formula/releases/effort-traffic-002`, then release the
-`main` commit that contains it. Supplier must be released in the same commit so
+It is selected by `order_pricing/RELEASE_PACKAGE`. Supplier must be released in the same commit so
 its internal pricing catalogue includes coordinates; otherwise quotes still
 return `unsupported_place`. New locations need coordinates in Supplier, not a new
 Pricing release.
+
+### Release package selection moved into the repository
+
+The first coordinate release merged while the GitHub variable
+`PRICING_POLICY_PACKAGE` still named `effort-traffic-001`. The release therefore
+built a fresh Pricing image with the old package, and re-running the release
+after changing the variable reused that same commit's image. The publisher now
+reads `order_pricing/RELEASE_PACKAGE` through `order_pricing/scripts/release-package.sh`
+and records the selection in the run summary. The repository variable is no
+longer read and can be deleted.
 
