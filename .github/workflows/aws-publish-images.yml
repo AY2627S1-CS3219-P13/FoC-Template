@@ -81,7 +81,6 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION }}
       ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
       SERVICE: ${{ matrix.service }}
-      PRICING_POLICY_PACKAGE: ${{ vars.PRICING_POLICY_PACKAGE }}
       RELEASE_SHA: ${{ needs.verify-ci.outputs.sha }}
     steps:
       - name: Check out the selected commit
@@ -127,10 +126,11 @@ jobs:
         shell: bash
         run: |
           if [ "$SERVICE" = pricing-service ]; then
-            : "${PRICING_POLICY_PACKAGE:?Set PRICING_POLICY_PACKAGE to the tracked Pricing release directory}"
-            git ls-files --error-unmatch -- "order_pricing/$PRICING_POLICY_PACKAGE/manifest.json" > /dev/null
+            # The tracked selection keeps each commit's image reproducible.
+            package=$(sh order_pricing/scripts/release-package.sh)
+            echo "Pricing policy package: $package" >> "$GITHUB_STEP_SUMMARY"
             set -- --file order_pricing/serving/Dockerfile --target runtime \
-              --build-arg "POLICY_PACKAGE=$PRICING_POLICY_PACKAGE" ./order_pricing
+              --build-arg "POLICY_PACKAGE=$package" ./order_pricing
           elif [ "$SERVICE" = order-service ]; then
             set -- --file order-service/Dockerfile .
           else

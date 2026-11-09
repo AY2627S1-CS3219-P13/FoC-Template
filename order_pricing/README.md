@@ -180,8 +180,8 @@ has been removed; expiry remains required only for actual order creation.
 ## CI/CD and EC2
 
 Pricing's component checks already run in CI. The release publisher now includes
-`foc/pricing-service`, using the `runtime` Docker target and the required repository
-variable `PRICING_POLICY_PACKAGE` to choose a committed release directory. The
+`foc/pricing-service`, using the `runtime` Docker target and the tracked `RELEASE_PACKAGE` file to choose
+a committed release directory; CI runs the adapter suite on that package. The
 existing Pricing CI checks continue to validate the framework and policy packages.
 The EC2 override adds private Pricing/PostgreSQL, persistent storage, credential initialization,
 readiness checks and immutable-image verification. Local development still uses
