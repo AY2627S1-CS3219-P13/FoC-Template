@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import shutil
 
-from formula.policy.formula import DEFAULT_CONFIG, FEATURE_SCHEMA_VERSION, validate_config, validate_foot_traffic, validate_static_context
+from formula.policy.formula import DEFAULT_CONFIG, feature_schema_version, validate_config, validate_foot_traffic, validate_static_context
 
 
 def write_json(path, value):
@@ -23,7 +23,7 @@ def build(output, code_commit, release_id, *, fixture=None, config=None, foot_tr
     if not release_id or not isinstance(release_id, str):
         raise ValueError("release identity required")
     config = dict(config or DEFAULT_CONFIG)
-    validate_config(config)
+    validated = validate_config(config)
     root = Path(__file__).resolve().parents[1]
     traffic_path = Path(foot_traffic or Path(__file__).parent / "data/foot_traffic.json")
     traffic = json.loads(traffic_path.read_text())
@@ -60,8 +60,9 @@ def build(output, code_commit, release_id, *, fixture=None, config=None, foot_tr
         manifest = {
             "releaseId": release_id, "entryPoint": "policy.formula:load_policy",
             "adapterMajor": 1, "contextMajor": 1,
-            "requiredCapabilities": ["catalogue.v1", "orders.v1", "routes.v1", "footfall.v1"],
-            "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
+            "requiredCapabilities": ["catalogue.v1", "orders.v1", "routes.v1", "footfall.v1"]
+            + (["coordinates.v1"] if validated["walkingDetourFactor"] else []),
+            "featureSchemaVersion": feature_schema_version(validated, traffic),
             "bounds": {"minimum": 5, "maximum": 30},
             "provenance": {
                 "codeCommit": code_commit,

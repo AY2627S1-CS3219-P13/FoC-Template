@@ -6,7 +6,7 @@ from pathlib import Path, PurePosixPath
 
 from .wire import decode_input, json_loads, normalize, validate
 
-CAPABILITIES = {"catalogue.v1", "orders.v1", "routes.v1", "footfall.v1"}
+CAPABILITIES = {"catalogue.v1", "orders.v1", "routes.v1", "footfall.v1", "coordinates.v1"}
 
 
 def load_package(directory):

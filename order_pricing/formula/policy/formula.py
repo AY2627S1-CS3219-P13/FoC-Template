@@ -4,12 +4,15 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_CEILING
 import json
+import math
 from pathlib import Path
 from types import MappingProxyType
 
 from pricing_contracts import PolicyInput, PolicyResult, PolicyUnavailable, UnsupportedRoute
 
 FEATURE_SCHEMA_VERSION = "effort-traffic-1"
+COORDINATE_FEATURE_SCHEMA_VERSION = "effort-traffic-coordinates-1"
+EARTH_RADIUS_METRES = 6371008.8
 SINGAPORE = timezone(timedelta(hours=8), "Asia/Singapore")
 DEFAULT_CONFIG = {
     "baseCredits": 2,
@@ -22,6 +25,9 @@ DEFAULT_CONFIG = {
     "minimumCredits": 5,
     "maximumCredits": 30,
     "footTrafficMaxPremium": 0.2,
+    # Walking distance ~= straight line x detour; campus paths, stairs and
+    # covered walkways typically add 20-40 percent. Uncalibrated assumption.
+    "walkingDetourFactor": 1.3,
 }
 
 
@@ -57,6 +63,12 @@ def validate_config(value):
             config[key] = _number(value.get(key, 0))
             if config[key] > Decimal("0.2"):
                 raise ValueError("foot traffic premium must not exceed 20 percent")
+            continue
+        if key == "walkingDetourFactor":
+            # Old releases omit this coefficient and support only static routes.
+            config[key] = _number(value.get(key, 0))
+            if config[key] and not Decimal(1) <= config[key] <= Decimal(2):
+                raise ValueError("walking detour factor must be 0 (disabled) or between 1 and 2")
             continue
         if key not in value:
             raise ValueError("missing formula coefficient")
@@ -193,20 +205,70 @@ def _freeze(value):
     return value
 
 
-def _effort(value, config):
-    if value.contract_version.split(".")[0] != "1" or value.context["schemaVersion"].split(".")[0] != "1":
-        raise PolicyUnavailable()
+def _coordinates(value, location_id):
+    for row in value.context["catalogue"]["locations"]:
+        if row["id"] == location_id:
+            if "latitude" not in row or "longitude" not in row:
+                return None
+            latitude, longitude = float(_signed(row["latitude"], 90)), float(_signed(row["longitude"], 180))
+            return math.radians(latitude), math.radians(longitude)
+    return None
+
+
+def _signed(value, limit):
+    if type(value) not in (int, float, Decimal):
+        raise ValueError("expected numeric coordinate")
+    number = Decimal(str(value))
+    if not number.is_finite() or abs(number) > limit:
+        raise ValueError("invalid coordinate")
+    return number
+
+
+def coordinate_route(value, config):
+    """Estimated walking metres from catalogue coordinates, or None if unknown."""
+    factor = config.get("walkingDetourFactor", Decimal(0))
+    places = value.resolved_places
+    if not factor:
+        return None
+    start = _coordinates(value, places["pickupLocationId"])
+    end = _coordinates(value, places["deliveryLocationId"])
+    if start is None or end is None:
+        return None
+    (lat1, lon1), (lat2, lon2) = start, end
+    # Haversine great-circle distance; exact enough at campus scale.
+    h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    straight = Decimal(str(round(2 * EARTH_RADIUS_METRES * math.asin(min(1.0, math.sqrt(h))), 1)))
+    return straight, straight * factor
+
+
+def feature_schema_version(config, traffic):
+    if traffic is None:
+        return "effort-1"
+    return COORDINATE_FEATURE_SCHEMA_VERSION if config.get("walkingDetourFactor", 0) else FEATURE_SCHEMA_VERSION
+
+
+def _route(value, config):
     places = value.resolved_places
     candidates = [
         route for route in value.context["routes"]
         if route["pickupLocationId"] == places["pickupLocationId"]
         and route["deliveryLocationId"] == places["deliveryLocationId"]
     ]
-    if not candidates:
-        raise UnsupportedRoute()
-    if len(candidates) != 1:
+    if len(candidates) > 1:
         raise PolicyUnavailable()
-    distance = _number(candidates[0]["walkableMetres"])
+    if candidates:
+        return _number(candidates[0]["walkableMetres"]), None
+    estimate = coordinate_route(value, config)
+    if estimate is None:
+        raise UnsupportedRoute()
+    straight, walking = estimate
+    return walking, straight
+
+
+def _effort(value, config):
+    if value.contract_version.split(".")[0] != "1" or value.context["schemaVersion"].split(".")[0] != "1":
+        raise PolicyUnavailable()
+    distance, _ = _route(value, config)
     travel = distance / config["walkingMetresPerMinute"]
     total = config["approachMinutes"] + config["pickupMinutes"] + travel
     quantity = value.request.get("totalItemQuantity")
@@ -239,6 +301,14 @@ def effort_features(value, config, traffic=None):
         "routeProvenance": route_sources[0]["provenance"] if route_sources else "estimated",
         "footfallUsed": False,
     }
+    if config.get("walkingDetourFactor", 0):
+        # Coordinate estimates are new keys under their own feature schema only.
+        _, straight = _route(value, config)
+        features["routeMethod"] = "static" if straight is None else "coordinates"
+        features["straightLineMetres"] = float(straight) if straight is not None else None
+        features["walkingDetourFactor"] = float(config["walkingDetourFactor"])
+        if straight is not None:
+            features["routeProvenance"] = "estimated"
     features.update(traffic_features(value, config, traffic))
     features["trafficAdjustedCredits"] = float(unrounded * Decimal(str(features["trafficMultiplier"])))
     return features
@@ -249,7 +319,7 @@ class FormulaPolicy:
         if config.get("footTrafficMaxPremium", 0) and traffic is None:
             raise ValueError("enabled foot traffic adjustment requires a lookup")
         self.config, self.traffic = config, traffic
-        self.feature_schema = FEATURE_SCHEMA_VERSION if traffic is not None else "effort-1"
+        self.feature_schema = feature_schema_version(config, traffic)
 
     def warm_up(self, example: PolicyInput) -> None:
         self.calculate(example)

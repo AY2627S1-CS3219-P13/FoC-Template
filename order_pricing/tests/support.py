@@ -15,7 +15,9 @@ from pricing_contracts import PolicyInput
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
 SCHEMA = json.loads((ROOT / "contracts" / "schemas" / "v1.json").read_text())
-CAPABILITIES = {"catalogue.v1", "orders.v1", "routes.v1", "footfall.v1"}
+# Current serving schema: v1 plus optional quote expiry and location coordinates.
+LATEST = json.loads((ROOT / "contracts" / "schemas" / "v1.2.json").read_text())
+CAPABILITIES = {"catalogue.v1", "orders.v1", "routes.v1", "footfall.v1", "coordinates.v1"}
 
 # JSON Schema's default integer checker also accepts 2.0; our transport does not.
 StrictValidator = validators.extend(
@@ -37,23 +39,23 @@ def validate(name, value, schema=SCHEMA):
     ).validate(value)
 
 
-def resolve(schema):
+def resolve(schema, root=SCHEMA):
     while "$ref" in schema:
-        schema = SCHEMA["$defs"][schema["$ref"].split("/")[-1]]
+        schema = root["$defs"][schema["$ref"].split("/")[-1]]
     return schema
 
 
-def project(value, schema):
+def project(value, schema, root=SCHEMA):
     """Ignore unknown fields; preserve open, release-owned JSON diagnostics."""
-    schema = resolve(schema)
+    schema = resolve(schema, root)
     if isinstance(value, dict) and "properties" in schema:
         return {
-            key: project(item, schema["properties"][key])
+            key: project(item, schema["properties"][key], root)
             for key, item in value.items()
             if key in schema["properties"]
         }
     if isinstance(value, list):
-        return [project(item, schema.get("items", {})) for item in value]
+        return [project(item, schema.get("items", {}), root) for item in value]
     return copy.deepcopy(value)
 
 
@@ -65,9 +67,9 @@ def freeze(value):
     return value
 
 
-def decode_input(value):
-    validate("PolicyInput", value)
-    value = project(value, SCHEMA["$defs"]["PolicyInput"])
+def decode_input(value, schema=SCHEMA):
+    validate("PolicyInput", value, schema=schema)
+    value = project(value, schema["$defs"]["PolicyInput"], schema)
     return PolicyInput(
         value["contractVersion"], value["calculatedAt"], freeze(value["request"]),
         freeze(value["resolvedPlaces"]), freeze(value["context"]),

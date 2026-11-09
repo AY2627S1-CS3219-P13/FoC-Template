@@ -132,6 +132,22 @@ class WireTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             context.validate_source("catalogue", bad, None, now)
 
+    def test_catalogue_coordinates_reach_policy_and_must_be_paired_and_in_range(self):
+        context = Context(settings(), {})
+        now = utcnow()
+        catalogue = dict(self.value["context"]["catalogue"], schemaVersion=1, snapshotId="cat", asOf=stamp(now))
+        catalogue["locations"] = [{"id": "com2", "latitude": 1.293925, "longitude": 103.774153, "name": "ignored"}, {"id": "utown"}]
+        accepted = context.validate_source("catalogue", catalogue, None, now)
+        self.assertEqual(accepted["locations"], [{"id": "com2", "latitude": 1.293925, "longitude": 103.774153}, {"id": "utown"}])
+        value = copy.deepcopy(self.value)
+        value["context"]["catalogue"]["locations"] = accepted["locations"]
+        self.assertEqual(decode_input(value).context["catalogue"]["locations"][0]["latitude"], 1.293925)
+        for location in ({"id": "com2", "latitude": 1.29}, {"id": "com2", "latitude": 91, "longitude": 0},
+                         {"id": "com2", "latitude": "1.29", "longitude": 103.77}):
+            bad = dict(catalogue, locations=[location])
+            with self.subTest(location=location), self.assertRaises(Exception):
+                context.validate_source("catalogue", bad, None, now)
+
 
 class FrameworkTests(unittest.TestCase):
     def setUp(self):

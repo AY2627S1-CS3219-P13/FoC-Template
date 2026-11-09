@@ -545,3 +545,21 @@ or pricing effectiveness. The original Pricing component/model/two-replica check
 continue unchanged. Cloud resources and repository variables are not provisioned
 by these code changes; no AWS deployment is triggered until changes reach main
 and all prerequisites and CI checks succeed.
+
+### Coordinate-based route estimates
+
+The first Pricing release (`effort-traffic-001`) shipped only the synthetic
+COM2 → UTown reference route. Every real catalogue pair therefore returned 422
+`unsupported_place` and the Orders page showed "Suggestion unavailable". Local
+development did not show this because `compose.pricing.yaml` builds the
+`local-demo` stage with synthetic routes for every location pair.
+
+`formula/releases/effort-traffic-002` estimates walking distance from Supplier's
+location coordinates (haversine × 1.3 detour) whenever no reference route exists.
+To deploy it, set the GitHub repository variable
+`PRICING_POLICY_PACKAGE=formula/releases/effort-traffic-002`, then release the
+`main` commit that contains it. Supplier must be released in the same commit so
+its internal pricing catalogue includes coordinates; otherwise quotes still
+return `unsupported_place`. New locations need coordinates in Supplier, not a new
+Pricing release.
+

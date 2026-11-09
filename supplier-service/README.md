@@ -94,6 +94,6 @@ Order’s recovery worker uses Supplier’s authenticated internal read-only cat
 The internal catalogue routes reuse Supplier’s existing HTTP listener; there is no additional port or service. The gateway rejects `/internal` paths, and the routes require their service credential even when called directly. Run `sh order-service/scripts/init-env.sh` after initializing User and Credit for the root stack.
 
 Pricing reuses the existing catalogue through authenticated
-`GET /internal/v1/pricing-catalogue`. The compact snapshot includes place IDs,
-supplier location mappings and active status from one consistent database read;
+`GET /internal/v1/pricing-catalogue`. The compact snapshot includes place IDs and
+coordinates, supplier location mappings and active status from one consistent database read;
 it does not introduce another catalogue or price storage. See API.md for limits.

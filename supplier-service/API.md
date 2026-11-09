@@ -121,7 +121,9 @@ The existing port 8080 also exposes `GET /internal/v1/suppliers/{id}` and `GET /
 
 `GET /internal/v1/pricing-catalogue` requires the existing Supplier internal bearer
 credential. It exposes the existing catalogue in one read-only repeatable-read
-snapshot: `schemaVersion: 1`, `snapshotId`, database `asOf`, `locations: [{id}]`,
+snapshot: `schemaVersion: 1`, `snapshotId`, database `asOf`,
+`locations: [{id,latitude,longitude}]` (WGS84 building positions, as on the public
+locations endpoint),
 and `suppliers: [{id,locationId,active}]`. Inactive suppliers are included; deleted
 suppliers are excluded. No names, user data or prices are exported. Query
 parameters are rejected. More than 1,000 locations or 10,000 suppliers returns
