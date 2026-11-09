@@ -23,7 +23,9 @@ func (a *App) pricingCatalogue(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	type location struct {
-		ID string `json:"id"`
+		ID        string  `json:"id"`
+		Latitude  float64 `json:"latitude"`
+		Longitude float64 `json:"longitude"`
 	}
 	type supplier struct {
 		ID         string `json:"id"`
@@ -32,13 +34,13 @@ func (a *App) pricingCatalogue(w http.ResponseWriter, r *http.Request) error {
 	}
 	locations := []location{}
 	suppliers := []supplier{}
-	rows, err := tx.Query(r.Context(), "SELECT id FROM locations ORDER BY id LIMIT 1001")
+	rows, err := tx.Query(r.Context(), "SELECT id,latitude,longitude FROM locations ORDER BY id LIMIT 1001")
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var item location
-		if err = rows.Scan(&item.ID); err != nil {
+		if err = rows.Scan(&item.ID, &item.Latitude, &item.Longitude); err != nil {
 			rows.Close()
 			return err
 		}

@@ -33,14 +33,25 @@ func TestPricingCatalogueUsesExistingRecords(t *testing.T) {
 		SchemaVersion int
 		SnapshotID    string
 		AsOf          time.Time
-		Locations     []struct{ ID string }
-		Suppliers     []struct {
+		Locations     []struct {
+			ID                  string
+			Latitude, Longitude *float64
+		}
+		Suppliers []struct {
 			ID, LocationID string
 			Active         bool
 		}
 	}
 	if json.Unmarshal(response.Body.Bytes(), &snapshot) != nil || snapshot.SchemaVersion != 1 || snapshot.SnapshotID == "" || snapshot.AsOf.IsZero() || len(snapshot.Locations) == 0 {
 		t.Fatalf("invalid snapshot: %s", response.Body.String())
+	}
+	for _, location := range snapshot.Locations {
+		if location.Latitude == nil || location.Longitude == nil {
+			t.Fatalf("location %s lacks coordinates", location.ID)
+		}
+		if location.ID == "com2" && (*location.Latitude != 1.293925 || *location.Longitude != 103.774153) {
+			t.Fatal("com2 coordinates changed")
+		}
 	}
 	found := false
 	for _, supplier := range snapshot.Suppliers {

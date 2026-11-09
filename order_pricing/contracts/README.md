@@ -15,8 +15,11 @@ The external [API](../API.md) remains normative.
 | `QuoteResponse` | Framework -> Order, JSON | API section 3 response. Framework adds quote identity, draft, timestamps, release/context IDs; merges warnings and durably commits before responding. |
 | Model features | Inside policy only | Release-owned preprocessing output; never a shared framework or source-service contract. |
 
-`schemas/v1.1.json` specifies the current serializable representation. It makes
-quote `orderExpiresAt` optional without changing older request semantics. The
+`schemas/v1.2.json` specifies the current serializable representation. v1.1 made
+quote `orderExpiresAt` optional without changing older request semantics; v1.2
+adds optional, paired WGS84 `latitude`/`longitude` to catalogue locations
+(capability `coordinates.v1`). Missing coordinates stay omitted, and policies
+must treat them as unknown. The
 original `schemas/v1.json` remains the compatibility baseline. `python/pricing_contracts.py` defines the Python adapter DTOs and protocol.
 Python uses snake_case attributes; serialized fixtures and HTTP use camelCase.
 The framework decodes HTTP into normalized domain values, not FastAPI objects

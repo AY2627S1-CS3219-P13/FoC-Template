@@ -29,6 +29,20 @@ class SharedContractTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             validate("PolicyInput", without_expiry, schema=latest)
 
+    def test_v1_2_adds_optional_paired_location_coordinates(self):
+        from jsonschema import Draft202012Validator
+        latest = json.loads((Path(__file__).parents[1] / "contracts/schemas/v1.2.json").read_text())
+        Draft202012Validator.check_schema(latest)
+        validate("PolicyInput", self.base, schema=latest)
+        placed = copy.deepcopy(self.base)
+        placed["context"]["catalogue"]["locations"][0].update(latitude=1.293925, longitude=103.774153)
+        validate("PolicyInput", placed, schema=latest)
+        # Older readers ignore the additive fields.
+        validate("PolicyInput", placed)
+        del placed["context"]["catalogue"]["locations"][0]["longitude"]
+        with self.assertRaises(ValidationError):
+            validate("PolicyInput", placed, schema=latest)
+
     def test_schema_is_valid(self):
         from jsonschema import Draft202012Validator
         Draft202012Validator.check_schema(SCHEMA)

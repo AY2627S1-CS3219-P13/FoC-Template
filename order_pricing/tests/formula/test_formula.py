@@ -6,7 +6,7 @@ import unittest
 from formula.build import build
 from formula.policy.formula import DEFAULT_CONFIG, FormulaPolicy, load_policy, validate_config
 from pricing_contracts import UnsupportedRoute
-from tests.support import decode_input, load_fixture, validate_package
+from tests.support import LATEST, decode_input, load_fixture, validate_package
 
 
 class FormulaTests(unittest.TestCase):
@@ -96,6 +96,72 @@ class FormulaTests(unittest.TestCase):
             self.policy.calculate(decode_input(self.value))
 
 
+class CoordinateRouteTests(unittest.TestCase):
+    """Catalogue coordinates cover pairs that have no reference route."""
+
+    def setUp(self):
+        self.value = load_fixture("policy-input.json")
+        self.value["context"]["catalogue"]["locations"] = [
+            {"id": "com2", "latitude": 1.293925, "longitude": 103.774153},
+            {"id": "central-library", "latitude": 1.296558, "longitude": 103.773111},
+            {"id": "utown"},
+        ]
+        self.value["request"]["delivery"]["id"] = "central-library"
+        self.value["resolvedPlaces"]["deliveryLocationId"] = "central-library"
+        self.config = validate_config(dict(DEFAULT_CONFIG, footTrafficMaxPremium=0))
+
+    def calculate(self, config=None):
+        return FormulaPolicy(config or self.config).calculate(decode_input(self.value, LATEST))
+
+    def test_unlisted_pair_uses_haversine_with_detour(self):
+        result = self.calculate()
+        features = result.feature_snapshot
+        self.assertEqual(features["routeMethod"], "coordinates")
+        self.assertEqual(features["routeProvenance"], "estimated")
+        self.assertAlmostEqual(features["straightLineMetres"], 314.9, places=1)
+        self.assertAlmostEqual(features["walkableMetres"], 314.9 * 1.3, places=1)
+        # 2 + 15 * (5 + 3 + 409.37 / 75) / 60 + 0.5 = 5.86 -> 6 credits.
+        self.assertEqual(result.recommended_credits, 6)
+        self.assertEqual(result.feature_schema_version, "effort-1")
+
+    def test_farther_pairs_cost_more_and_reverse_is_symmetric(self):
+        near = self.calculate().recommended_credits
+        self.value["context"]["catalogue"]["locations"][1].update(latitude=1.299434, longitude=103.769064)
+        far = self.calculate()
+        self.assertGreater(far.recommended_credits, near)
+        self.value["resolvedPlaces"] = {"pickupLocationId": "central-library", "deliveryLocationId": "com2"}
+        self.assertEqual(self.calculate().feature_snapshot["walkableMetres"], far.feature_snapshot["walkableMetres"])
+
+    def test_reference_route_takes_precedence(self):
+        self.value["context"]["routes"].append(
+            {"pickupLocationId": "com2", "deliveryLocationId": "central-library", "walkableMetres": 900})
+        features = self.calculate().feature_snapshot
+        self.assertEqual(features["routeMethod"], "static")
+        self.assertIsNone(features["straightLineMetres"])
+        self.assertEqual(features["walkableMetres"], 900)
+
+    def test_missing_coordinates_or_disabled_detour_is_unsupported(self):
+        with self.assertRaises(UnsupportedRoute):
+            self.calculate(validate_config(dict(DEFAULT_CONFIG, footTrafficMaxPremium=0, walkingDetourFactor=0)))
+        old_release = {key: value for key, value in DEFAULT_CONFIG.items() if key not in ("walkingDetourFactor", "footTrafficMaxPremium")}
+        with self.assertRaises(UnsupportedRoute):
+            self.calculate(validate_config(old_release))
+        self.value["resolvedPlaces"]["deliveryLocationId"] = "utown"
+        self.value["context"]["routes"] = []
+        with self.assertRaises(UnsupportedRoute):
+            self.calculate()
+
+    def test_old_schema_reader_drops_coordinates(self):
+        # A v1/v1.1 framework cannot supply coordinates, so no estimate is made.
+        with self.assertRaises(UnsupportedRoute):
+            FormulaPolicy(self.config).calculate(decode_input(self.value))
+
+    def test_detour_factor_bounds(self):
+        for factor in (0.5, 2.5, -1, float("nan")):
+            with self.subTest(factor=factor), self.assertRaises(ValueError):
+                validate_config(dict(DEFAULT_CONFIG, walkingDetourFactor=factor))
+
+
 class PackageTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -115,6 +181,14 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(policy.calculate(value).recommended_credits, 13)
         policy.close()
         policy.close()
+        self.assertIn("coordinates.v1", first["requiredCapabilities"])
+        self.assertEqual(first["featureSchemaVersion"], "effort-traffic-coordinates-1")
+
+    def test_static_route_release_keeps_original_manifest(self):
+        config = dict(DEFAULT_CONFIG, walkingDetourFactor=0)
+        manifest = build(self.output, self.commit, "formula-test-static", config=config)
+        self.assertNotIn("coordinates.v1", manifest["requiredCapabilities"])
+        self.assertEqual(manifest["featureSchemaVersion"], "effort-traffic-1")
 
     def test_existing_release_is_never_overwritten(self):
         build(self.output, self.commit, "formula-test-001")

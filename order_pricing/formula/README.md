@@ -64,8 +64,9 @@ footfall references. Invalid assets fail startup. The framework separately check
 the release inventory/checksums and major/capability compatibility before import.
 
 The framework passes an immutable enriched context. This policy looks up the
-directed route by resolved campus location IDs; a missing route raises
-`UnsupportedRoute`. It never makes a source call, reads a clock for features,
+directed route by resolved campus location IDs. A release with a nonzero
+`walkingDetourFactor` (see below) falls back to catalogue coordinates when no
+reference route exists; otherwise a missing route raises `UnsupportedRoute`. It never makes a source call, reads a clock for features,
 writes storage or uses draft identity. Stale/missing Order context returns the
 same baseline with `stale_order_context`/`order_context_unavailable` warnings.
 Legacy people-count footfall values and Order counts do not affect the effort
@@ -123,3 +124,37 @@ The release layout is `manifest.json`, `requirements.lock`, `policy/formula.py`,
 routes/footfall and their source stamps; warm-up is serialized PolicyInput. Mount
 or COPY the selected release read-only at the serving package path. Never modify
 a running release; rebuild and deploy a new image.
+
+## Coordinate route estimates
+
+Reference routes cannot keep up with an admin-edited location catalogue, so
+`releases/effort-traffic-002` estimates unlisted pairs from Supplier's location
+coordinates (contract v1.2, capability `coordinates.v1`):
+
+```text
+straightLineMetres = haversine(pickup coordinates, delivery coordinates)
+walkableMetres     = straightLineMetres * walkingDetourFactor   # default 1.3
+```
+
+The 1.3 detour factor is an uncalibrated assumption for campus paths, stairs and
+covered walkways; it must stay within 1–2, and 0 or an omitted value disables the
+estimate (older releases are unchanged). A listed reference route always wins.
+Locations without coordinates still raise `UnsupportedRoute`. Estimated routes
+add `routeMethod`, `straightLineMetres` and `walkingDetourFactor` to the
+`effort-traffic-coordinates-1` feature snapshot and mark `routeProvenance` as
+`estimated`. Supplier coordinates are approximate building positions, so prices
+for very short hops are dominated by the fixed approach/pickup minutes.
+
+Straight-line estimates were chosen over a routing API: Google Maps' Routes API
+would need a billed key, network egress from the private Pricing container and a
+per-pair cache, and NUSMods publishes venue coordinates but no walking routes.
+A measured route table can later be shipped as reference routes without changing
+the fallback.
+
+Build a release from a committed policy with the coordinate warm-up fixture:
+
+```sh
+python -m formula.build --output formula/releases/<new-id> --release-id <new-id> \
+  --code-commit <full commit containing formula/policy> --fixture formula/data/coordinate-warmup.json
+```
+

@@ -452,3 +452,14 @@ or malformed supplied expiry remains invalid. Deploy the updated serving API
 before an expiry-free Order client; rollback to older serving cannot quote new
 expiry-free requests, so the advisory UI falls back to manual offers. Actual
 order creation still requires its own future expiry.
+
+### v1.2 catalogue coordinates
+
+`contracts/schemas/v1.2.json` adds optional `latitude` and `longitude` (WGS84
+decimal degrees, both or neither) to catalogue locations. Supplier's internal
+pricing catalogue supplies them; serving validates and passes them to policies,
+and older readers ignore them. Serving advertises capability `coordinates.v1`, so
+a release requiring it fails readiness on older serving instead of quoting
+without coordinates. Formula release `effort-traffic-002` uses them to estimate
+routes for location pairs without a reference route.
+
