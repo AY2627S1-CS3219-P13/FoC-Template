@@ -8,6 +8,9 @@ the same 1 MiB request limit as Order. `/orders/schedule` is a child page served
 by the main Order frontend. Order's scheduled-import listener stays private on
 container port 8081; the gateway continues rejecting every `/internal` path.
 
+`/api/v1/suppliers` also allows 1 MiB, because supplier create and edit requests
+can carry a photo of up to 512 KiB as base64. Other routes keep the 16 KiB default.
+
 ## Authentication rate limits
 
 By default the gateway uses the connection's client IP (`$binary_remote_addr`),

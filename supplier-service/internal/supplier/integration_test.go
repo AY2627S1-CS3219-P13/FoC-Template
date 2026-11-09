@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"image"
 	"io"
 	"log/slog"
 	"net/http"
@@ -185,4 +186,93 @@ func TestInputValidation(t *testing.T) {
 	}
 	status(t, request(t, a, "GET", "/api/v1/suppliers/invalid", "user", nil), 400)
 	status(t, request(t, a, "PATCH", "/api/v1/suppliers/"+testUserID, "admin", map[string]string{}), 400)
+}
+
+func TestSupplierImages(t *testing.T) {
+	a := testApp(t)
+	ctx := context.Background()
+	var seeded int
+	if err := a.db.QueryRow(ctx, "SELECT count(*) FROM suppliers WHERE image LIKE 'data:image/jpeg;base64,%'").Scan(&seeded); err != nil || seeded != 6 {
+		t.Fatalf("expected the 6 template photos to be seeded, got %d (%v)", seeded, err)
+	}
+	// Lists never carry photos: Order reads 100 suppliers within 1 MiB.
+	w := request(t, a, "GET", "/api/v1/suppliers?pageSize=100", "user", nil)
+	status(t, w, 200)
+	if strings.Contains(w.Body.String(), `"image"`) {
+		t.Fatal("the supplier list returned photos")
+	}
+	w = request(t, a, "GET", "/api/v1/suppliers?q=Anna", "user", nil)
+	var list struct {
+		Suppliers []Supplier `json:"suppliers"`
+	}
+	if json.Unmarshal(w.Body.Bytes(), &list) != nil || len(list.Suppliers) != 1 {
+		t.Fatal("expected one seeded supplier named Anna")
+	}
+	anna := "/api/v1/suppliers/" + list.Suppliers[0].ID
+	read := func(path string) Supplier {
+		t.Helper()
+		w := request(t, a, "GET", path, "user", nil)
+		status(t, w, 200)
+		var body struct {
+			Supplier Supplier `json:"supplier"`
+		}
+		if json.Unmarshal(w.Body.Bytes(), &body) != nil {
+			t.Fatal("invalid supplier response")
+		}
+		return body.Supplier
+	}
+	// Order resolves pickups without include and reads at most 64 KiB.
+	if w = request(t, a, "GET", anna, "user", nil); strings.Contains(w.Body.String(), `"image"`) || w.Body.Len() > 64*1024 {
+		t.Fatal("a plain supplier read returned the photo")
+	}
+	if s := read(anna + "?include=image"); !strings.HasPrefix(s.Image, "data:image/jpeg;base64,") {
+		t.Fatal("the seeded photo was not returned on request")
+	}
+	status(t, request(t, a, "GET", anna+"?include=photos", "user", nil), 400)
+
+	photo := dataURL("png", encodePNG(t, image.NewRGBA(image.Rect(0, 0, 3, 2))))
+	body := map[string]any{"name": "Photo Kiosk", "category": "retail", "locationId": "com2", "image": photo}
+	status(t, request(t, a, "POST", "/api/v1/suppliers", "user", body), 403)
+	body["image"] = "data:image/png;base64,bad"
+	if w = request(t, a, "POST", "/api/v1/suppliers", "admin", body); w.Code != 400 || !strings.Contains(w.Body.String(), "invalid_image") {
+		t.Fatalf("an invalid photo was not rejected: %d %s", w.Code, w.Body.String())
+	}
+	body["image"] = photo
+	w = request(t, a, "POST", "/api/v1/suppliers", "admin", body)
+	status(t, w, 201)
+	var created struct {
+		Supplier Supplier `json:"supplier"`
+	}
+	if json.Unmarshal(w.Body.Bytes(), &created) != nil || !strings.HasPrefix(created.Supplier.Image, "data:image/jpeg;base64,") {
+		t.Fatal("the created supplier's photo was not stored as JPEG")
+	}
+	path := "/api/v1/suppliers/" + created.Supplier.ID
+	stored := read(path + "?include=image").Image
+	if stored != created.Supplier.Image {
+		t.Fatal("the read photo differs from the saved one")
+	}
+	// Editing other fields keeps the photo; an empty string removes it.
+	status(t, request(t, a, "PATCH", path, "admin", map[string]string{"description": "Next to LT19"}), 200)
+	if read(path+"?include=image").Image != stored {
+		t.Fatal("a text edit changed the photo")
+	}
+	status(t, request(t, a, "PATCH", path, "admin", map[string]string{"image": ""}), 200)
+	if read(path+"?include=image").Image != "" {
+		t.Fatal("the photo was not removed")
+	}
+	status(t, request(t, a, "PATCH", path, "admin", map[string]string{"image": photo}), 200)
+	// A supplier without a photo is created normally.
+	status(t, request(t, a, "POST", "/api/v1/suppliers", "admin", map[string]string{"name": "No Photo", "category": "food", "locationId": "com2"}), 201)
+	// Deleting clears the photo, and the database refuses one on a deleted row.
+	status(t, request(t, a, "DELETE", path, "admin", nil), 204)
+	var remaining string
+	if err := a.db.QueryRow(ctx, "SELECT image FROM suppliers WHERE id=$1", created.Supplier.ID).Scan(&remaining); err != nil || remaining != "" {
+		t.Fatal("deleting a supplier kept its photo")
+	}
+	if _, err := a.db.Exec(ctx, "UPDATE suppliers SET image='x' WHERE id=$1", created.Supplier.ID); err == nil {
+		t.Fatal("a deleted supplier accepted a photo")
+	}
+	// A request body over 1 MiB is refused before decoding.
+	body["name"], body["image"] = "Huge", "data:image/png;base64,"+strings.Repeat("A", 1024*1024)
+	status(t, request(t, a, "POST", "/api/v1/suppliers", "admin", body), 400)
 }

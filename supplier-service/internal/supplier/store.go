@@ -61,6 +61,7 @@ type Supplier struct {
 	Active       bool      `json:"active"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
+	Image        string    `json:"image,omitempty"`
 }
 
 type Location struct {
@@ -70,12 +71,23 @@ type Location struct {
 	Longitude float64 `json:"longitude"`
 }
 
-const supplierColumns = "id,name,category,location_id,description,opening_hours,active,created_at,updated_at"
+// Lists and Order's lookups read supplierColumns only, so a photo (up to about
+// 700 KB of text) is returned just by the single-supplier reads that ask for it.
+const (
+	supplierColumns      = "id,name,category,location_id,description,opening_hours,active,created_at,updated_at"
+	supplierImageColumns = supplierColumns + ",image"
+)
 
 type scanner interface{ Scan(...any) error }
 
 func scanSupplier(row scanner) (Supplier, error) {
 	var s Supplier
 	err := row.Scan(&s.ID, &s.Name, &s.Category, &s.LocationID, &s.Description, &s.OpeningHours, &s.Active, &s.CreatedAt, &s.UpdatedAt)
+	return s, err
+}
+
+func scanSupplierWithImage(row scanner) (Supplier, error) {
+	var s Supplier
+	err := row.Scan(&s.ID, &s.Name, &s.Category, &s.LocationID, &s.Description, &s.OpeningHours, &s.Active, &s.CreatedAt, &s.UpdatedAt, &s.Image)
 	return s, err
 }

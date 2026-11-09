@@ -116,6 +116,8 @@ function SupplierDetails({ id, locations, canManage, busy, onFailure, onEdit, on
   }, [id, retry, onFailure]);
   return <aside className="detail-panel" aria-label="Supplier details">
     {error ? <><p role="alert">{error}</p><button className="secondary-button" onClick={() => setRetry(n => n+1)}>Retry details</button></> : !supplier ? <p role="status">Loading details…</p> : <>
+      {/* eslint-disable-next-line @next/next/no-img-element -- a data URL needs no optimisation */}
+      {supplier.image && <img className="supplier-photo detail-photo" src={supplier.image} alt={`Photo of ${supplier.name}`} />}
       <div className="detail-head"><div className="detail-icon" aria-hidden="true">{supplier.name[0]}</div><span className={`status-pill ${supplier.active ? "is-active" : "is-inactive"}`}>{supplier.active ? "Active" : "Inactive"}</span></div>
       <p className="eyebrow">Supplier details</p><h3>{supplier.name}</h3><p className="detail-description">{supplier.description || "Description not provided"}</p>
       {!supplier.active && <p className="inactive-note">This supplier is inactive and unavailable for new pickups.</p>}
