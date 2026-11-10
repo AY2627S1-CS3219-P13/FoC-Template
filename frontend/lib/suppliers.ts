@@ -11,6 +11,7 @@ export type Supplier = {
   active: boolean;
   createdAt: string;
   updatedAt: string;
+  image?: string; // JPEG data URL; only single-supplier reads include it
 };
 export type SupplierDraft = Omit<Supplier, "id" | "createdAt" | "updatedAt">;
 export type CatalogueQuery = {

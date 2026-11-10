@@ -21,7 +21,7 @@ export function queryString(query: CatalogueQuery) {
 export const supplierApi = {
   list: (query: CatalogueQuery, signal?: AbortSignal) => request<SupplierPage>(`/api/v1/suppliers?${queryString(query)}`, "GET", undefined, signal),
   locations: (signal?: AbortSignal) => request<{ locations: CampusLocation[] }>("/api/v1/locations", "GET", undefined, signal),
-  get: (id: string, signal?: AbortSignal) => request<{ supplier: Supplier }>(`/api/v1/suppliers/${encodeURIComponent(id)}`, "GET", undefined, signal),
+  get: (id: string, signal?: AbortSignal) => request<{ supplier: Supplier }>(`/api/v1/suppliers/${encodeURIComponent(id)}?include=image`, "GET", undefined, signal),
   create: (draft: SupplierDraft) => request<{ supplier: Supplier }>("/api/v1/suppliers", "POST", draft),
   update: (id: string, draft: Partial<SupplierDraft>) => request<{ supplier: Supplier }>(`/api/v1/suppliers/${encodeURIComponent(id)}`, "PATCH", draft),
   remove: (id: string) => request<void>(`/api/v1/suppliers/${encodeURIComponent(id)}`, "DELETE"),

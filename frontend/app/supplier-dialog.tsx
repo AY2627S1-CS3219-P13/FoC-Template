@@ -1,7 +1,8 @@
 "use client";
-import { useState, type FormEvent } from "react";
+import { useState, type ChangeEvent, type FormEvent } from "react";
 import { categories, categoryLabel, displayTime, emptyDraft, type CampusLocation, type Category, type Supplier, type SupplierDraft } from "@/lib/suppliers";
 import { supplierError } from "@/lib/supplier-api";
+import { photoData } from "@/lib/image";
 import Modal from "./modal";
 
 export default function SupplierDialog({ supplier, locations, onSave, onClose }: {
@@ -14,10 +15,27 @@ export default function SupplierDialog({ supplier, locations, onSave, onClose }:
   const [saved, setSaved] = useState<Supplier | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // The photo is sent only when it changed; an empty string removes it.
+  const originalImage = supplier?.image ?? "";
+  const [image, setImage] = useState(originalImage);
+  const [preparing, setPreparing] = useState(false);
+  const [imageError, setImageError] = useState("");
   const summary = saved ?? draft;
+  const previewImage = saved ? saved.image : image;
+  async function chooseImage(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setPreparing(true); setImageError("");
+    try { setImage(await photoData(file)); }
+    catch (failure) { setImageError(failure instanceof Error ? failure.message : "This photo could not be prepared."); }
+    finally { setPreparing(false); }
+  }
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
-    try { setSaved(await onSave({ ...draft, name: draft.name.trim(), description: draft.description.trim(), openingHours: draft.openingHours.trim() })); }
+    const payload: SupplierDraft = { ...draft, name: draft.name.trim(), description: draft.description.trim(), openingHours: draft.openingHours.trim() };
+    if (image !== originalImage) payload.image = image;
+    try { setSaved(await onSave(payload)); }
     catch (failure) { setError(supplierError(failure)); }
     finally { setBusy(false); }
   }
@@ -32,14 +50,23 @@ export default function SupplierDialog({ supplier, locations, onSave, onClose }:
           <label className="supplier-field"><span>Status</span><select aria-label="Status" value={draft.active ? "active" : "inactive"} onChange={e => setDraft({ ...draft, active: e.target.value === "active" })}><option value="active">Active</option><option value="inactive">Inactive</option></select><small>Inactive suppliers remain visible for reference.</small></label>
           <label className="supplier-field"><span>Description <em>(optional)</em></span><textarea rows={4} maxLength={500} value={draft.description} onChange={e => setDraft({ ...draft, description: e.target.value })} placeholder="Pickup directions or useful details" /></label>
           <label className="supplier-field"><span>Opening hours <em>(optional)</em></span><textarea rows={4} maxLength={200} value={draft.openingHours} onChange={e => setDraft({ ...draft, openingHours: e.target.value })} placeholder="For example, Mon–Fri 09:00–17:00" /></label>
+          <div className="supplier-field supplier-photo-field"><span>Photo <em>(optional)</em></span>
+            {/* eslint-disable-next-line @next/next/no-img-element -- a data URL needs no optimisation */}
+            {image && <img className="supplier-photo-thumb" src={image} alt="Selected supplier photo" />}
+            <div className="photo-actions"><label className="secondary-button file-button">{image ? "Replace photo" : "Choose photo"}<input type="file" accept="image/jpeg,image/png,image/webp" disabled={preparing} onChange={chooseImage} /></label>{image && <button type="button" className="text-button" disabled={preparing} onClick={() => setImage("")}>Remove photo</button>}</div>
+            <small role="status">{preparing ? "Preparing photo…" : "JPEG, PNG or WebP. Large photos are resized before saving."}</small>
+            {imageError && <p className="form-error" role="alert">{imageError}</p>}
+          </div>
         </fieldset>
         {error && <p className="form-error" role="alert">{error}</p>}
         {saved && <p className="notice" role="status">Your changes have been saved.</p>}
-        <div className="supplier-form-actions">{saved ? <button type="button" className="primary-button" onClick={onClose}>Done</button> : <><button className="primary-button" disabled={busy || !draft.name.trim() || !draft.locationId}>{busy ? "Saving…" : "Save supplier"}</button><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button></>}</div>
+        <div className="supplier-form-actions">{saved ? <button type="button" className="primary-button" onClick={onClose}>Done</button> : <><button className="primary-button" disabled={busy || preparing || !draft.name.trim() || !draft.locationId}>{busy ? "Saving…" : "Save supplier"}</button><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button></>}</div>
       </form>
       <aside className="supplier-save-preview" aria-label="Record preview"><p className="auth-overline">{saved ? "Saved record" : "Record preview"}</p><div className="supplier-summary-card">
+        {/* eslint-disable-next-line @next/next/no-img-element -- a data URL needs no optimisation */}
+        {previewImage && <img className="supplier-photo" src={previewImage} alt={`Photo of ${summary.name || "the supplier"}`} />}
         <strong>{summary.name || "Supplier name"}</strong><p>{categoryLabel(summary.category)} · {locations.find(l => l.id === summary.locationId)?.name || "Choose a location"}</p>
-        <dl><div><dt>Supplier ID</dt><dd>{saved?.id ?? supplier?.id ?? "Assigned on save"}</dd></div><div><dt>Created</dt><dd>{saved || supplier ? displayTime((saved ?? supplier)!.createdAt) : "Assigned on save"}</dd></div><div><dt>Status</dt><dd>{summary.active ? "Active" : "Inactive"}</dd></div><div><dt>Description</dt><dd>{summary.description || "Not provided"}</dd></div><div><dt>Opening hours</dt><dd>{summary.openingHours || "Not provided"}</dd></div></dl>
+        <dl><div><dt>Supplier ID</dt><dd>{saved?.id ?? supplier?.id ?? "Assigned on save"}</dd></div><div><dt>Created</dt><dd>{saved || supplier ? displayTime((saved ?? supplier)!.createdAt) : "Assigned on save"}</dd></div><div><dt>Status</dt><dd>{summary.active ? "Active" : "Inactive"}</dd></div><div><dt>Description</dt><dd>{summary.description || "Not provided"}</dd></div><div><dt>Opening hours</dt><dd>{summary.openingHours || "Not provided"}</dd></div><div><dt>Photo</dt><dd>{previewImage ? "Included" : "Not provided"}</dd></div></dl>
       </div><p className="supplier-preview-note">Only one active supplier can use the same name at a location. The same name at a different location is allowed.</p></aside>
     </div>
   </Modal>;

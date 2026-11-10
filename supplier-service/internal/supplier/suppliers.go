@@ -29,7 +29,17 @@ func (a *App) get(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	s, err := scanSupplier(a.db.QueryRow(r.Context(), "SELECT "+supplierColumns+" FROM suppliers WHERE id=$1 AND deleted_at IS NULL", id))
+	// The photo is returned only on request: Order resolves pickups through this
+	// endpoint and reads at most 64 KiB.
+	columns, scan := supplierColumns, scanSupplier
+	switch r.URL.Query().Get("include") {
+	case "":
+	case "image":
+		columns, scan = supplierImageColumns, scanSupplierWithImage
+	default:
+		return problem(400, "invalid_query", "Include must be image.")
+	}
+	s, err := scan(a.db.QueryRow(r.Context(), "SELECT "+columns+" FROM suppliers WHERE id=$1 AND deleted_at IS NULL", id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return supplierNotFound()
 	}
@@ -48,13 +58,14 @@ type supplierWrite struct {
 	Description  *string `json:"description"`
 	OpeningHours *string `json:"openingHours"`
 	Active       *bool   `json:"active"`
+	Image        *string `json:"image"` // "" removes the photo
 }
 
 func (b *supplierWrite) validate(create bool) error {
 	if create && (b.Name == nil || b.Category == nil || b.LocationID == nil) {
 		return problem(400, "invalid_supplier", "Name, category and location are required.")
 	}
-	if b.Name == nil && b.Category == nil && b.LocationID == nil && b.Description == nil && b.OpeningHours == nil && b.Active == nil {
+	if b.Name == nil && b.Category == nil && b.LocationID == nil && b.Description == nil && b.OpeningHours == nil && b.Active == nil && b.Image == nil {
 		return problem(400, "invalid_supplier", "Provide at least one editable supplier field.")
 	}
 	for _, field := range []struct {
@@ -76,6 +87,13 @@ func (b *supplierWrite) validate(create bool) error {
 	if b.Category != nil && !slices.Contains(categories, *b.Category) {
 		return problem(400, "invalid_category", "Choose food, printing, retail, services or other.")
 	}
+	if b.Image != nil {
+		image, err := normaliseImage(*b.Image)
+		if err != nil {
+			return err
+		}
+		*b.Image = image
+	}
 	return nil
 }
 
@@ -87,9 +105,9 @@ func (a *App) create(w http.ResponseWriter, r *http.Request) error {
 	if err := body.validate(true); err != nil {
 		return err
 	}
-	s, err := scanSupplier(a.db.QueryRow(r.Context(), `INSERT INTO suppliers(name,category,location_id,description,opening_hours,active)
-        VALUES($1,$2,$3,COALESCE($4,''),COALESCE($5,''),COALESCE($6,true)) RETURNING `+supplierColumns,
-		body.Name, body.Category, body.LocationID, body.Description, body.OpeningHours, body.Active))
+	s, err := scanSupplierWithImage(a.db.QueryRow(r.Context(), `INSERT INTO suppliers(name,category,location_id,description,opening_hours,active,image)
+        VALUES($1,$2,$3,COALESCE($4,''),COALESCE($5,''),COALESCE($6,true),COALESCE($7,'')) RETURNING `+supplierImageColumns,
+		body.Name, body.Category, body.LocationID, body.Description, body.OpeningHours, body.Active, body.Image))
 	if err != nil {
 		return storeError(err)
 	}
@@ -112,12 +130,12 @@ func (a *App) update(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	// Apply the patch atomically; PostgreSQL enforces concurrent uniqueness.
-	s, err := scanSupplier(a.db.QueryRow(r.Context(), `UPDATE suppliers SET
+	s, err := scanSupplierWithImage(a.db.QueryRow(r.Context(), `UPDATE suppliers SET
         name=COALESCE($2,name),category=COALESCE($3,category),location_id=COALESCE($4,location_id),
         description=COALESCE($5,description),opening_hours=COALESCE($6,opening_hours),
-        active=COALESCE($7,active),updated_at=now()
-        WHERE id=$1 AND deleted_at IS NULL RETURNING `+supplierColumns,
-		id, body.Name, body.Category, body.LocationID, body.Description, body.OpeningHours, body.Active))
+        active=COALESCE($7,active),image=COALESCE($8,image),updated_at=now()
+        WHERE id=$1 AND deleted_at IS NULL RETURNING `+supplierImageColumns,
+		id, body.Name, body.Category, body.LocationID, body.Description, body.OpeningHours, body.Active, body.Image))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return supplierNotFound()
 	}
@@ -134,7 +152,7 @@ func (a *App) remove(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	result, err := a.db.Exec(r.Context(), `UPDATE suppliers SET deleted_at=now(),active=false,updated_at=now()
+	result, err := a.db.Exec(r.Context(), `UPDATE suppliers SET deleted_at=now(),active=false,image='',updated_at=now()
         WHERE id=$1 AND deleted_at IS NULL`, id)
 	if err != nil {
 		return err

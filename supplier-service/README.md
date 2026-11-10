@@ -85,7 +85,7 @@ ESLint 9 is pinned because the React/import plugins bundled with the selected Ne
 
 ## Explicitly deferred
 
-Image/coordinate fields and image serving, Order integration, Redis caching, RabbitMQ events and load testing remain future work. The seed CSV retains the additional source metadata. D2 verification is tracked in the checkpoint document.
+Suppliers now have coordinates (migration 004) and one optional photo (migration 005; see the [API](API.md#photo)). Admins add, replace or remove the photo in the supplier form, and the details panel shows it. Redis caching, RabbitMQ events and load testing remain future work. The seed CSV retains the additional source metadata. D2 verification is tracked in the checkpoint document.
 
 This Compose setup binds public ports to loopback for local use. EC2 deployment still needs HTTPS ingress, secure cookies, deployment secrets, a real email provider, backup policy and appropriate network access. Services can communicate by Compose DNS on one host. The gateway re-resolves those names when containers are replaced. User's existing peer-IP rate limit sees gateway traffic as one source; a production trusted-proxy/rate-limit policy remains open.
 

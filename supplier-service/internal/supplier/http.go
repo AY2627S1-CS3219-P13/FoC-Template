@@ -63,7 +63,8 @@ func readJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	if err != nil || media != "application/json" {
 		return problem(415, "json_required", "Send Content-Type: application/json.")
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 8*1024)
+	// Room for a 512 KiB photo as base64 (about 683 KiB) plus the text fields.
+	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024)
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if d.Decode(dst) != nil || d.Decode(new(any)) != io.EOF {
