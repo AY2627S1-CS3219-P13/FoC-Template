@@ -118,7 +118,7 @@ class AcceptancePolicy:
         return PolicyResult(
             self.prices[best], "model", warnings, FEATURE_SCHEMA_VERSION,
             MappingProxyType({
-                "provenance": "synthetic", "experimental": True,
+                "provenance": self.spec.get("provenance", "synthetic"), "experimental": True,
                 "acceptanceProbability": probabilities[best],
                 "acceptanceAtMinimum": probabilities[0], "acceptanceAtMaximum": probabilities[-1],
                 "pricePenalty": self.penalty, "baselineCredits": baseline.recommended_credits,

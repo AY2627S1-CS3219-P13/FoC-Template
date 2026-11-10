@@ -90,7 +90,8 @@ def policy_input(record, shared):
     """The PolicyInput serving would have built for this record's quote."""
     context = copy.deepcopy(shared)
     context["orderContext"] = copy.deepcopy(record["orderContext"])
-    context["sources"].append({"source": "orders", "snapshotId": "synthetic-orders",
-                               "asOf": record["calculatedAt"], "provenance": "synthetic"})
+    provenance = record.get("provenance", "synthetic")
+    context["sources"].append({"source": "orders", "snapshotId": provenance + "-orders",
+                               "asOf": record["calculatedAt"], "provenance": provenance})
     return PolicyInput("1.0", record["calculatedAt"], _freeze(record["request"]),
                        _freeze(record["resolvedPlaces"]), _freeze(context))

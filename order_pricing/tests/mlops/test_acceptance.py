@@ -153,6 +153,22 @@ class AcceptancePipelineTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             acceptance.export(self.work, selection, self.formula, output, "acceptance-test-1")
 
+    def test_production_approval_is_explicit_and_attributed(self):
+        path = self.root / (next(tempfile._get_candidate_names()) + ".selection.json")
+        with self.assertRaisesRegex(ValueError, "approver and a reason"):
+            acceptance.select(self.work, self.result["runId"], path, approved_by="Reviewer")
+        self.assertFalse(path.exists())
+        acceptance.select(self.work, self.result["runId"], path, "Reviewer", "advisory prices only")
+        selection = json.loads(path.read_text())
+        self.assertTrue(selection["productionApproved"])
+        self.assertEqual(selection["approval"], {"approvedBy": "Reviewer", "reason": "advisory prices only"})
+        output = self.root / (next(tempfile._get_candidate_names()) + "-package")
+        manifest = acceptance.export(self.work, path, self.formula, output, "acceptance-approved-1")
+        validate_package(output)
+        self.assertTrue(manifest["productionApproved"])
+        self.assertTrue(manifest["experimental"])
+        self.assertEqual(json.loads((output / "artifacts/selection.json").read_text()), selection)
+
     def test_export_rejects_changed_selection(self):
         path = self.selection()
         value = json.loads(path.read_text())

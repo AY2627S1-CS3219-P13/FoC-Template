@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 
-from . import feed, pipeline
+from . import feed, observed, pipeline
 
 KINDS = ("effort-ols", "acceptance-gbm")
 SIZES = ("graph_rows", "graph_batches", "agent_days", "agent_batches")
@@ -37,6 +37,13 @@ def main():
     p.add_argument("--formula-package", required=True)
     p.add_argument("--seed", type=int, default=42)
     add_sizes(p)
+    p = commands.add_parser("import-observed", help="add observed Order outcomes to a simulated dataset")
+    p.add_argument("--synthetic", required=True, help="simulated dataset directory")
+    p.add_argument("--orders", required=True, help="CSV from mlflow/sql/extract-orders.sql")
+    p.add_argument("--pricing-events", help="JSONL of Pricing training-export events")
+    p.add_argument("--output", required=True)
+    p.add_argument("--observed-weight", type=float, default=0.2,
+                   help="share of total training weight given to observed orders")
     for name in ("train", "demo"):
         p = commands.add_parser(name)
         p.add_argument("--work-dir", required=True)
@@ -47,7 +54,7 @@ def main():
         p.add_argument("--count", type=int, default=1000)
         p.add_argument("--kind", choices=KINDS, default="effort-ols")
         if name == "train":
-            p.add_argument("--dataset", help="simulated dataset directory (acceptance-gbm)")
+            p.add_argument("--dataset", help="simulated or mixed dataset directory (acceptance-gbm)")
         else:
             add_sizes(p)
         if name == "demo":
@@ -59,6 +66,8 @@ def main():
     p.add_argument("--selection", required=True)
     p.add_argument("--maximum-mae", type=float, default=0.05)
     p.add_argument("--minimum-agreement", type=float, default=0.98)
+    p.add_argument("--approved-by", help="acceptance-gbm: record production approval by this person")
+    p.add_argument("--approval-reason", help="acceptance-gbm: why the release is approved (required with --approved-by)")
     p = commands.add_parser("export")
     for name in ("work-dir", "selection", "formula-package", "output", "release-id"):
         p.add_argument("--" + name, required=True)
@@ -72,6 +81,9 @@ def main():
     sizes = {name: getattr(args, name) for name in SIZES if hasattr(args, name)}
     if args.command == "simulate":
         result = acceptance().simulate(args.output, args.formula_package, args.seed, **sizes)
+    elif args.command == "import-observed":
+        result = observed.build(args.synthetic, args.orders, args.output, args.pricing_events,
+                                args.observed_weight)
     elif args.command in ("train", "demo") and args.kind == "acceptance-gbm":
         module = acceptance()
         dataset_dir = getattr(args, "dataset", None)
@@ -99,7 +111,10 @@ def main():
             result.update(selection=str(selection), output=str(args.output), releaseId=manifest["releaseId"])
     elif args.command == "select":
         if candidate_kind(args.work_dir, args.run_id) == "acceptance-gbm":
-            result = acceptance().select(args.work_dir, args.run_id, args.selection)
+            result = acceptance().select(args.work_dir, args.run_id, args.selection,
+                                         args.approved_by, args.approval_reason)
+        elif args.approved_by or args.approval_reason:
+            raise SystemExit("production approval is only supported for acceptance-gbm candidates")
         else:
             result = pipeline.select(args.work_dir, args.run_id, args.selection,
                                      args.maximum_mae, args.minimum_agreement)

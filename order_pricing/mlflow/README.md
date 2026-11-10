@@ -138,6 +138,66 @@ one are the effort-distillation model. The package's `requirements.lock` is
 install `libgomp1` for LightGBM. The model is the native LightGBM text format, not
 a pickle. Stale or unavailable Order context falls back to the copied baseline.
 
+Selections default to `productionApproved: false`. Production approval is an
+explicit, attributed decision: pass `--approved-by NAME --approval-reason TEXT` to
+`select` (acceptance-gbm only). The selection records the approval and export
+copies the flag into the manifest; the package stays `experimental` with
+`synthetic` provenance, since approval does not turn synthetic metrics into
+evidence of real acceptance.
+
+### Observed orders (one-off backfill)
+
+`import-observed` appends real Order outcomes to a simulated dataset, producing a
+`mixed-acceptance-*` dataset that trains through the same `prepare` path:
+
+```sh
+python -m pricing_mlops import-observed --synthetic /data/datasets/seed-42 --orders /data/orders.csv --pricing-events /data/pricing-events.jsonl --output /data/datasets/mixed --observed-weight 0.2
+```
+
+- `orders.csv` comes from [sql/extract-orders.sql](sql/extract-orders.sql), run
+  once in a read-only transaction against Order's database. It covers immediate
+  orders whose expiry is over an hour past and holds no user/courier IDs, item
+  names or cancellation reasons.
+- `pricing-events.jsonl` (optional) is Pricing's training export, one envelope per
+  line; only `QuoteCalculated` is read. Order does not store which quote a user
+  saw, so a quote is linked when pickup, delivery and quantity match and it was
+  calculated at most 150 s (validity plus one refresh) before creation. Quotes from
+  two drafts make the link ambiguous and it is dropped. A linked quote supplies the
+  Order context Pricing actually saw; otherwise it is rebuilt from the export with
+  Order's pricing-context definition (open at creation, created in the last 15
+  minutes, same pickup location).
+- Labels match the simulator: accepted before expiry, expired, or cancelled
+  before acceptance (censored). Undecided orders and locations the catalogue no
+  longer has are skipped and counted in the manifest's `observedReport`.
+- One in five orders (stable order-ID hash) is held out. Observed rows share
+  `--observed-weight` of the training weight; the simulators split the rest.
+  Training reports `observed_*` holdout metrics beside the synthetic ones, but only
+  the synthetic gates decide selection: a few hundred orders are too few to gate on.
+  Mixed releases record `mixed` provenance and `synthetic-and-observed` calibration.
+
+[demo-observed/](demo-observed/README.md) holds 100 **fake** orders and matching
+quotes in the real export formats, for demonstrating this end to end.
+
+### Retraining a release
+
+`order_pricing/scripts/retrain.sh` runs simulate, `import-observed` (with
+`--orders`), train, select, export and checks in containers, then stages
+`models/<release-id>` and points `RELEASE_PACKAGE` at it. It does not commit,
+push or deploy: merging the change to main is what makes CI test the package and
+the release workflow publish and deploy it. For example, the demo:
+
+```sh
+sh order_pricing/scripts/retrain.sh --release-id acceptance-gbm-demo --orders order_pricing/mlflow/demo-observed/orders.csv --pricing-events order_pricing/mlflow/demo-observed/pricing-events.jsonl --quick
+```
+
+It refuses a dirty working tree (the release records the HEAD commit as its
+code; `--allow-dirty` overrides), an existing package directory, and candidates
+that fail the gates. Inputs, MLflow store and command outputs stay in the ignored
+`order_pricing/.retrain/<release-id>-<time>/`; the script prints how to browse the
+run in the MLflow UI. `--check full` also runs `scripts/check.sh`; `--no-switch`
+leaves `RELEASE_PACKAGE` unchanged; `--approved-by`/`--approval-reason` record
+production approval. Run `sh order_pricing/scripts/retrain.sh --help` for all options.
+
 ## Local MLflow server
 
 ```sh
@@ -179,12 +239,10 @@ may arrive. Schedule polling externally; the command performs one bounded page.
 
 ## Remaining implementation work
 
-The acceptance model is trained only on synthetic orders. Real records should
-reuse the synthetic record shape (quote input + confirmed offer + outcome) so
-the same `prepare` path trains on them. Real-data label joins, mature outcome
-windows, real-only evaluation, causal price
-response calibration, scheduled retraining and AWS release automation remain
-follow-ups. The current synthetic generator exercises effort-price distillation;
+Observed orders can be added through the one-off `import-observed` backfill;
+continuous collection still needs Order's durable event producer. Exact
+quote-to-order linkage, real-only selection gates, causal price response
+calibration and scheduled retraining remain follow-ups. The current synthetic generator exercises effort-price distillation;
 it is not the complete campus behavioural simulator described in synthetic-data.md.
 
 The current model learns the effort core only. A deterministic policy then applies
