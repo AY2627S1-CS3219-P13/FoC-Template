@@ -8,11 +8,19 @@ docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --securit
 
 docker build -f order_pricing/formula/Dockerfile -t foc-pricing-formula-tests order_pricing
 docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges foc-pricing-formula-tests
-# The package the next AWS release will publish must pass the adapter suite.
+# The package the next AWS release will publish must pass the adapter suite inside
+# its own serving runtime, which installs the package's locked dependencies.
 release_package=$(sh order_pricing/scripts/release-package.sh)
+case $(grep -o '"entryPoint": *"[^"]*"' "order_pricing/$release_package/manifest.json") in
+  *policy.formula:*) release_checks="tests.test_policy_conformance tests.formula_conformance" ;;
+  *policy.acceptance:*) release_checks="tests.test_policy_conformance tests.acceptance_conformance" ;;
+  *) echo "unknown entry point in $release_package/manifest.json" >&2; exit 1 ;;
+esac
+docker build -f order_pricing/serving/Dockerfile --target tests --build-arg "POLICY_PACKAGE=$release_package" \
+  -t foc-pricing-release-tests order_pricing
+# shellcheck disable=SC2086 # release_checks is a list of test modules.
 docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
-  -e PRICING_PACKAGE_DIR="/checks/$release_package" foc-pricing-formula-tests \
-  python -m unittest tests.test_policy_conformance tests.formula_conformance -v
+  -e PRICING_PACKAGE_DIR=/opt/policy foc-pricing-release-tests python -m unittest $release_checks -v
 
 docker build -f order_pricing/mlflow/Dockerfile -t foc-pricing-mlops order_pricing
 docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges foc-pricing-mlops python -m unittest discover -s tests/mlops -v
@@ -22,16 +30,18 @@ task_run=$(date +%Y%m%d%H%M%S)-$$
 task_work="$PWD/order_pricing/.integration"
 mkdir -p "$task_work/runs/$task_run" "$task_work/state"
 docker run --rm --network none --read-only --tmpfs /tmp --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges \
-  -v "$task_work:/data" foc-pricing-mlops python -m pricing_mlops demo \
-  --work-dir "/data/runs/$task_run/work" --formula-package /app/formula/releases/effort-traffic-001 \
+  -v "$task_work:/data" foc-pricing-mlops python -m pricing_mlops demo --kind acceptance-gbm \
+  --work-dir "/data/runs/$task_run/work" --formula-package /app/formula/releases/effort-traffic-002 \
   --code-commit "$task_commit" --output "/data/runs/$task_run/model" \
-  --release-id "model-integration-$task_run" --seed 42
+  --release-id "model-integration-$task_run" --seed 42 \
+  --graph-rows 4000 --graph-batches 10 --agent-days 20 --agent-batches 10
 
 export PRICING_MODEL_PACKAGE=".integration/runs/$task_run/model"
-# Bind the generated package into the contract image: actual model adapter checks.
+# Bind the generated package into the training image, which has LightGBM:
+# actual model adapter checks.
 docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
   -v "$task_work/runs/$task_run/model:/candidate:ro" -e PRICING_PACKAGE_DIR=/candidate \
-  foc-pricing-contracts python -m unittest tests.test_policy_conformance -v
+  foc-pricing-mlops python -m unittest tests.test_policy_conformance tests.acceptance_conformance -v
 
 compose() { docker compose -f order_pricing/compose.integration.yaml "$@"; }
 cleanup() {

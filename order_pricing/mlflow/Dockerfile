@@ -8,6 +8,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     GIT_PYTHON_REFRESH=quiet \
     MLFLOW_ENABLE_ARTIFACTS_PROGRESS_BAR=false
 WORKDIR /app
+# LightGBM (acceptance-gbm releases) needs the OpenMP runtime.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
 COPY mlflow/requirements.lock /tmp/requirements.lock
 COPY tests/requirements.lock /tmp/test-requirements.lock
 RUN pip install --no-cache-dir -r /tmp/requirements.lock -r /tmp/test-requirements.lock \
