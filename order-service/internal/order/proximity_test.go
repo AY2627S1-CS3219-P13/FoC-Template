@@ -11,13 +11,13 @@ import (
 )
 
 func TestDistanceMetersMatchesHaversine(t *testing.T) {
-	com2 := Coordinate{1.293925, 103.774153}
-	library := Coordinate{1.296558, 103.773111}
+	com2 := Coordinate{Latitude: 1.293925, Longitude: 103.774153}
+	library := Coordinate{Latitude: 1.296558, Longitude: 103.773111}
 	// Reference values from an independent Haversine calculation (R = 6371 km).
 	for _, c := range []struct {
 		a, b Coordinate
 		want int64
-	}{{com2, library, 315}, {library, com2, 315}, {library, Coordinate{1.304, 103.7735}, 829}, {com2, com2, 0}} {
+	}{{com2, library, 315}, {library, com2, 315}, {library, Coordinate{Latitude: 1.304, Longitude: 103.7735}, 829}, {com2, com2, 0}} {
 		if got := distanceMeters(c.a, c.b); got != c.want {
 			t.Errorf("distance %v→%v = %d, want %d", c.a, c.b, got, c.want)
 		}

@@ -15,8 +15,8 @@ Public base: `http://localhost:8084` when run standalone. Browser requests use t
 | `GET /api/v1/orders?scope=user&userId={id}&page=1` | 200 | Admin-only orders where the user is requester or courier |
 | `GET /api/v1/orders/stream` | 200 | Authenticated creation and eligible lifecycle SSE invalidations |
 | `GET /api/v1/orders/publication-status` | 200 | Admin-only publication/workflow backlog monitoring |
-| `GET /api/v1/orders/alerts` | 200 | Nearby-alert availability, VAPID public key, the caller's preference and device count |
-| `PUT /api/v1/orders/alerts` | 200 | Save the caller's nearby-alert preference |
+| `GET /api/v1/orders/alerts` | 200 | Nearby-alert availability, VAPID public key, the caller's preferences and device count |
+| `PUT /api/v1/orders/alerts` | 200 | Replace the caller's nearby-alert preferences (up to three) |
 | `PUT /api/v1/orders/alerts/subscription` | 204 | Register this browser's Web Push subscription for the caller |
 | `DELETE /api/v1/orders/alerts/subscription` | 204 | Remove one of the caller's push subscriptions |
 | `GET /api/v1/orders/{id}` | 200 | Authorized detail snapshot |
@@ -328,22 +328,28 @@ snapshot refreshes. Notifications never directly overwrite cached order state.
 
 ### Nearby alerts
 
-A courier chooses one campus location and a radius: 0 (that location and its
-suppliers only), 100 or 250 m. When
-a new errand's pickup is within that straight-line distance, each of their
-registered browsers receives a Web Push notification, even with the site closed.
-The design is in `NEARBY-ALERTS.md`.
+A courier keeps up to three preferences. Each is a campus location, a radius
+(0 for that location and its suppliers only, 100 or 250 m) and its own on/off
+switch. When a new errand's pickup is within the straight-line distance of an
+enabled preference, each of their registered browsers receives a Web Push
+notification, even with the site closed. The design is in `NEARBY-ALERTS.md`.
 
 `GET /api/v1/orders/alerts` returns `pushAvailable`, `vapidPublicKey` (base64url
-uncompressed P-256 point for `PushManager.subscribe`, or `null`), `preference`
-(`{enabled, locationId, radiusMeters}` or `null`) and `devices`. Endpoints and
-keys are never returned.
+uncompressed P-256 point for `PushManager.subscribe`, or `null`), `preferences`
+(a list of `{enabled, locationId, radiusMeters}` in the order saved, empty when
+there are none) and `devices`. Endpoints and keys are never returned.
 
-`PUT /api/v1/orders/alerts` takes `{"enabled":true,"locationId":"central-library","radiusMeters":250}`
-and returns `{"preference":{...}}`. All three fields are required. Other radii
-return `400 invalid_radius`. The location is checked through Supplier with the
-caller's session; an unknown location or one without coordinates returns
-`400 invalid_location`.
+`PUT /api/v1/orders/alerts` replaces the whole list. It takes
+`{"preferences":[{"enabled":true,"locationId":"central-library","radiusMeters":250},{"enabled":false,"locationId":"com2","radiusMeters":0}]}`
+and returns `{"preferences":[...]}`. An empty list removes every preference.
+All three fields are required in each item; a missing list or field returns
+`400 invalid_alert_preference`. More than three items return
+`400 too_many_alert_preferences`, the same location twice returns
+`400 duplicate_alert_location`, and other radii return `400 invalid_radius`.
+Locations are checked through Supplier with the caller's session; an unknown
+location or one without coordinates returns `400 invalid_location`. Nothing is
+saved when any item is rejected. A location that stays in the list keeps its
+cooldown.
 
 `PUT /api/v1/orders/alerts/subscription` takes the browser's
 `{"endpoint":"https://…","keys":{"p256dh":"…","auth":"…"}}` (base64url; send no
@@ -368,13 +374,15 @@ when the errand is still open, unexpired and created under 10 minutes ago, and
 only couriers who:
 
 - are not the requester;
-- have alerts enabled and at least one device;
+- have at least one device;
 - have fewer than three accepted or picked-up orders;
-- were last alerted at least 2 minutes ago;
-- are within their radius of the pickup's campus location.
+- have an enabled preference that alerted at least 2 minutes ago (or never)
+  and whose location is within its radius of the pickup's campus location.
 
-Matching writes one delivery job per device in the consumer transaction. Each
-event can create a job for a device only once. Migration 013 marks every event
+When several preferences match, the closest one is used (the earlier one on a
+tie) and only its cooldown starts, so a courier with three preferences can get
+up to three alerts in two minutes. Matching writes one delivery job per device in
+the consumer transaction. Each event can create a job for a device only once. Migration 013 marks every event
 that existed before it as handled, so a deploy never announces existing errands.
 
 A sender loop runs every second. It claims up to 20 due jobs with a 30-second
@@ -388,8 +396,9 @@ POST carries:
 - `Topic`: a 32-character hash of the order ID.
 
 The payload is
-`{"v":1,"orderId","title":"New errand nearby","body":"Campus Cafe (COM2) · about 320 m from your alert location. …","url":"/orders?view=open&order=…"}`.
-It never contains items, credits or user IDs.
+`{"v":1,"orderId","title":"New errand nearby","body":"Campus Cafe (COM2) · about 320 m from your alert at Central Library. …","url":"/orders?view=open&order=…"}`.
+The body names the matching preference's location, or says "at your alert
+location" when the pickup is at it. It never contains items, credits or user IDs.
 
 | Push service response | Result |
 | --- | --- |

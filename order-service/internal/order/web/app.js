@@ -16,6 +16,7 @@ import {
   alertState,
   alertScope,
   alertCoverage,
+  maxAlertPreferences,
   base64UrlBytes,
   subscriptionBody,
   deepLink,
@@ -220,7 +221,7 @@ function clearSessionUI() {
   placesReady = false;
   alerts = noAlerts(alerts.revision + 1);
   $("alerts-panel").hidden = true;
-  $("alerts-location").replaceChildren();
+  $("alerts-list").replaceChildren();
   alertMessage("");
   draft = emptyDraft();
   attempt = null;
@@ -398,7 +399,7 @@ async function loadPlaces() {
     places = loaded;
     placesReady = true;
     fillStartingLocations();
-    fillAlertLocations();
+    buildAlertRows();
     renderAlerts();
     for (const id of ["pickup", "delivery"]) {
       const select = $(id);
@@ -470,10 +471,12 @@ function pickupDistance(order) {
   const pickup = start && places.find((p) => placeable(p) && p.id === pickupLocationId(order));
   return pickup ? distanceMeters(start, pickup) : null;
 }
-// Nearby alerts (Web Push). The server keeps one preference per account; each
-// browser keeps its own push subscription, registered with the server.
+// Nearby alerts (Web Push). The server keeps up to three preferences per
+// account, each with its own switch; each browser keeps its own push
+// subscription, registered with the server. The panel edits a copy of the list
+// (rows) and saves it whole; dirty rows survive a refresh until saved.
 const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
-const noAlerts = (revision) => ({ loaded: false, busy: false, pushAvailable: false, key: null, preference: null, devices: 0, subscription: null, locationTouched: false, radiusTouched: false, revision });
+const noAlerts = (revision) => ({ loaded: false, busy: false, pushAvailable: false, key: null, preferences: [], devices: 0, subscription: null, rows: [], dirty: false, revision });
 let alerts = noAlerts(0);
 async function alertRegistration(register = false) {
   if (!register) return navigator.serviceWorker.getRegistration("/orders/");
@@ -498,7 +501,8 @@ async function loadAlerts() {
     let subscription = null;
     if (pushSupported() && window.isSecureContext) subscription = (await (await alertRegistration())?.pushManager.getSubscription()) || null;
     if (generation !== epoch || revision !== alerts.revision) return;
-    alerts = { ...alerts, loaded: true, pushAvailable: data.pushAvailable, key: data.vapidPublicKey, preference: data.preference, devices: data.devices, subscription };
+    alerts = { ...alerts, loaded: true, pushAvailable: data.pushAvailable, key: data.vapidPublicKey, preferences: data.preferences || [], devices: data.devices, subscription };
+    if (!alerts.dirty) resetAlertRows();
     if (!alerts.busy) alertMessage("");
   } catch (err) {
     if (generation !== epoch || revision !== alerts.revision) return;
@@ -511,67 +515,101 @@ function alertMessage(text) {
   $("alerts-message").textContent = text;
   $("alerts-message").hidden = !text;
 }
-function fillAlertLocations() {
-  const select = $("alerts-location"),
-    wanted = (!alerts.locationTouched && alerts.preference?.locationId) || select.value || $("open-from").value;
-  select.replaceChildren(new Option("Choose a location", ""));
-  for (const place of places.filter(placeable)) select.append(new Option(place.name, place.id));
-  select.value = places.some((p) => placeable(p) && p.id === wanted) ? wanted : "";
+// Rows start from the saved list; with none saved, one row near Start from.
+function resetAlertRows() {
+  alerts.rows = alerts.preferences.length
+    ? alerts.preferences.map(({ enabled, locationId, radiusMeters }) => ({ enabled, locationId, radiusMeters }))
+    : [{ enabled: true, locationId: "", radiusMeters: 0 }];
+  buildAlertRows();
+}
+const alertPlace = (id) => places.find((p) => placeable(p) && p.id === id);
+// Rebuilds the row controls; renderAlertRows fills in their values.
+function buildAlertRows() {
+  const fresh = !alerts.dirty && !alerts.preferences.length && alerts.rows.length === 1;
+  if (fresh && !alertPlace(alerts.rows[0].locationId)) alerts.rows[0].locationId = $("open-from").value;
+  const template = $("alert-row-template").content.firstElementChild;
+  $("alerts-list").replaceChildren(
+    ...alerts.rows.map((_, i) => {
+      const item = template.cloneNode(true);
+      item.dataset.index = String(i);
+      const location = item.querySelector(".alert-location");
+      location.append(new Option("Choose a location", ""), ...places.filter(placeable).map((p) => new Option(p.name, p.id)));
+      location.setAttribute("aria-label", `Alert ${i + 1} location`);
+      item.querySelector(".alert-radius").setAttribute("aria-label", `Alert ${i + 1} distance`);
+      item.querySelector(".alert-enabled").setAttribute("aria-label", `Alert ${i + 1} on`);
+      item.querySelector(".alert-remove").setAttribute("aria-label", `Remove alert ${i + 1}`);
+      return item;
+    }),
+  );
 }
 function renderAlerts() {
   $("alerts-panel").hidden = view !== "open" || !user;
-  const preference = alerts.preference;
   const state = alertState({
     supported: pushSupported(),
     secure: window.isSecureContext,
     permission: "Notification" in window ? Notification.permission : "default",
     pushAvailable: alerts.pushAvailable,
-    preference,
+    preferences: alerts.preferences,
     subscribed: Boolean(alerts.subscription),
     devices: alerts.devices,
   });
-  const where = preference && places.find((p) => p.type === "location" && p.id === preference.locationId);
+  const scopes = alerts.preferences.filter((p) => p.enabled).map((p) => alertPlace(p.locationId) && alertScope(p.radiusMeters, alertPlace(p.locationId).name));
   $("alerts-state").textContent = !alerts.loaded
     ? "Checking alert settings…"
-    : state.key === "on" && where
-      ? `On for this device · ${alertScope(preference.radiusMeters, where.name)}`
+    : state.key === "on" && scopes.length && scopes.every(Boolean)
+      ? `On for this device · ${scopes.join("; ")}`
       : state.message;
   $("alerts-panel").dataset.state = alerts.loaded ? state.key : "loading";
-  if (preference && !alerts.locationTouched && $("alerts-location").value !== preference.locationId) fillAlertLocations();
-  if (preference && !alerts.radiusTouched) $("alerts-radius").value = String(preference.radiusMeters);
   const usable = alerts.loaded && ["on", "off", "elsewhere"].includes(state.key);
-  $("alerts-location").disabled = $("alerts-radius").disabled = !usable || alerts.busy;
+  const chosen = alerts.rows.map((row) => row.locationId);
+  const duplicate = chosen.some((id, i) => id && chosen.indexOf(id) !== i);
+  const complete = !duplicate && alerts.rows.every((row) => alertPlace(row.locationId));
+  $("alerts-hint").textContent = duplicate ? "Each campus location can appear only once. Change or remove the repeated one." : "";
+  $("alerts-hint").hidden = !duplicate;
+  $("alerts-add").hidden = alerts.rows.length >= maxAlertPreferences;
+  $("alerts-add").disabled = !usable || alerts.busy;
   $("alerts-enable").hidden = state.key === "on";
-  $("alerts-enable").disabled = !usable || alerts.busy || !$("alerts-location").value;
+  $("alerts-enable").disabled = !usable || alerts.busy || !complete || !alerts.rows.some((row) => row.enabled);
   $("alerts-save").hidden = $("alerts-disable").hidden = state.key !== "on";
-  $("alerts-save").disabled = alerts.busy || !$("alerts-location").value;
+  $("alerts-save").disabled = alerts.busy || !complete;
   $("alerts-disable").disabled = alerts.busy;
-  renderCoverage(usable);
+  renderAlertRows(usable);
 }
-// Lists the campus locations the chosen location and distance would cover.
-function renderCoverage(usable) {
-  const covered = usable ? alertCoverage(places, $("alerts-location").value, Number($("alerts-radius").value)) : [];
-  $("alerts-coverage").hidden = !covered.length;
-  if (!covered.length) return;
+// Fills each row and lists the campus locations its location and distance cover.
+function renderAlertRows(usable) {
   const total = places.filter(placeable).length;
-  $("alerts-coverage-title").textContent = `New errands with a pickup at these places will alert you (${covered.length} of ${total} campus locations):`;
-  $("alerts-coverage-list").replaceChildren(
-    ...covered.map((place, i) => {
-      const item = document.createElement("li");
-      const where = i === 0 ? "your location" : formatDistance(place.distance) || "under 50 m";
-      const suppliers = place.suppliers ? ` · ${place.suppliers} supplier${place.suppliers === 1 ? "" : "s"}` : "";
-      item.textContent = `${place.name} · ${where}${suppliers}`;
-      return item;
-    }),
-  );
+  for (const item of $("alerts-list").children) {
+    const row = alerts.rows[Number(item.dataset.index)];
+    if (!row) continue;
+    const place = alertPlace(row.locationId);
+    item.querySelector(".alert-location").value = place ? row.locationId : "";
+    item.querySelector(".alert-radius").value = String(row.radiusMeters);
+    item.querySelector(".alert-enabled").checked = row.enabled;
+    for (const control of item.querySelectorAll("select, input, button")) control.disabled = !usable || alerts.busy;
+    item.classList.toggle("paused", !row.enabled);
+    const covered = usable && place ? alertCoverage(places, row.locationId, row.radiusMeters) : [];
+    item.querySelector(".alerts-coverage").hidden = !covered.length;
+    if (!covered.length) continue;
+    item.querySelector(".alert-coverage-title").textContent =
+      `${row.enabled ? "New errands" : "Switched off. When on, new errands"} with a pickup at these places will alert you (${covered.length} of ${total} campus locations):`;
+    item.querySelector(".alert-coverage-list").replaceChildren(
+      ...covered.map((covered, i) => {
+        const entry = document.createElement("li");
+        const where = i === 0 ? "your location" : formatDistance(covered.distance) || "under 50 m";
+        const suppliers = covered.suppliers ? ` · ${covered.suppliers} supplier${covered.suppliers === 1 ? "" : "s"}` : "";
+        entry.textContent = `${covered.name} · ${where}${suppliers}`;
+        return entry;
+      }),
+    );
+  }
 }
-async function savePreference(enabled) {
+async function savePreferences() {
   const data = await api("/alerts", {
     method: "PUT",
-    body: JSON.stringify({ enabled, locationId: $("alerts-location").value, radiusMeters: Number($("alerts-radius").value) }),
+    body: JSON.stringify({ preferences: alerts.rows.map(({ enabled, locationId, radiusMeters }) => ({ enabled, locationId, radiusMeters })) }),
   });
-  alerts.preference = data.preference;
-  alerts.locationTouched = alerts.radiusTouched = false;
+  alerts.preferences = data.preferences;
+  alerts.dirty = false;
 }
 async function alertAction(work) {
   if (alerts.busy) return;
@@ -607,16 +645,21 @@ async function enableAlerts() {
     subscription = await registration.pushManager.subscribe(options);
   }
   await api("/alerts/subscription", { method: "PUT", body: JSON.stringify(subscriptionBody(subscription.toJSON())) });
-  await savePreference(true);
+  await savePreferences();
 }
+// Removes this browser only. The saved locations stay: with no device left the
+// account gets no alerts, and turning alerts on again restores them.
 async function disableAlerts() {
   const subscription = alerts.subscription;
   if (subscription) {
     await api("/alerts/subscription", { method: "DELETE", body: JSON.stringify({ endpoint: subscription.endpoint }) });
     await subscription.unsubscribe();
   }
-  // With no device left, also switch the account preference off.
-  if (alerts.devices <= 1) await savePreference(false);
+}
+function alertRowsChanged() {
+  alerts.dirty = true;
+  buildAlertRows();
+  renderAlerts();
 }
 // Open Help a friend with one errand selected: a notification link or click.
 function openErrand(id) {
@@ -1350,16 +1393,30 @@ $("open-from").addEventListener("change", () => {
   void loadList();
 });
 $("request-filter").addEventListener("change", () => setView("mine"));
-$("alerts-location").addEventListener("change", () => {
-  alerts.locationTouched = true;
+$("alerts-list").addEventListener("change", (event) => {
+  const row = alerts.rows[Number(event.target.closest(".alert-row")?.dataset.index)];
+  if (!row) return;
+  if (event.target.matches(".alert-enabled")) row.enabled = event.target.checked;
+  if (event.target.matches(".alert-location")) row.locationId = event.target.value;
+  if (event.target.matches(".alert-radius")) row.radiusMeters = Number(event.target.value);
+  alerts.dirty = true;
   renderAlerts();
 });
-$("alerts-radius").addEventListener("change", () => {
-  alerts.radiusTouched = true;
-  renderAlerts();
+$("alerts-list").addEventListener("click", (event) => {
+  const item = event.target.closest(".alert-remove")?.closest(".alert-row");
+  if (!item) return;
+  alerts.rows.splice(Number(item.dataset.index), 1);
+  alertRowsChanged();
+  $("alerts-add").focus();
+});
+$("alerts-add").addEventListener("click", () => {
+  if (alerts.rows.length >= maxAlertPreferences) return;
+  alerts.rows.push({ enabled: true, locationId: "", radiusMeters: 0 });
+  alertRowsChanged();
+  $("alerts-list").lastElementChild?.querySelector(".alert-location").focus();
 });
 $("alerts-enable").addEventListener("click", () => void alertAction(enableAlerts));
-$("alerts-save").addEventListener("click", () => void alertAction(() => savePreference(true)));
+$("alerts-save").addEventListener("click", () => void alertAction(savePreferences));
 $("alerts-disable").addEventListener("click", () => void alertAction(disableAlerts));
 window.addEventListener("offline", () => {
   stale = true;

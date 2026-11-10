@@ -122,7 +122,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/orders/publication-status", a.endpoint(a.protected(a.publicationStatus)))
 	mux.HandleFunc("GET /api/v1/orders/places", a.endpoint(a.protected(a.listPlaces)))
 	mux.HandleFunc("GET /api/v1/orders/alerts", a.endpoint(a.protected(a.alertSettings)))
-	mux.HandleFunc("PUT /api/v1/orders/alerts", a.endpoint(a.protected(a.saveAlertPreference)))
+	mux.HandleFunc("PUT /api/v1/orders/alerts", a.endpoint(a.protected(a.saveAlertPreferences)))
 	mux.HandleFunc("PUT /api/v1/orders/alerts/subscription", a.endpoint(a.protected(a.saveSubscription)))
 	mux.HandleFunc("DELETE /api/v1/orders/alerts/subscription", a.endpoint(a.protected(a.deleteSubscription)))
 	mux.HandleFunc("GET /api/v1/orders", a.endpoint(a.snapshot(a.protected(a.listOrders))))

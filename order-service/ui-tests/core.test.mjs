@@ -17,6 +17,7 @@ import {
   radiusLabel,
   alertScope,
   alertCoverage,
+  maxAlertPreferences,
   base64UrlBytes,
   subscriptionBody,
   deepLink,
@@ -132,17 +133,26 @@ test("scheduled creation preserves int64 values and replaces manual expiry",()=>
 });
 
 test("alert panel states follow browser support, permission and the account", () => {
-  const base = { supported: true, secure: true, permission: "default", pushAvailable: true, preference: null, subscribed: false, devices: 0 };
+  const base = { supported: true, secure: true, permission: "default", pushAvailable: true, preferences: [], subscribed: false, devices: 0 };
   const on = { enabled: true, locationId: "com2", radiusMeters: 250 };
+  const off = { enabled: false, locationId: "utown", radiusMeters: 100 };
   assert.equal(alertState({ ...base, supported: false }).key, "unsupported");
   assert.equal(alertState({ ...base, secure: false }).key, "insecure");
   assert.equal(alertState({ ...base, pushAvailable: false }).key, "unavailable");
-  assert.equal(alertState({ ...base, permission: "denied", preference: on, subscribed: true }).key, "blocked");
+  assert.equal(alertState({ ...base, permission: "denied", preferences: [on], subscribed: true }).key, "blocked");
   assert.equal(alertState(base).key, "off");
-  assert.equal(alertState({ ...base, preference: { ...on, enabled: false }, subscribed: true }).key, "off");
-  assert.deepEqual(alertState({ ...base, preference: on, subscribed: true }), { key: "on", message: "On for this device · within 250 m" });
-  assert.equal(alertState({ ...base, preference: on, devices: 2 }).key, "elsewhere");
-  assert.equal(alertState({ ...base, preference: on, devices: 0 }).key, "off");
+  assert.equal(alertState({ ...base, preferences: undefined }).key, "off");
+  // A subscribed device stays on with every location switched off, so it can switch one back on.
+  assert.deepEqual(alertState({ ...base, preferences: [off], subscribed: true }), { key: "on", message: "On for this device, but every alert location is switched off." });
+  assert.deepEqual(alertState({ ...base, preferences: [on], subscribed: true }), { key: "on", message: "On for this device · within 250 m" });
+  assert.deepEqual(alertState({ ...base, preferences: [on, off, { ...on, locationId: "terrace", radiusMeters: 0 }], subscribed: true }), {
+    key: "on",
+    message: "On for this device · within 250 m; this location only",
+  });
+  assert.equal(alertState({ ...base, preferences: [on], devices: 2 }).key, "elsewhere");
+  assert.equal(alertState({ ...base, preferences: [off], devices: 2 }).key, "off");
+  assert.equal(alertState({ ...base, preferences: [on], devices: 0 }).key, "off");
+  assert.equal(maxAlertPreferences, 3);
   assert.equal(radiusLabel(0), "this location only");
   assert.equal(radiusLabel(100), "within 100 m");
   assert.equal(alertScope(0, "COM2"), "at COM2 only");
