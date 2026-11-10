@@ -107,7 +107,9 @@ All response fields shown are required. `pricingMode` is `baseline` or `model`;
 clients treat an unrecognized future value as an opaque display/telemetry value,
 never a permission. `warnings` is an extensible string-code array; initial codes
 are `stale_order_context`, `order_context_unavailable`, `estimated_supply` and
-`unknown_item_quantity`. Unknown warning codes do not invalidate the response.
+`unknown_item_quantity`. Model releases may add `low_predicted_acceptance` when
+even the chosen price has a predicted acceptance below 0.5. Unknown warning codes
+do not invalidate the response.
 Footfall-based supply always carries `estimated_supply`.
 
 Successful quotes are durably recorded before responding. Validity is

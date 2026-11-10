@@ -26,6 +26,22 @@ def write_json(path, value):
     Path(path).write_text(canonical(value) + "\n")
 
 
+def use_tracking(work, tracking_uri):
+    """Point MLflow at this run's store without leaking it to later runs.
+
+    mlflow.set_tracking_uri also exports MLFLOW_TRACKING_URI, which a later train
+    call in the same process would otherwise read as an explicit choice.
+    """
+    import mlflow
+
+    configured = os.environ.get("MLFLOW_TRACKING_URI")
+    mlflow.set_tracking_uri(tracking_uri or configured or (Path(work) / "mlruns").as_uri())
+    if configured is None:
+        os.environ.pop("MLFLOW_TRACKING_URI", None)
+    else:
+        os.environ["MLFLOW_TRACKING_URI"] = configured
+
+
 def baseline_module(package):
     verify_baseline(package)
     spec = importlib.util.spec_from_file_location("_training_formula", Path(package) / "policy/formula.py")
@@ -142,7 +158,7 @@ def train(work_dir, formula_package, code_commit, seed=42, count=1000, tracking_
              "coefficients": learned[1:], "datasetId": dataset["datasetId"],
              "provenance": "synthetic", "experimental": True}
     metrics = evaluate(model, rows)
-    mlflow.set_tracking_uri(tracking_uri or os.environ.get("MLFLOW_TRACKING_URI") or (work / "mlruns").as_uri())
+    use_tracking(work, tracking_uri)
     mlflow.set_experiment("foc-synthetic-effort")
     with mlflow.start_run(tags={"provenance": "synthetic", "experimental": "true", "code_commit": code_commit}) as run:
         run_id = run.info.run_id

@@ -68,6 +68,14 @@ new shared fixtures and capability negotiation, not silently changing v1 meaning
 Socket interception catches common accidental network calls; run with network
 disabled as well. It does not prove absence of every possible IO side effect.
 
+For an acceptance-model release, run `tests.acceptance_conformance` instead of
+the formula suite; it checks model mode, probability diagnostics and monotone
+acceptance in price. `scripts/check.sh` selects the suite from the published
+package's entry point and runs it in the serving `tests` image built with that
+package, which installs the package's locked dependencies. The MLOps image runs
+`tests/mlops/test_sim.py` (generators) and `tests/mlops/test_acceptance.py`
+(price-effect recovery, gates, export and training/serving parity).
+
 For the first real formula, also run `python -m unittest tests.formula_conformance -v`
 in the candidate container. This explicitly requires `PRICING_PACKAGE_DIR` and
 adds distance/quantity monotonicity, a nonconstant effort response, bounded

@@ -24,6 +24,7 @@
     {"id": "real-export", "requires": "export job + built image", "assert": "Export includes exact selected policy/preprocessing/assets, complete checksums, supported majors/capabilities and fully pinned dependencies; image loads without runtime downloads."},
     {"id": "training-serving-parity", "requires": "training + real model policy", "assert": "Same versioned examples produce equivalent preprocessing and predictions offline and inside serving; omitted fields remain unknown."},
     {"id": "lineage-quality", "requires": "training/evaluation job", "assert": "Versioned datasets, seeds, code/model/release identities and mature labels are reproducible; synthetic/estimated/observed provenance stays distinct; promotion is explicit."},
-    {"id": "immutable-promotion-rollback", "requires": "deployment pipeline", "assert": "New image digest is deployed through readiness and serialized releases; failed rollout restores prior full release without deleting shared issuance/events."}
+    {"id": "immutable-promotion-rollback", "requires": "deployment pipeline", "assert": "New image digest is deployed through readiness and serialized releases; failed rollout restores prior full release without deleting shared issuance/events."},
+    {"id": "acceptance-model", "requires": "simulated dataset + LightGBM training + exported package", "assert": "Training uses the exported feature code; acceptance is monotone in price; holdout log loss beats the base rate; mean predicted acceptance at chosen prices is within 0.03 of 0.8; cross-generator metrics are recorded; synthetic metrics are never reported as real acceptance."}
   ]
 }

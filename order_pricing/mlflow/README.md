@@ -100,6 +100,44 @@ not an invented quantity. The exported package includes the copied baseline for
 stale/unavailable Order context, context/warm-up examples, model JSON, selection
 record and complete SHA-256 manifest. No pickle or runtime artifact downloads.
 
+## Acceptance model (LightGBM)
+
+The first learned pricing model predicts P(accepted before expiry | context, price)
+for created orders and chooses the price. Scope and assumptions are in
+[synthetic-data.md](synthetic-data.md#implemented-generators-acceptance-gbm-1).
+
+- Data: `simulate` writes a versioned dataset (records, shared context, manifest)
+  from the causal-graph and agent-based generators. Cancelled-before-acceptance
+  orders are censored and excluded from training, not counted as rejections.
+- Features (`acceptance_policy.py`, exported as `policy/acceptance.py`): price,
+  price minus effort credits, route/effort/quantity, Singapore hour and weekday,
+  relative foot traffic and pickup open/created order counts. Training builds rows
+  through the exported functions, so serving uses identical preprocessing.
+- Model: LightGBM binary classifier, monotone increasing in both price features,
+  deterministic single-threaded training, each generator weighted to half the total.
+- Price choice: every whole credit 5..30 is scored as
+  `P(accept) - lambda * (price - 5) / 25`; the best wins, ties go to the lower
+  price. Lambda is calibrated on held-out parameter batches so the mean predicted
+  acceptance at the chosen prices is 0.8.
+- Metrics (MLflow experiment `foc-acceptance-gbm`): generator-balanced holdout log
+  loss/Brier/AUC, leave-one-generator-out log loss/AUC, monotonicity violations,
+  mean chosen/baseline credits and the lambda sweep.
+- Selection gates: no monotonicity violations, holdout log loss below the base
+  rate, and mean chosen-price acceptance within 0.03 of 0.8.
+
+```sh
+python -m pricing_mlops simulate --output /data/datasets/seed-42 --formula-package /app/formula/releases/effort-traffic-002 --seed 42
+python -m pricing_mlops train --kind acceptance-gbm --dataset /data/datasets/seed-42 --work-dir /data/work --formula-package /app/formula/releases/effort-traffic-002 --code-commit SHA --seed 42
+python -m pricing_mlops select --work-dir /data/work --run-id EXACT_RUN_ID --selection /data/acceptance.selection.json
+python -m pricing_mlops export --work-dir /data/work --selection /data/acceptance.selection.json --formula-package /app/formula/releases/effort-traffic-002 --output /data/acceptance-gbm-001 --release-id acceptance-gbm-001
+```
+
+`select` and `export` dispatch on the candidate/selection `kind`; candidates without
+one are the effort-distillation model. The package's `requirements.lock` is
+`release-requirements.lock` (LightGBM, NumPy, SciPy); serving and training images
+install `libgomp1` for LightGBM. The model is the native LightGBM text format, not
+a pickle. Stale or unavailable Order context falls back to the copied baseline.
+
 ## Local MLflow server
 
 ```sh
@@ -141,7 +179,10 @@ may arrive. Schedule polling externally; the command performs one bounded page.
 
 ## Remaining implementation work
 
-Real-data label joins, mature outcome windows, real-only evaluation, causal price
+The acceptance model is trained only on synthetic orders. Real records should
+reuse the synthetic record shape (quote input + confirmed offer + outcome) so
+the same `prepare` path trains on them. Real-data label joins, mature outcome
+windows, real-only evaluation, causal price
 response calibration, scheduled retraining and AWS release automation remain
 follow-ups. The current synthetic generator exercises effort-price distillation;
 it is not the complete campus behavioural simulator described in synthetic-data.md.

@@ -4,6 +4,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app/serving:/app/contracts/python \
     PRICING_PACKAGE_DIR=/opt/policy
 WORKDIR /app
+# LightGBM (acceptance-gbm releases) needs the OpenMP runtime.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
 COPY serving/requirements.lock /tmp/requirements.lock
 RUN pip install --no-cache-dir --no-deps -r /tmp/requirements.lock && pip check
 ARG POLICY_PACKAGE=formula/releases/effort-traffic-001

@@ -181,7 +181,12 @@ has been removed; expiry remains required only for actual order creation.
 
 Pricing's component checks already run in CI. The release publisher now includes
 `foc/pricing-service`, using the `runtime` Docker target and the tracked `RELEASE_PACKAGE` file to choose
-a committed release directory; CI runs the adapter suite on that package. The
+a committed release directory; CI runs the adapter suite on that package inside
+its own serving runtime (so a model release's locked LightGBM dependencies load).
+The published release is `models/acceptance-gbm-001`, an acceptance model trained
+only on synthetic orders (see [training](mlflow/README.md#acceptance-model-lightgbm)).
+It is experimental: synthetic metrics are not evidence of real acceptance. Roll back
+by setting `RELEASE_PACKAGE` to `formula/releases/effort-traffic-002`. The
 existing Pricing CI checks continue to validate the framework and policy packages.
 The EC2 override adds private Pricing/PostgreSQL, persistent storage, credential initialization,
 readiness checks and immutable-image verification. Local development still uses

@@ -30,6 +30,33 @@ transport simulation. [SUMO](https://sumo.dlr.de/docs/Demand/Activity-based_Dema
 and [MATSim](https://www.matsim.org/files/book/partOne-latest.pdf) provide reference
 approaches; adopting either full framework is not required for this MVP.
 
+## Implemented generators (acceptance-gbm-1)
+
+The first model trains on **created orders** labelled accepted before expiry or
+expired. Unbooked quotes are not used. A customer cancelling before anyone accepts
+is censored: it is excluded, never counted as a rejection.
+
+All generators in `pricing_mlops/sim/` share one world (`sim/world.json`): the 15
+catalogue locations with Supplier's seed coordinates, the release foot-traffic
+lookup, a separate requester profile (residential evenings, meal peaks) and prior
+ranges for every behavioural parameter. Each parameter batch draws its own values,
+so no single invented world dominates. Records have the shape real data will have
+after joining the quote input, confirmed offer and outcome, and pass through the
+same baseline/feature code as serving.
+
+| Generator | Use | Mechanics |
+| --- | --- | --- |
+| Independent rows (method 1) | Tests only | Uniform prices, known logistic label; training must recover the price effect |
+| Causal graph (method 2) | Training | Hidden difficulty raises the customer's offer and lowers acceptance (the confounding real self-chosen offers have); unseen supply follows foot traffic with random strength |
+| Agent-based (method 4) | Training and cross-check | Poisson requester/deliverer arrivals per location and 30 minutes with a shared Gamma day factor; deliverers take the best positive-utility open order and stay busy while delivering; orders expire or are cancelled |
+
+Supply means follow `(1 - rho) * flat + rho * foot traffic` with rho drawn from
+0..1, so a model cannot simply confirm the formula's foot-traffic premium. Both
+training generators carry half the total sample weight each; whole parameter
+batches are held out for validation; train-on-one/evaluate-on-the-other metrics
+expose a model that only fits one simulator's equations. Not modelled yet: the
+three-assignment-slot rule, weather/calendar events and deliverer learning.
+
 ## Collection and gradual replacement
 
 1. Keep real and synthetic records distinguishable and append new observations
