@@ -12,6 +12,8 @@ from .records import shared_context
 from .world import World, WORLD_PATH, FOOT_TRAFFIC_PATH
 
 SCHEMA_VERSION = 1
+# Dataset IDs name their provenance; mixed datasets add observed records.
+PREFIXES = {"synthetic": "synthetic-acceptance-", "mixed": "mixed-acceptance-"}
 
 
 def canonical(value):
@@ -64,7 +66,7 @@ def build(seed, baseline, baseline_package, *, graph_rows=12000, graph_batches=2
         "labels": "accepted before expiry vs expired; cancelled before acceptance is censored",
         "limitation": "Encodes assumed behaviour; not evidence of real acceptance or price response.",
     }
-    manifest["datasetId"] = "synthetic-acceptance-" + digest(manifest)[:32]
+    manifest["datasetId"] = PREFIXES["synthetic"] + digest(manifest)[:32]
     return records, shared, manifest
 
 
@@ -92,7 +94,8 @@ def read(directory):
         raise ValueError("dataset integrity mismatch")
     identity = dict(manifest)
     del identity["datasetId"]
-    if "synthetic-acceptance-" + digest(identity)[:32] != manifest["datasetId"]:
+    if manifest.get("provenance") not in PREFIXES or \
+            PREFIXES[manifest["provenance"]] + digest(identity)[:32] != manifest["datasetId"]:
         raise ValueError("dataset identity mismatch")
     return records, shared, manifest
 

@@ -132,6 +132,48 @@ fallback, event recording/export, training ingestion, restart recovery and a
 recording-failure injection. It publishes no ports and removes its test stack;
 generated training runs/packages remain gitignored in `.integration/` for review.
 
+## Training and releasing a model (MLflow / MLOps)
+
+All training runs in the `foc-pricing-mlops` container; nothing is installed on
+the host. Details and the individual commands are in [mlflow/README.md](mlflow/README.md).
+
+1. **(Optional) Export real data, read-only.** Run
+   [mlflow/sql/extract-orders.sql](mlflow/sql/extract-orders.sql) against Order's
+   database to get `orders.csv`, and optionally save Pricing's training export
+   (`GET /internal/v1/training-events`, one envelope per line) as
+   `pricing-events.jsonl` to link the quotes users were shown. Keep both files out
+   of Git. Skip this step to train on simulated orders only.
+2. **Train, gate and export a release** from a clean, committed working tree:
+
+   ```sh
+   sh order_pricing/scripts/retrain.sh --release-id acceptance-gbm-002 \
+     --orders orders.csv --pricing-events pricing-events.jsonl
+   ```
+
+   The script simulates orders, adds the observed ones (`import-observed`), trains
+   the LightGBM acceptance model, applies the selection gates, exports the package
+   to `models/acceptance-gbm-002`, points `RELEASE_PACKAGE` at it and stages both.
+   It then runs the package's adapter suite and builds the runtime image locally
+   (`--check full` also runs `scripts/check.sh`). A failed gate stops it; existing
+   packages are never overwritten. Add `--approved-by NAME --approval-reason TEXT`
+   to record production approval, `--no-switch` to keep the current release, or
+   `--help` for all options.
+3. **Inspect the run in MLflow.** Each run keeps its inputs, outputs and MLflow
+   file store in the ignored `order_pricing/.retrain/<release-id>-<time>/`; the
+   script prints the `mlflow ui` command that serves it on `http://127.0.0.1:5000`.
+   For a shared, persistent tracking server instead, start
+   `docker compose -f order_pricing/mlflow/compose.yaml up --build -d mlflow` and
+   run the CLI commands in that Compose project's `training` service.
+4. **Ship it.** Commit the staged package and `RELEASE_PACKAGE`, open a PR and
+   merge to main. CI tests the package; the release workflow builds
+   `foc/pricing-service` with it, pushes to ECR and deploys to EC2. Nothing is
+   pushed or deployed from a laptop. Roll back by restoring `RELEASE_PACKAGE`.
+
+To demonstrate the pipeline without real data, use the **fake** exports in
+[mlflow/demo-observed/](mlflow/demo-observed/README.md) as `--orders` and
+`--pricing-events` with `--release-id acceptance-gbm-demo`, and never merge that
+release. Observed holdout metrics are reported but do not gate selection.
+
 Next: implement the real source/Order/UI integrations and durable producers;
 calibrate the baseline and validate models on observed outcomes; finalize
 archival/retention and operational policy; then add image promotion, AWS
@@ -185,8 +227,13 @@ a committed release directory; CI runs the adapter suite on that package inside
 its own serving runtime (so a model release's locked LightGBM dependencies load).
 The published release is `models/acceptance-gbm-001`, an acceptance model trained
 only on synthetic orders (see [training](mlflow/README.md#acceptance-model-lightgbm)).
-It is experimental: synthetic metrics are not evidence of real acceptance. Roll back
-by setting `RELEASE_PACKAGE` to `formula/releases/effort-traffic-002`. The
+It is approved for production as advisory pricing only (users choose and confirm
+their own offer) but remains experimental: synthetic metrics are not evidence of
+real acceptance. Roll back
+by setting `RELEASE_PACKAGE` to `formula/releases/effort-traffic-002`.
+`sh order_pricing/scripts/retrain.sh --release-id ID` trains, gates and exports a
+new release (optionally adding observed orders) and stages the package and
+`RELEASE_PACKAGE` change for review; see [retraining](mlflow/README.md#retraining-a-release). The
 existing Pricing CI checks continue to validate the framework and policy packages.
 The EC2 override adds private Pricing/PostgreSQL, persistent storage, credential initialization,
 readiness checks and immutable-image verification. Local development still uses

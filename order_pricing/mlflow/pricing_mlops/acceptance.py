@@ -1,7 +1,9 @@
-"""Train, select and export the LightGBM acceptance model from synthetic orders.
+"""Train, select and export the LightGBM acceptance model.
 
-Synthetic metrics measure fit to the simulators' assumptions, not real
-acceptance or price effectiveness.
+Training uses simulated orders, optionally mixed with observed ones (see
+observed.py). Synthetic metrics measure fit to the simulators' assumptions, not
+real acceptance or price effectiveness; observed holdout metrics are reported
+alongside them but do not gate selection.
 """
 
 import hashlib
@@ -14,6 +16,7 @@ import tempfile
 
 from . import acceptance_policy as policy
 from .pipeline import baseline_module, canonical, digest, use_tracking, verify_baseline, write_json
+from .observed import NAME as OBSERVED
 from .sim import agents, dataset, graph
 from .sim.records import policy_input
 
@@ -24,6 +27,8 @@ ROUNDS = 300
 INFERENCE_SOURCE = Path(policy.__file__)
 RELEASE_LOCK = Path(__file__).resolve().parents[1] / "release-requirements.lock"
 GENERATORS = (graph.NAME, agents.NAME)
+SCOPES = {"synthetic": "synthetic-acceptance-only", "mixed": "synthetic-and-observed-acceptance"}
+CALIBRATION = {"synthetic": "synthetic-only", "mixed": "synthetic-and-observed"}
 
 
 def params(seed):
@@ -51,19 +56,26 @@ def prepare(records, shared, baseline):
     return rows
 
 
-def balanced_weights(rows):
-    """Each generator contributes half the total weight; mean weight stays 1."""
-    counts = {name: sum(1 for r in rows if r["generator"] == name) for name in GENERATORS}
-    present = [name for name in GENERATORS if counts[name]]
-    return [len(rows) / (len(present) * counts[r["generator"]]) for r in rows]
+def balanced_weights(rows, observed_weight=0.0):
+    """Observed rows share observed_weight of the total and each present simulator
+    an equal part of the rest; mean weight stays 1."""
+    counts = {}
+    for r in rows:
+        counts[r["generator"]] = counts.get(r["generator"], 0) + 1
+    share = observed_weight if counts.get(OBSERVED) else 0.0
+    present = [name for name in GENERATORS if counts.get(name)]
+    total = {name: (1 - share) / len(present) for name in present}
+    if share:
+        total[OBSERVED] = share
+    return [len(rows) * total[r["generator"]] / counts[r["generator"]] for r in rows]
 
 
-def fit(rows, seed):
+def fit(rows, seed, observed_weight=0.0):
     import lightgbm
     import numpy
 
     data = lightgbm.Dataset(numpy.array([r["features"] for r in rows], dtype=float),
-                            label=[r["label"] for r in rows], weight=balanced_weights(rows),
+                            label=[r["label"] for r in rows], weight=balanced_weights(rows, observed_weight),
                             feature_name=list(policy.FEATURES), free_raw_data=True)
     return lightgbm.train(params(seed), data, num_boost_round=ROUNDS)
 
@@ -93,9 +105,10 @@ def scores(probabilities, labels, base_rate):
             "brier": float(numpy.mean((p - y) ** 2)), "auc": auc, "rows": len(y)}
 
 
-def evaluate(booster, train_rows, rows):
-    """Generator-balanced holdout metrics: the mean of per-generator scores."""
-    weights = balanced_weights(train_rows)
+def evaluate(booster, train_rows, rows, observed_weight=0.0):
+    """Generator-balanced holdout metrics: the mean of per-simulator scores, plus
+    separate observed_* scores when the dataset has observed orders."""
+    weights = balanced_weights(train_rows, observed_weight)
     base_rate = sum(w * r["label"] for w, r in zip(weights, train_rows)) / sum(weights)
     per = {name: scores(predict(booster, [r["features"] for r in rows if r["generator"] == name]),
                         [r["label"] for r in rows if r["generator"] == name], base_rate)
@@ -107,6 +120,12 @@ def evaluate(booster, train_rows, rows):
     for name in GENERATORS:
         for key, value in per[name].items():
             metrics[f"{name}_{key}"] = value
+    observed = [r for r in rows if r["generator"] == OBSERVED]
+    if observed:
+        for key, value in scores(predict(booster, [r["features"] for r in observed]),
+                                 [r["label"] for r in observed], base_rate).items():
+            metrics[f"{OBSERVED}_{key}"] = value
+        metrics[f"{OBSERVED}_actual_acceptance"] = sum(r["label"] for r in observed) / len(observed)
     return metrics
 
 
@@ -145,9 +164,9 @@ def calibrate(matrix, prices, weights, target=TARGET_ACCEPTANCE):
     return round(low, 9)
 
 
-def policy_metrics(booster, rows, penalty=None):
+def policy_metrics(booster, rows, penalty=None, observed_weight=0.0):
     matrix, prices = price_matrix(booster, rows)
-    weights = balanced_weights(rows)
+    weights = balanced_weights(rows, observed_weight)
     violations = sum(1 for row in matrix for a, b in zip(row, row[1:]) if b < a - 1e-12)
     if penalty is None:
         penalty = calibrate(matrix, prices, weights)
@@ -173,13 +192,16 @@ def train(work_dir, formula_package, code_commit, dataset_dir, seed=42, tracking
     baseline_manifest = verify_baseline(formula_package)
     baseline = baseline_module(formula_package).load_policy(Path(formula_package))
     records, shared, manifest = dataset.read(dataset_dir)
+    provenance = manifest["provenance"]
+    observed_weight = manifest.get("observedWeight", 0.0)
     rows = prepare(records, shared, baseline)
     train_rows = [r for r in rows if r["split"] == "train"]
     holdout = [r for r in rows if r["split"] == "validation"]
-    if any(not [r for r in part if r["generator"] == name] for part in (train_rows, holdout) for name in GENERATORS):
+    required = GENERATORS + ((OBSERVED,) if provenance == "mixed" else ())
+    if any(not [r for r in part if r["generator"] == name] for part in (train_rows, holdout) for name in required):
         raise ValueError("every generator needs training and validation rows")
-    booster = fit(train_rows, seed)
-    metrics = evaluate(booster, train_rows, holdout)
+    booster = fit(train_rows, seed, observed_weight)
+    metrics = evaluate(booster, train_rows, holdout, observed_weight)
     # Leave-one-generator-out: a model that only fits its own simulator fails here.
     for source, target in ((graph.NAME, agents.NAME), (agents.NAME, graph.NAME)):
         only = [r for r in train_rows if r["generator"] == source]
@@ -188,22 +210,23 @@ def train(work_dir, formula_package, code_commit, dataset_dir, seed=42, tracking
                        sum(r["label"] for r in only) / len(only))
         metrics[f"cross_{source}_to_{target}_log_loss"] = cross["log_loss"]
         metrics[f"cross_{source}_to_{target}_auc"] = cross["auc"]
-    penalty, sweep, decision = policy_metrics(booster, holdout)
+    penalty, sweep, decision = policy_metrics(booster, holdout, observed_weight=observed_weight)
     metrics.update(decision)
     model_text = booster.model_to_string()
     spec = {"schemaVersion": 1, "features": list(policy.FEATURES), "monotone": list(policy.MONOTONE),
             "prices": list(range(5, 31)), "penalty": penalty, "targetAcceptance": TARGET_ACCEPTANCE,
             "datasetId": manifest["datasetId"], "lightgbmVersion": lightgbm.__version__,
-            "params": params(seed), "rounds": ROUNDS, "provenance": "synthetic", "experimental": True}
+            "params": params(seed), "rounds": ROUNDS, "provenance": provenance, "experimental": True}
     use_tracking(work, tracking_uri)
     mlflow.set_experiment("foc-acceptance-gbm")
-    tags = {"provenance": "synthetic", "experimental": "true", "code_commit": code_commit, "kind": KIND}
+    tags = {"provenance": provenance, "experimental": "true", "code_commit": code_commit, "kind": KIND}
     with mlflow.start_run(tags=tags) as run:
         run_id = run.info.run_id
         mlflow.log_params({"seed": seed, "dataset_id": manifest["datasetId"], "algorithm": "lightgbm-binary",
                            "rounds": ROUNDS, "features": ",".join(policy.FEATURES), "penalty": penalty,
                            "target_acceptance": TARGET_ACCEPTANCE, "train_rows": len(train_rows),
                            "validation_rows": len(holdout), "lightgbm": lightgbm.__version__,
+                           "observed_weight": observed_weight,
                            "generators": ",".join(f"{n}:{v['version']}" for n, v in manifest["generators"].items())})
         mlflow.log_metrics({k: v for k, v in metrics.items() if isinstance(v, (int, float)) and math.isfinite(v)})
         mlflow.log_dict(manifest, "dataset-manifest.json")
@@ -216,7 +239,7 @@ def train(work_dir, formula_package, code_commit, dataset_dir, seed=42, tracking
         candidate = {
             "schemaVersion": 1, "kind": KIND, "runId": run_id, "codeCommit": code_commit,
             "datasetId": manifest["datasetId"], "spec": spec, "metrics": metrics, "penaltySweep": sweep,
-            "modelSha256": hashlib.sha256(model_text.encode()).hexdigest(), "provenance": "synthetic",
+            "modelSha256": hashlib.sha256(model_text.encode()).hexdigest(), "provenance": provenance,
             "inferenceSourceSha256": hashlib.sha256(INFERENCE_SOURCE.read_bytes()).hexdigest(),
             "baselineManifestSha256": digest(baseline_manifest),
         }
@@ -251,14 +274,20 @@ def gate_failures(metrics, tolerance=TARGET_TOLERANCE):
     return failures
 
 
-def select(work_dir, run_id, selection_path):
+def select(work_dir, run_id, selection_path, approved_by=None, approval_reason=None):
+    """Select an exact run. Production approval is an explicit, attributed decision."""
     candidate = read_candidate(work_dir, run_id)
     failures = gate_failures(candidate["metrics"])
     if failures:
         raise ValueError("candidate failed synthetic gates: " + "; ".join(failures))
+    if bool(approved_by) != bool(approval_reason):
+        raise ValueError("production approval needs both an approver and a reason")
     selection = {"schemaVersion": 1, "kind": KIND, "runId": run_id, "candidateSha256": digest(candidate),
                  "targetAcceptance": TARGET_ACCEPTANCE, "targetTolerance": TARGET_TOLERANCE,
-                 "scope": "synthetic-acceptance-only", "productionApproved": False}
+                 "scope": SCOPES[candidate.get("provenance", "synthetic")],
+                 "productionApproved": bool(approved_by)}
+    if approved_by:
+        selection["approval"] = {"approvedBy": approved_by, "reason": approval_reason}
     with Path(selection_path).open("x") as stream:
         stream.write(canonical(selection) + "\n")
     return selection
@@ -304,8 +333,8 @@ def export(work_dir, selection_path, formula_package, output, release_id):
             "provenance": {"codeCommit": candidate["codeCommit"],
                            "datasetIds": [candidate["datasetId"], *baseline_manifest["provenance"]["datasetIds"]],
                            "modelRuns": [candidate["runId"]], "baselineReleaseId": baseline_manifest["releaseId"],
-                           "calibration": "synthetic-only"},
-            "experimental": True, "productionApproved": False,
+                           "calibration": CALIBRATION[candidate.get("provenance", "synthetic")]},
+            "experimental": True, "productionApproved": selection.get("productionApproved") is True,
             "files": {p.relative_to(package).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                       for p in sorted(package.rglob("*")) if p.is_file()},
         }
