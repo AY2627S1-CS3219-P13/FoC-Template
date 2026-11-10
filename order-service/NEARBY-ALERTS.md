@@ -1,6 +1,6 @@
 # Nearby errand alerts (Web Push) — design
 
-Status: implemented (migrations 013 and 014, `alerts.go`, `webpush.go`, `web/sw.js`); API.md has the contract. Builds on nearest-pickup sorting
+Status: implemented (migrations 013, 014 and 015, `alerts.go`, `webpush.go`, `web/sw.js`); API.md has the contract. Builds on nearest-pickup sorting
 (campus coordinates from Supplier, `distanceMeters` in `internal/order/proximity.go`).
 
 ## 1. Purpose and scope
@@ -26,9 +26,10 @@ project brief) and iOS home-screen installation (section 13).
 | Delivery channel | True Web Push (service worker + browser push service), not email or in-page only |
 | Implementation | Go standard library for RFC 8291 encryption and RFC 8292 VAPID; no new module dependency |
 | Preference owner | Order Service, keyed by the User UUID from the validated session |
-| Preference granularity | One preference per courier, shared by all their devices |
+| Preference granularity | Up to three preferences per courier, shared by all their devices; each has its own on/off switch, and a campus location appears at most once. Migration 015 replaced the single preference, keeping it as the first |
+| Overlapping preferences | One alert per errand, from the closest matching preference (the earlier one on a tie), naming its location |
 | Radius | Fixed set: 0 m (the chosen location and its suppliers only), 100 m or 250 m. Across the 15 seeded campus locations these cover on average 1, 1.8 and 3.8 locations (7%, 12% and 25%). Migration 014 replaced the original 200/500/1000 m set and moved existing preferences to 250 m |
-| Rate limit | Per-courier cooldown of 2 minutes. Missed alerts are acceptable: the notification leads to the full list |
+| Rate limit | Per-preference cooldown of 2 minutes, so at most three alerts per courier in two minutes. Missed alerts are acceptable: the notification leads to the full list |
 | Delivery history | Delete delivery rows 7 days after creation |
 | Busy couriers | Skipped when matching if they already have three active orders, the acceptance limit; no cooldown is used |
 | Browsers | Chrome, Edge, Firefox and Safari on macOS (Apple's push host is allowed; the team tests it on a Mac) |
@@ -69,6 +70,9 @@ CREATE TABLE nearby_alert_preferences (
     last_alerted_at timestamptz,              -- cooldown
     updated_at timestamptz NOT NULL DEFAULT now()
 );
+-- Migration 015: up to three rows per courier.
+--   position smallint (1-3); PRIMARY KEY (user_id, position); UNIQUE (user_id, location_id)
+--   push_deliveries.alert_location text: the matching preference's location name
 
 CREATE TABLE push_subscriptions (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -117,8 +121,8 @@ already covers them.
 
 | Method and path | Body / response | Notes |
 | --- | --- | --- |
-| `GET /api/v1/orders/alerts` | `{pushAvailable, vapidPublicKey, preference: {enabled, locationId, radiusMeters} \| null, devices}` | `pushAvailable:false` when not configured |
-| `PUT /api/v1/orders/alerts` | `{enabled, locationId, radiusMeters}` | Location checked through Supplier with the user's session; radius ∈ {0,100,250} → `400 invalid_radius` / `invalid_location` |
+| `GET /api/v1/orders/alerts` | `{pushAvailable, vapidPublicKey, preferences: [{enabled, locationId, radiusMeters}], devices}` | `pushAvailable:false` when not configured |
+| `PUT /api/v1/orders/alerts` | `{preferences: [{enabled, locationId, radiusMeters}]}` (0–3 items) | Replaces the list; locations checked through Supplier with the user's session; radius ∈ {0,100,250} → `400 invalid_radius` / `invalid_location` / `duplicate_alert_location` / `too_many_alert_preferences` |
 | `PUT /api/v1/orders/alerts/subscription` | `{endpoint, keys: {p256dh, auth}}` → 204 | Upsert by endpoint; validated per section 9 |
 | `DELETE /api/v1/orders/alerts/subscription` | `{endpoint}` → 204 | Removes only the caller's own row |
 
@@ -149,8 +153,10 @@ Registered in `workflow.go` beside the existing three consumers and shown in
    - leave out couriers who already have three active orders (`accepted` or
      `picked up`), the same limit acceptance enforces with `409 courier_busy`;
      they keep their cooldown unused;
-   - insert one `push_deliveries` row per device (`ON CONFLICT DO NOTHING`) and
-     set `last_alerted_at` for couriers that received at least one row.
+   - keep one match per courier: the closest preference, the earlier one on a tie;
+   - insert one `push_deliveries` row per device (`ON CONFLICT DO NOTHING`) with
+     that preference's location name, and set `last_alerted_at` on that
+     preference only.
 4. If push is not configured, events are acknowledged without effect.
 
 ## 7. Push sender loop
@@ -162,7 +168,8 @@ Runs every second in `cmd/server/main.go`, like the other workers.
    never claim the same row at the same time.
 2. **Re-check:** if the order is no longer open or has expired, mark `skipped`.
 3. **Build** the payload (at most 3 KB of JSON):
-   `{"v":1,"orderId":"…","title":"New errand nearby","body":"Campus Cafe (COM2) · about 320 m from your alert location. Open Help a friend to see all nearby errands.","url":"/orders?view=open&order=…"}`
+   `{"v":1,"orderId":"…","title":"New errand nearby","body":"Campus Cafe (COM2) · about 320 m from your alert at Central Library. Open Help a friend to see all nearby errands.","url":"/orders?view=open&order=…"}`
+   ("at your alert location" when the pickup is at it)
 4. **Encrypt** per RFC 8291 (`aes128gcm`): ephemeral P-256 ECDH with the
    browser's key, HKDF-SHA-256 with its auth secret, AES-128-GCM, one record.
 5. **Sign** a VAPID JWT per RFC 8292 (ES256; `aud` = push service origin, `exp`
@@ -193,18 +200,20 @@ older than 7 days.
   outside that scope, which push does not need, so the page waits for the
   worker to activate before subscribing.
 - `/orders?view=open&order=<id>` opens Help a friend and selects that errand.
-- **Nearby alerts** panel in Help a friend: on/off toggle, location (prefilled
-  from **Start from**) and radius (this location only, 100 m or 250 m). Below
-  the form, the panel lists the campus locations that choice covers, nearest
-  first, with each one's distance and supplier count, computed in the browser
-  with the same distance as matching. Enabling runs:
+- **Nearby alerts** panel in Help a friend: up to three rows (**Add a
+  location**, **Remove**), each with its own on switch, location (the first
+  prefilled from **Start from**) and radius (this location only, 100 m or
+  250 m). Under each row, the panel lists the campus locations that row covers,
+  nearest first, with each one's distance and supplier count, computed in the
+  browser with the same distance as matching. A repeated location disables
+  saving with a hint. Enabling runs:
   permission request → `register('/orders/sw.js')` → `pushManager.subscribe({
   userVisibleOnly: true, applicationServerKey })` → `PUT …/subscription` →
   `PUT /alerts`.
-- **Turn off on this device** unsubscribes the browser and deletes its row; when
-  it was the last device, the account preference is switched off too.
-- The saved preference fills the location and radius until the courier changes
-  them, even when this browser has a different **Start from**. Browsers can drop
+- **Turn off on this device** unsubscribes the browser and deletes its row. The
+  saved locations stay; with no device the account gets no alerts.
+- The saved list fills the rows until the courier changes them, even when this
+  browser has a different **Start from**. Browsers can drop
   a subscription themselves (site permission reset, "turn off" from a
   notification); the two-second refresh notices it and offers to turn alerts on again.
 - The panel shows clear states: unsupported browser, insecure origin,
@@ -290,9 +299,9 @@ and failed over 7 days). Logs warn with the consumer name or delivery category o
 | Layer | Coverage |
 | --- | --- |
 | Go unit | RFC 8291 Appendix A test vector reproduced byte for byte; VAPID JWT verifies against the derived public key; endpoint allowlist rejects `http`, IP literals, other ports and hosts; radius validation |
-| Go integration (fake push service via `httptest`) | Radius matching; requester excluded; cooldown; replayed event sends nothing twice; existing events never alert after migration; 429/5xx retry and give-up; 404/410 deletes subscription; skipped when accepted or expired; API session, Origin and validation; 7-day cleanup |
+| Go integration (fake push service via `httptest`) | Radius matching; up to three preferences with closest-match naming, per-preference cooldown and switch; list validation and cooldown kept across saves; requester excluded; cooldown; replayed event sends nothing twice; existing events never alert after migration; 429/5xx retry and give-up; 404/410 deletes subscription; skipped when accepted or expired; API session, Origin and validation; 7-day cleanup |
 | Node (`core.test.mjs`) | Panel states, subscription body, deep link; the real `sw.js` run in a VM: payload → notification, unsafe URLs and malformed payloads fall back, clicks reuse an Orders tab or open the errand |
-| Playwright (`alerts.spec.mjs`) | Turn on, persist across reload, change radius, turn off; blocked permission; server without push; another device; notification deep link. A real service worker registers; only `PushManager` and the permission prompt are stubbed, since headless Chromium has no push service. The spec reaches the fixture through `localhost`, a secure origin |
+| Playwright (`alerts.spec.mjs`) | Add, remove and de-duplicate locations, per-row coverage, turn on, persist across reload, switch one off and change radius, turn off; blocked permission; server without push; another device; notification deep link. A real service worker registers; only `PushManager` and the permission prompt are stubbed, since headless Chromium has no push service. The spec reaches the fixture through `localhost`, a secure origin |
 | Manual | Real delivery through FCM in desktop Chrome; Firefox; Safari on macOS 13+ (team Mac) |
 
 iOS requires "Add to Home Screen" and a web-app manifest; it is out of scope
@@ -309,6 +318,8 @@ on a laptop. `localhost` and an SSM tunnel are secure origins.
 3. A system notification appears within a few seconds; clicking it opens Help a
    friend with that errand selected.
 4. Create an errand at Central Library (~320 m): no notification arrives.
+   Add a second row, **Central Library, this location only**, save, and repeat:
+   the notification now arrives.
 5. Show the consumer in publication-status and the delivery log lines.
 
 With ingress active, the same flow works on an Android phone through the

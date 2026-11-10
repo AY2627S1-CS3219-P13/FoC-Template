@@ -5,9 +5,11 @@ import (
 	"math"
 )
 
-// Coordinate is a campus location's WGS84 position, owned by Supplier Service.
+// Coordinate is a campus location's WGS84 position and display name, owned by
+// Supplier Service.
 type Coordinate struct {
 	Latitude, Longitude float64
+	Name                string
 }
 
 // Coordinates maps every campus location ID to its position. A nil value means
@@ -21,7 +23,7 @@ func (c *CatalogueClient) Coordinates(ctx context.Context, session string) (map[
 	for _, l := range body.Locations {
 		result[l.ID] = nil
 		if l.Latitude != nil {
-			result[l.ID] = &Coordinate{*l.Latitude, *l.Longitude}
+			result[l.ID] = &Coordinate{Latitude: *l.Latitude, Longitude: *l.Longitude, Name: l.Name}
 		}
 	}
 	return result, nil

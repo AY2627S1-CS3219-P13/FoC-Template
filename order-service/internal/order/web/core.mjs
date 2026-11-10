@@ -140,17 +140,25 @@ export function scheduledHistoryPage(orders, page, pageStart, nextPageStart) {
 
 // Nearby alerts: the panel state from browser capability, permission and the
 // server's view of this account. `subscribed` means this browser has a subscription.
-export function alertState({ supported, secure, permission, pushAvailable, preference, subscribed, devices }) {
+// preferences is the account's list (up to three), each with its own switch.
+export function alertState({ supported, secure, permission, pushAvailable, preferences = [], subscribed, devices }) {
   if (!supported) return { key: "unsupported", message: "This browser can't receive alerts. Use Chrome, Edge, Firefox, or Safari on macOS." };
   if (!secure) return { key: "insecure", message: "Alerts need a secure address (HTTPS or localhost)." };
   if (!pushAvailable) return { key: "unavailable", message: "Nearby alerts are not available on this server right now." };
   if (permission === "denied")
     return { key: "blocked", message: "Notifications are blocked for this site. Allow them in your browser's site settings, then reload this page." };
-  if (preference?.enabled && subscribed) return { key: "on", message: `On for this device · ${radiusLabel(preference.radiusMeters)}` };
-  if (preference?.enabled && devices > 0)
+  const active = preferences.filter((p) => p.enabled);
+  if (subscribed)
+    return active.length
+      ? { key: "on", message: `On for this device · ${active.map((p) => radiusLabel(p.radiusMeters)).join("; ")}` }
+      : { key: "on", message: "On for this device, but every alert location is switched off." };
+  if (active.length && devices > 0)
     return { key: "elsewhere", message: "On for another of your devices. Turn alerts on here to also get them on this device." };
   return { key: "off", message: "Off. Get a notification when a new errand appears near you, even with this page closed." };
 }
+
+// The most alert locations a courier can keep; the server enforces the same.
+export const maxAlertPreferences = 3;
 
 // Radius options: 0 (the chosen location and its suppliers only), 100 or 250 m.
 export const radiusLabel = (meters) => (meters === 0 ? "this location only" : `within ${meters} m`);

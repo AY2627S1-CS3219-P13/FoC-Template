@@ -572,10 +572,58 @@ dd {
 .alerts-panel .error {
   flex-basis: 100%;
 }
-/* Which campus locations the chosen location and distance cover. */
-.alerts-coverage {
+/* Up to three alert locations, each with its switch, fields and coverage. */
+.alerts-list {
   flex-basis: 100%;
-  padding-top: 12px;
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.alert-row {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.alert-row.paused {
+  background: #f6f7fa;
+}
+.alert-row.paused .alerts-coverage {
+  opacity: 0.7;
+}
+.alert-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+.alert-switch {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  min-height: 45px;
+  font-size: 14px;
+}
+.alert-switch input {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+}
+.alerts-hint {
+  flex-basis: 100%;
+  color: #8a4b00;
+}
+.alerts-hint[hidden] {
+  display: none;
+}
+/* Which campus locations a row's location and distance cover. */
+.alerts-coverage {
+  margin-top: 10px;
+  padding-top: 10px;
   border-top: 1px solid var(--line);
 }
 .alerts-coverage[hidden] {

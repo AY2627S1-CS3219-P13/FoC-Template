@@ -262,8 +262,8 @@ func TestLoadVAPIDConfiguration(t *testing.T) {
 }
 
 func TestAlertPayloadNamesPlaceAndDistanceOnly(t *testing.T) {
-	p := alertPayload("order/1", Place{Type: "supplier", ID: testSupplierID, Name: "Campus Cafe", LocationName: "COM2"}, 315)
-	if p["body"] != "Campus Cafe (COM2) · about 320 m from your alert location. Open Help a friend to see all nearby errands." ||
+	p := alertPayload("order/1", Place{Type: "supplier", ID: testSupplierID, Name: "Campus Cafe", LocationName: "COM2"}, 315, "Central Library")
+	if p["body"] != "Campus Cafe (COM2) · about 320 m from your alert at Central Library. Open Help a friend to see all nearby errands." ||
 		p["url"] != "/orders?view=open&order=order%2F1" || p["title"] != "New errand nearby" || p["orderId"] != "order/1" {
 		t.Fatalf("unexpected payload %+v", p)
 	}
@@ -272,10 +272,14 @@ func TestAlertPayloadNamesPlaceAndDistanceOnly(t *testing.T) {
 			t.Fatalf("%d m: got %q want %q", meters, got, want)
 		}
 	}
-	if same := alertPayload("x", Place{Type: "supplier", ID: testSupplierID, Name: "Campus Cafe", LocationName: "COM2"}, 0); same["body"] != "Campus Cafe (COM2) · at your alert location. Open Help a friend to see all nearby errands." {
+	if same := alertPayload("x", Place{Type: "supplier", ID: testSupplierID, Name: "Campus Cafe", LocationName: "COM2"}, 0, "COM2"); same["body"] != "Campus Cafe (COM2) · at your alert location. Open Help a friend to see all nearby errands." {
 		t.Fatalf("same-location payload %+v", same)
 	}
-	if location := alertPayload("x", Place{Type: "location", ID: "com2", Name: "COM2"}, 100); !strings.HasPrefix(location["body"].(string), "COM2 · about 100 m") {
+	if location := alertPayload("x", Place{Type: "location", ID: "com2", Name: "COM2"}, 100, "Terrace"); !strings.HasPrefix(location["body"].(string), "COM2 · about 100 m from your alert at Terrace") {
 		t.Fatal("location pickup body", location["body"])
+	}
+	// A job queued before migration 015 carries no alert location.
+	if legacy := alertPayload("x", Place{Type: "location", ID: "com2", Name: "COM2"}, 100, ""); !strings.HasPrefix(legacy["body"].(string), "COM2 · about 100 m from your alert location.") {
+		t.Fatal("legacy job body", legacy["body"])
 	}
 }

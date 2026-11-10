@@ -121,8 +121,13 @@ func enableAlerts(t *testing.T, a *App, token, location string, radius int, devi
 	for _, d := range devices {
 		assertStatus(t, request(t, a, "PUT", "/api/v1/orders/alerts/subscription", token, "", d.subscription()), 204)
 	}
-	assertStatus(t, request(t, a, "PUT", "/api/v1/orders/alerts", token, "",
-		map[string]any{"enabled": true, "locationId": location, "radiusMeters": radius}), 200)
+	savePreferences(t, a, token, alertPreference{true, location, radius})
+}
+
+// savePreferences replaces the caller's whole alert list.
+func savePreferences(t *testing.T, a *App, token string, preferences ...alertPreference) {
+	t.Helper()
+	assertStatus(t, request(t, a, "PUT", "/api/v1/orders/alerts", token, "", map[string]any{"preferences": append([]alertPreference{}, preferences...)}), 200)
 }
 
 func runAlerts(t *testing.T, a *App) {
@@ -141,38 +146,68 @@ func deliveries(t *testing.T, a *App, where string, args ...any) int {
 func TestAlertsAPIValidatesPreferencesAndSubscriptions(t *testing.T) {
 	a, push := alertsApp(t)
 	var settings struct {
-		PushAvailable  bool             `json:"pushAvailable"`
-		VAPIDPublicKey string           `json:"vapidPublicKey"`
-		Preference     *alertPreference `json:"preference"`
-		Devices        int              `json:"devices"`
+		PushAvailable  bool              `json:"pushAvailable"`
+		VAPIDPublicKey string            `json:"vapidPublicKey"`
+		Preferences    []alertPreference `json:"preferences"`
+		Devices        int               `json:"devices"`
 	}
 	got := request(t, a, "GET", "/api/v1/orders/alerts", "courier", "", nil)
 	assertStatus(t, got, 200)
-	if json.Unmarshal(got.Body.Bytes(), &settings) != nil || !settings.PushAvailable || len(b64url(t, settings.VAPIDPublicKey)) != 65 || settings.Preference != nil || settings.Devices != 0 {
+	if json.Unmarshal(got.Body.Bytes(), &settings) != nil || !settings.PushAvailable || len(b64url(t, settings.VAPIDPublicKey)) != 65 ||
+		!strings.Contains(got.Body.String(), `"preferences":[]`) || settings.Devices != 0 {
 		t.Fatalf("unexpected settings %s", got.Body.String())
 	}
+	library := `{"enabled":true,"locationId":"central-library","radiusMeters":250}`
 	for body, code := range map[string]string{
-		`{"enabled":true,"locationId":"central-library","radiusMeters":300}`:       "invalid_radius",
-		`{"enabled":true,"locationId":"central-library","radiusMeters":500}`:       "invalid_radius",
-		`{"enabled":true,"locationId":"central-library","radiusMeters":-1}`:        "invalid_radius",
-		`{"enabled":true,"locationId":"nowhere","radiusMeters":250}`:               "invalid_location",
-		`{"enabled":true,"locationId":"annex","radiusMeters":250}`:                 "invalid_location",
-		`{"locationId":"central-library","radiusMeters":250}`:                      "invalid_alert_preference",
-		`{"enabled":true,"locationId":"central-library","radiusMeters":250,"x":1}`: "invalid_json",
+		`{"preferences":[{"enabled":true,"locationId":"central-library","radiusMeters":300}]}`:       "invalid_radius",
+		`{"preferences":[{"enabled":true,"locationId":"central-library","radiusMeters":500}]}`:       "invalid_radius",
+		`{"preferences":[{"enabled":true,"locationId":"central-library","radiusMeters":-1}]}`:        "invalid_radius",
+		`{"preferences":[{"enabled":true,"locationId":"nowhere","radiusMeters":250}]}`:               "invalid_location",
+		`{"preferences":[` + library + `,{"enabled":true,"locationId":"annex","radiusMeters":250}]}`: "invalid_location",
+		`{"preferences":[{"locationId":"central-library","radiusMeters":250}]}`:                      "invalid_alert_preference",
+		`{"preferences":[{"enabled":true,"locationId":"central-library"}]}`:                          "invalid_alert_preference",
+		`{"preferences":[{"enabled":true,"radiusMeters":250}]}`:                                      "invalid_alert_preference",
+		`{}`: "invalid_alert_preference",
+		`{"preferences":[{"enabled":true,"locationId":"central-library","radiusMeters":250,"x":1}]}`: "invalid_json",
+		library: "invalid_json", // the single-preference body from before migration 015
+		`{"preferences":[` + library + `,{"enabled":false,"locationId":"central-library","radiusMeters":0}]}`:                                                                                                   "duplicate_alert_location",
+		`{"preferences":[` + library + `,{"enabled":true,"locationId":"com2","radiusMeters":0},{"enabled":true,"locationId":"utown","radiusMeters":0},{"enabled":true,"locationId":"annex","radiusMeters":0}]}`: "too_many_alert_preferences",
 	} {
 		response := rawRequest(a, "PUT", "/api/v1/orders/alerts", "courier", "", []byte(body))
 		if response.Code != 400 || !strings.Contains(response.Body.String(), code) {
 			t.Fatalf("%s: got %d %s", body, response.Code, response.Body.String())
 		}
 	}
+	if workflowCount(t, a, "SELECT count(*) FROM nearby_alert_preferences") != 0 {
+		t.Fatal("a rejected list was saved")
+	}
 	phone := push.device(t, "phone")
 	enableAlerts(t, a, "courier", "central-library", 250, phone)
+	want := []alertPreference{{true, "com2", 0}, {false, "utown", 100}, {true, "central-library", 250}}
+	savePreferences(t, a, "courier", want...)
 	got = request(t, a, "GET", "/api/v1/orders/alerts", "courier", "", nil)
-	if json.Unmarshal(got.Body.Bytes(), &settings) != nil || settings.Preference == nil || *settings.Preference != (alertPreference{true, "central-library", 250}) || settings.Devices != 1 {
-		t.Fatalf("preference not saved: %s", got.Body.String())
+	if json.Unmarshal(got.Body.Bytes(), &settings) != nil || len(settings.Preferences) != 3 || settings.Devices != 1 {
+		t.Fatalf("preferences not saved: %s", got.Body.String())
+	}
+	for i := range want {
+		if settings.Preferences[i] != want[i] {
+			t.Fatalf("preferences not saved in order: %s", got.Body.String())
+		}
 	}
 	if strings.Contains(got.Body.String(), phone.endpoint) {
 		t.Fatal("endpoint returned by the API")
+	}
+	// Saving keeps the cooldown of a location that stays in the list.
+	workflowSQL(t, a, "UPDATE nearby_alert_preferences SET last_alerted_at=clock_timestamp() WHERE location_id='central-library'")
+	savePreferences(t, a, "courier", alertPreference{false, "central-library", 100}, alertPreference{true, "utown", 0})
+	if workflowCount(t, a, "SELECT count(*) FROM nearby_alert_preferences WHERE location_id='central-library' AND position=1 AND last_alerted_at IS NOT NULL") != 1 ||
+		workflowCount(t, a, "SELECT count(*) FROM nearby_alert_preferences WHERE location_id='utown' AND last_alerted_at IS NULL") != 1 {
+		t.Fatal("cooldowns not carried across a save")
+	}
+	// An empty list removes every alert location.
+	savePreferences(t, a, "courier")
+	if workflowCount(t, a, "SELECT count(*) FROM nearby_alert_preferences WHERE user_id=$1", courierUser) != 0 {
+		t.Fatal("empty list kept preferences")
 	}
 
 	bad := phone.subscription()
@@ -232,7 +267,7 @@ func TestAlertsAPIValidatesPreferencesAndSubscriptions(t *testing.T) {
 	if json.Unmarshal(got.Body.Bytes(), &settings) != nil || settings.PushAvailable || settings.VAPIDPublicKey != "" {
 		t.Fatalf("unconfigured push advertised: %s", got.Body.String())
 	}
-	response := request(t, a, "PUT", "/api/v1/orders/alerts", "courier", "", map[string]any{"enabled": true, "locationId": "central-library", "radiusMeters": 250})
+	response := request(t, a, "PUT", "/api/v1/orders/alerts", "courier", "", map[string]any{"preferences": []alertPreference{{true, "central-library", 250}}})
 	if response.Code != 503 || !strings.Contains(response.Body.String(), "push_unavailable") {
 		t.Fatalf("got %d %s", response.Code, response.Body.String())
 	}
@@ -287,12 +322,82 @@ func TestNearbyAlertsReachOnlyCouriersInRange(t *testing.T) {
 	if len(push.messages()) != 2 {
 		t.Fatal("non-creation event alerted")
 	}
-	// Turning alerts off stops them.
-	assertStatus(t, request(t, a, "PUT", "/api/v1/orders/alerts", "courier", "", map[string]any{"enabled": false, "locationId": "com2", "radiusMeters": 0}), 200)
+	// Switching the preference off stops them.
+	savePreferences(t, a, "courier", alertPreference{false, "com2", 0})
 	createdForTest(t, a, "nearby-3")
 	runAlerts(t, a)
 	if len(push.messages()) != 2 {
 		t.Fatal("disabled preference alerted")
+	}
+}
+
+type coordinatesFunc func(context.Context, string) (map[string]*Coordinate, error)
+
+func (f coordinatesFunc) Coordinates(ctx context.Context, session string) (map[string]*Coordinate, error) {
+	return f(ctx, session)
+}
+
+// A courier with several preferences gets one alert per errand, from the
+// closest matching one, and each preference has its own cooldown and switch.
+func TestNearbyAlertsUseEachPreference(t *testing.T) {
+	a, push := alertsApp(t)
+	// Terrace is ~56 m from COM2; the fake Supplier catalogue does not list it.
+	catalogue := a.push.locations
+	a.push.locations = coordinatesFunc(func(ctx context.Context, session string) (map[string]*Coordinate, error) {
+		places, err := catalogue.Coordinates(ctx, session)
+		if err == nil {
+			places["terrace"] = &Coordinate{Latitude: 1.294425, Longitude: 103.774153, Name: "Terrace"}
+		}
+		return places, err
+	})
+	enableAlerts(t, a, "courier", "central-library", 0, push.device(t, "courier"))
+	savePreferences(t, a, "courier", alertPreference{true, "central-library", 250}, alertPreference{true, "com2", 0})
+	workflowSQL(t, a, "INSERT INTO nearby_alert_preferences(user_id,position,enabled,location_id,radius_meters) VALUES($1,3,true,'terrace',100)", courierUser)
+	cooling := func() []string {
+		var positions []string
+		for p := 1; p <= 3; p++ {
+			if workflowCount(t, a, "SELECT count(*) FROM nearby_alert_preferences WHERE user_id=$1 AND position=$2 AND last_alerted_at IS NOT NULL", courierUser, p) == 1 {
+				positions = append(positions, strconv.Itoa(p))
+			}
+		}
+		return positions
+	}
+
+	// COM2 (0 m) and Terrace (~56 m) both match; Central Library (~315 m) does not.
+	first := createdForTest(t, a, "several-1")
+	runAlerts(t, a)
+	got := push.messages()
+	if len(got) != 1 || got[0].payload["orderId"] != first.ID ||
+		got[0].payload["body"] != "Campus Cafe (COM2) · at your alert location. Open Help a friend to see all nearby errands." {
+		t.Fatalf("want one alert from the closest preference, got %+v", got)
+	}
+	if c := cooling(); strings.Join(c, ",") != "2" {
+		t.Fatal("cooldown started on the wrong preferences", c)
+	}
+	// COM2 is cooling down, so Terrace alerts and names itself.
+	second := createdForTest(t, a, "several-2")
+	runAlerts(t, a)
+	got = push.messages()
+	if len(got) != 2 || got[1].payload["orderId"] != second.ID ||
+		got[1].payload["body"] != "Campus Cafe (COM2) · about 60 m from your alert at Terrace. Open Help a friend to see all nearby errands." {
+		t.Fatalf("second preference did not alert: %+v", got)
+	}
+	if c := cooling(); strings.Join(c, ",") != "2,3" {
+		t.Fatal("cooldown started on the wrong preferences", c)
+	}
+	// Both matching preferences are cooling down.
+	third := createdForTest(t, a, "several-3")
+	runAlerts(t, a)
+	if len(push.messages()) != 2 || deliveries(t, a, "order_id=$1", third.ID) != 0 {
+		t.Fatal("alerted while every matching preference was cooling down")
+	}
+	// A switched-off preference never matches, even out of cooldown.
+	workflowSQL(t, a, "UPDATE nearby_alert_preferences SET last_alerted_at=NULL")
+	workflowSQL(t, a, "UPDATE nearby_alert_preferences SET enabled=false WHERE location_id IN ('com2','terrace')")
+	fourth := createdForTest(t, a, "several-4")
+	runAlerts(t, a)
+	if len(push.messages()) != 2 || deliveries(t, a, "order_id=$1", fourth.ID) != 0 {
+		t.Fatal("switched-off preference alerted")
 	}
 }
 
@@ -413,7 +518,7 @@ func TestNearbyAlertsMigrationNeverAnnouncesExistingErrands(t *testing.T) {
 	existing := createdForTest(t, a, "before-upgrade")
 	workflowSQL(t, a, "DROP TABLE push_deliveries, push_subscriptions, nearby_alert_preferences")
 	workflowSQL(t, a, "DELETE FROM workflow_receipts WHERE consumer_name=$1", nearbyAlertConsumer)
-	workflowSQL(t, a, "DELETE FROM schema_migrations WHERE name IN ('013_nearby_alerts.sql','014_alert_radius.sql')")
+	workflowSQL(t, a, "DELETE FROM schema_migrations WHERE name IN ('013_nearby_alerts.sql','014_alert_radius.sql','015_alert_preferences.sql')")
 	if err := Migrate(context.Background(), a.db); err != nil {
 		t.Fatal(err)
 	}

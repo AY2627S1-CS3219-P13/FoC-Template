@@ -17,13 +17,15 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Nearby errand alerts: couriers choose a campus location and radius (0 m for
-// that location only, 100 m or 250 m); each new open errand whose pickup is
-// within range becomes a Web Push notification.
+// Nearby errand alerts: couriers keep up to three preferences, each a campus
+// location and radius (0 m for that location only, 100 m or 250 m) with its own
+// on/off switch; each new open errand whose pickup is within range of one
+// becomes a Web Push notification.
 // See NEARBY-ALERTS.md for the design.
 
 const (
 	nearbyAlertConsumer = "workflow-nearby-alerts"
+	maxAlertPreferences = 3
 	maxPushDevices      = 5
 	pushClaimBatch      = 20
 	pushMaxAttempts     = 5
@@ -68,17 +70,27 @@ type alertPreference struct {
 func validRadius(meters int) bool { return meters == 0 || meters == 100 || meters == 250 }
 
 func (a *App) alertSettings(w http.ResponseWriter, r *http.Request) error {
-	body := map[string]any{"pushAvailable": a.push != nil, "vapidPublicKey": nil, "preference": nil, "devices": 0}
+	body := map[string]any{"pushAvailable": a.push != nil, "vapidPublicKey": nil, "preferences": []alertPreference{}, "devices": 0}
 	if a.push != nil {
 		body["vapidPublicKey"] = a.push.signer.publicKey
 	}
-	var p alertPreference
-	err := a.db.QueryRow(r.Context(), "SELECT enabled,location_id,radius_meters FROM nearby_alert_preferences WHERE user_id=$1", actor(r)).Scan(&p.Enabled, &p.LocationID, &p.RadiusMeters)
-	if err == nil {
-		body["preference"] = p
-	} else if !errors.Is(err, pgx.ErrNoRows) {
+	rows, err := a.db.Query(r.Context(), "SELECT enabled,location_id,radius_meters FROM nearby_alert_preferences WHERE user_id=$1 ORDER BY position", actor(r))
+	if err != nil {
 		return err
 	}
+	preferences := []alertPreference{}
+	for rows.Next() {
+		var p alertPreference
+		if err = rows.Scan(&p.Enabled, &p.LocationID, &p.RadiusMeters); err != nil {
+			break
+		}
+		preferences = append(preferences, p)
+	}
+	rows.Close()
+	if err = errors.Join(err, rows.Err()); err != nil {
+		return err
+	}
+	body["preferences"] = preferences
 	var devices int
 	if err = a.db.QueryRow(r.Context(), "SELECT count(*) FROM push_subscriptions WHERE user_id=$1", actor(r)).Scan(&devices); err != nil {
 		return err
@@ -88,43 +100,95 @@ func (a *App) alertSettings(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func (a *App) saveAlertPreference(w http.ResponseWriter, r *http.Request) error {
+// saveAlertPreferences replaces the caller's whole preference list. A location
+// that stays in the list keeps its cooldown, so saving never resets it.
+func (a *App) saveAlertPreferences(w http.ResponseWriter, r *http.Request) error {
 	if a.push == nil {
 		return pushUnavailable()
 	}
 	var body struct {
-		Enabled      *bool  `json:"enabled"`
-		LocationID   string `json:"locationId"`
-		RadiusMeters int    `json:"radiusMeters"`
+		Preferences []struct {
+			Enabled      *bool  `json:"enabled"`
+			LocationID   string `json:"locationId"`
+			RadiusMeters *int   `json:"radiusMeters"`
+		} `json:"preferences"`
 	}
 	if err := readJSON(w, r, &body); err != nil {
 		return err
 	}
-	if body.Enabled == nil || body.LocationID == "" || len(body.LocationID) > 128 {
-		return problem(400, "invalid_alert_preference", "Send enabled, locationId and radiusMeters.")
+	if body.Preferences == nil {
+		return problem(400, "invalid_alert_preference", "Send preferences: a list of enabled, locationId and radiusMeters.")
 	}
-	if !validRadius(body.RadiusMeters) {
-		return problem(400, "invalid_radius", "Choose this location only (0), 100 or 250 metres.")
+	if len(body.Preferences) > maxAlertPreferences {
+		return problem(400, "too_many_alert_preferences", "Choose at most three alert locations.")
 	}
-	cookie, _ := r.Cookie(a.cfg.SessionCookie)
-	session := ""
-	if cookie != nil {
-		session = cookie.Value
+	saved := make([]alertPreference, 0, len(body.Preferences))
+	seen := make(map[string]bool)
+	for _, p := range body.Preferences {
+		if p.Enabled == nil || p.LocationID == "" || len(p.LocationID) > 128 || p.RadiusMeters == nil {
+			return problem(400, "invalid_alert_preference", "Send enabled, locationId and radiusMeters for each alert location.")
+		}
+		if !validRadius(*p.RadiusMeters) {
+			return problem(400, "invalid_radius", "Choose this location only (0), 100 or 250 metres.")
+		}
+		if seen[p.LocationID] {
+			return problem(400, "duplicate_alert_location", "Each campus location can appear only once in your alerts.")
+		}
+		seen[p.LocationID] = true
+		saved = append(saved, alertPreference{*p.Enabled, p.LocationID, *p.RadiusMeters})
 	}
-	coordinates, err := a.locator.Coordinates(r.Context(), session)
+	if len(saved) > 0 {
+		cookie, _ := r.Cookie(a.cfg.SessionCookie)
+		session := ""
+		if cookie != nil {
+			session = cookie.Value
+		}
+		coordinates, err := a.locator.Coordinates(r.Context(), session)
+		if err != nil {
+			return err
+		}
+		for _, p := range saved {
+			if coordinates[p.LocationID] == nil {
+				return problem(400, "invalid_location", "Choose a campus location with a known position.")
+			}
+		}
+	}
+	tx, err := a.db.Begin(r.Context())
 	if err != nil {
 		return err
 	}
-	if coordinates[body.LocationID] == nil {
-		return problem(400, "invalid_location", "Choose a campus location with a known position.")
+	defer rollback(tx)
+	if _, err = tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", "alert-preferences:"+actor(r)); err != nil {
+		return err
 	}
-	_, err = a.db.Exec(r.Context(), `INSERT INTO nearby_alert_preferences(user_id,enabled,location_id,radius_meters) VALUES($1,$2,$3,$4)
- ON CONFLICT(user_id) DO UPDATE SET enabled=EXCLUDED.enabled,location_id=EXCLUDED.location_id,
- radius_meters=EXCLUDED.radius_meters,updated_at=clock_timestamp()`, actor(r), *body.Enabled, body.LocationID, body.RadiusMeters)
+	// Matching locks preference rows while it runs, so this waits for a pass in progress.
+	rows, err := tx.Query(r.Context(), "DELETE FROM nearby_alert_preferences WHERE user_id=$1 RETURNING location_id,last_alerted_at", actor(r))
 	if err != nil {
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"preference": alertPreference{*body.Enabled, body.LocationID, body.RadiusMeters}})
+	cooldowns := make(map[string]*time.Time)
+	for rows.Next() {
+		var location string
+		var last *time.Time
+		if err = rows.Scan(&location, &last); err != nil {
+			break
+		}
+		cooldowns[location] = last
+	}
+	rows.Close()
+	if err = errors.Join(err, rows.Err()); err != nil {
+		return err
+	}
+	for i, p := range saved {
+		if _, err = tx.Exec(r.Context(), `INSERT INTO nearby_alert_preferences(user_id,position,enabled,location_id,radius_meters,last_alerted_at)
+ VALUES($1,$2,$3,$4,$5,$6)`, actor(r), i+1, p.Enabled, p.LocationID, p.RadiusMeters, cooldowns[p.LocationID]); err != nil {
+			return err
+		}
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		return err
+	}
+	writeJSON(w, 200, map[string]any{"preferences": saved})
 	return nil
 }
 
@@ -236,40 +300,65 @@ func matchNearby(ctx context.Context, tx pgx.Tx, e domainEvent, coordinates map[
 	if !fresh || origin == nil {
 		return nil
 	}
-	// Couriers at the three-active-order acceptance limit could not take it.
-	rows, err := tx.Query(ctx, `SELECT p.user_id::text,p.location_id,p.radius_meters FROM nearby_alert_preferences p
+	// Each enabled preference outside its own cooldown is a candidate. Couriers at
+	// the three-active-order acceptance limit could not take it.
+	rows, err := tx.Query(ctx, `SELECT p.user_id::text,p.position,p.location_id,p.radius_meters FROM nearby_alert_preferences p
  WHERE p.enabled AND p.user_id<>$1::uuid
  AND (p.last_alerted_at IS NULL OR p.last_alerted_at<=clock_timestamp()-interval '2 minutes')
  AND EXISTS(SELECT 1 FROM push_subscriptions s WHERE s.user_id=p.user_id)
  AND (SELECT count(*) FROM orders o WHERE o.courier_id=p.user_id AND o.status IN ('accepted','picked up'))<3
- ORDER BY p.user_id FOR UPDATE OF p`, requester)
+ ORDER BY p.user_id,p.position FOR UPDATE OF p`, requester)
 	if err != nil {
 		return err
 	}
+	// One alert per courier: the closest matching preference, the first on a tie.
+	type match struct {
+		position int16
+		distance int64
+		location string
+	}
+	best := make(map[string]match)
 	var users []string
-	var distances []int64
 	for rows.Next() {
 		var user, location string
+		var position int16
 		var radius int64
-		if err = rows.Scan(&user, &location, &radius); err != nil {
+		if err = rows.Scan(&user, &position, &location, &radius); err != nil {
 			break
 		}
-		if from := coordinates[location]; from != nil {
-			if d := distanceMeters(*from, *origin); d <= radius {
-				users, distances = append(users, user), append(distances, d)
-			}
+		from := coordinates[location]
+		if from == nil {
+			continue
+		}
+		d := distanceMeters(*from, *origin)
+		if d > radius {
+			continue
+		}
+		current, found := best[user]
+		if !found {
+			users = append(users, user)
+		}
+		if !found || d < current.distance {
+			best[user] = match{position, d, from.Name}
 		}
 	}
 	rows.Close()
 	if err = errors.Join(err, rows.Err()); err != nil || len(users) == 0 {
 		return err
 	}
-	if _, err = tx.Exec(ctx, "UPDATE nearby_alert_preferences SET last_alerted_at=clock_timestamp() WHERE user_id=ANY($1::text[]::uuid[])", users); err != nil {
+	positions, distances, names := make([]int16, len(users)), make([]int64, len(users)), make([]string, len(users))
+	for i, user := range users {
+		m := best[user]
+		positions[i], distances[i], names[i] = m.position, m.distance, m.location
+	}
+	// Only the preference that produced the alert starts its cooldown.
+	if _, err = tx.Exec(ctx, `UPDATE nearby_alert_preferences p SET last_alerted_at=clock_timestamp()
+ FROM unnest($1::text[]::uuid[],$2::smallint[]) AS m(u,position) WHERE p.user_id=m.u AND p.position=m.position`, users, positions); err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO push_deliveries(event_id,subscription_id,order_id,distance_meters)
- SELECT $1,s.id,$2,m.d FROM unnest($3::text[]::uuid[],$4::bigint[]) AS m(u,d) JOIN push_subscriptions s ON s.user_id=m.u
- ON CONFLICT DO NOTHING`, e.ID, e.OrderID, users, distances)
+	_, err = tx.Exec(ctx, `INSERT INTO push_deliveries(event_id,subscription_id,order_id,distance_meters,alert_location)
+ SELECT $1,s.id,$2,m.d,m.name FROM unnest($3::text[]::uuid[],$4::bigint[],$5::text[]) AS m(u,d,name) JOIN push_subscriptions s ON s.user_id=m.u
+ ON CONFLICT DO NOTHING`, e.ID, e.OrderID, users, distances, names)
 	return err
 }
 
@@ -278,6 +367,7 @@ type pushJob struct {
 	subscriptionID int64
 	orderID        string
 	distance       int64
+	alertLocation  string
 	attempts       int
 }
 
@@ -292,14 +382,14 @@ func (a *App) SendPushAlerts(ctx context.Context) error {
  WHERE status='pending' AND next_attempt_at<=clock_timestamp() ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED)
  UPDATE push_deliveries d SET next_attempt_at=clock_timestamp()+interval '30 seconds' FROM due
  WHERE d.event_id=due.event_id AND d.subscription_id=due.subscription_id
- RETURNING d.event_id,d.subscription_id,d.order_id,d.distance_meters,d.attempts`, pushClaimBatch)
+ RETURNING d.event_id,d.subscription_id,d.order_id,d.distance_meters,d.alert_location,d.attempts`, pushClaimBatch)
 	if err != nil {
 		return err
 	}
 	var jobs []pushJob
 	for rows.Next() {
 		var j pushJob
-		if err = rows.Scan(&j.eventID, &j.subscriptionID, &j.orderID, &j.distance, &j.attempts); err != nil {
+		if err = rows.Scan(&j.eventID, &j.subscriptionID, &j.orderID, &j.distance, &j.alertLocation, &j.attempts); err != nil {
 			break
 		}
 		jobs = append(jobs, j)
@@ -345,7 +435,7 @@ func (a *App) sendPush(ctx context.Context, job pushJob) error {
 	if json.Unmarshal(rawPickup, &pickup) != nil {
 		return a.finishPush(ctx, job, "failed", "push_rejected")
 	}
-	payload, err := json.Marshal(alertPayload(job.orderID, pickup, job.distance))
+	payload, err := json.Marshal(alertPayload(job.orderID, pickup, job.distance, job.alertLocation))
 	if err != nil {
 		return err
 	}
@@ -419,14 +509,18 @@ func (a *App) retryPush(ctx context.Context, job pushJob, retryAfter int) error 
 	return err
 }
 
-// alertPayload is the decrypted notification content. It names the place and
-// distance only: never items, credits or user IDs.
-func alertPayload(orderID string, pickup Place, distance int64) map[string]any {
+// alertPayload is the decrypted notification content. It names the place, the
+// distance and the courier's matching alert location only: never items, credits
+// or user IDs. Jobs queued before migration 015 have no alert location.
+func alertPayload(orderID string, pickup Place, distance int64, alertLocation string) map[string]any {
 	place := pickup.Name
 	if pickup.Type == "supplier" && pickup.LocationName != "" {
 		place += " (" + pickup.LocationName + ")"
 	}
 	where := alertDistance(distance) + " from your alert location"
+	if alertLocation != "" {
+		where = alertDistance(distance) + " from your alert at " + alertLocation
+	}
 	if distance == 0 {
 		where = "at your alert location"
 	}

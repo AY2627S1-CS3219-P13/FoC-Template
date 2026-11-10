@@ -247,17 +247,28 @@
             <h3 id="alerts-title">Nearby alerts</h3>
             <p id="alerts-state" class="muted" role="status"></p>
           </div>
+          <ol id="alerts-list" class="alerts-list" aria-label="Alert locations"></ol>
+          <p id="alerts-hint" class="alerts-hint" role="status" hidden></p>
           <div class="alerts-form">
-            <label>Near <select id="alerts-location"></select></label>
-            <label>Distance <select id="alerts-radius"><option value="0">This location only</option><option value="100">Within 100 m</option><option value="250">Within 250 m</option></select></label>
+            <button id="alerts-add" class="secondary">Add a location</button>
             <button id="alerts-enable">Turn on alerts</button>
             <button id="alerts-save" class="secondary" hidden>Save changes</button>
             <button id="alerts-disable" class="secondary" hidden>Turn off on this device</button>
           </div>
-          <div id="alerts-coverage" class="alerts-coverage" hidden>
-            <p id="alerts-coverage-title" class="muted"></p>
-            <ul id="alerts-coverage-list"></ul>
-          </div>
+          <template id="alert-row-template">
+            <li class="alert-row">
+              <div class="alert-fields">
+                <label class="alert-switch"><input type="checkbox" class="alert-enabled" /> <span>On</span></label>
+                <label>Near <select class="alert-location"></select></label>
+                <label>Distance <select class="alert-radius"><option value="0">This location only</option><option value="100">Within 100 m</option><option value="250">Within 250 m</option></select></label>
+                <button type="button" class="secondary alert-remove">Remove</button>
+              </div>
+              <div class="alerts-coverage" hidden>
+                <p class="muted alert-coverage-title"></p>
+                <ul class="alert-coverage-list"></ul>
+              </div>
+            </li>
+          </template>
           <p id="alerts-message" class="error" role="alert" hidden></p>
         </section>
         <div class="list-toolbar">
