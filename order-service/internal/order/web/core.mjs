@@ -152,7 +152,28 @@ export function alertState({ supported, secure, permission, pushAvailable, prefe
   return { key: "off", message: "Off. Get a notification when a new errand appears near you, even with this page closed." };
 }
 
-export const radiusLabel = (meters) => (meters >= 1000 ? `within ${meters / 1000} km` : `within ${meters} m`);
+// Radius options: 0 (the chosen location and its suppliers only), 100 or 250 m.
+export const radiusLabel = (meters) => (meters === 0 ? "this location only" : `within ${meters} m`);
+export const alertScope = (meters, name) => (meters === 0 ? `at ${name} only` : `${radiusLabel(meters)} of ${name}`);
+
+// The campus locations whose pickups would alert a courier at locationId with
+// this radius, nearest first, with how many suppliers each has. Uses the same
+// distance as the server's matching, so the list is exactly what will alert.
+export function alertCoverage(places, locationId, radiusMeters) {
+  const located = (p) => p.type === "location" && typeof p.latitude === "number" && typeof p.longitude === "number";
+  const origin = places.find((p) => located(p) && p.id === locationId);
+  if (!origin) return [];
+  return places
+    .filter(located)
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      distance: distanceMeters(origin, p),
+      suppliers: places.filter((s) => s.type === "supplier" && s.locationId === p.id).length,
+    }))
+    .filter((p) => (p.id === origin.id ? true : p.distance <= radiusMeters))
+    .sort((a, b) => (a.id === origin.id ? -1 : b.id === origin.id ? 1 : a.distance - b.distance || a.name.localeCompare(b.name)));
+}
 
 // PushManager.subscribe needs the VAPID public key as bytes.
 export function base64UrlBytes(value) {

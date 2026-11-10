@@ -153,10 +153,12 @@ func TestAlertsAPIValidatesPreferencesAndSubscriptions(t *testing.T) {
 	}
 	for body, code := range map[string]string{
 		`{"enabled":true,"locationId":"central-library","radiusMeters":300}`:       "invalid_radius",
-		`{"enabled":true,"locationId":"nowhere","radiusMeters":500}`:               "invalid_location",
-		`{"enabled":true,"locationId":"annex","radiusMeters":500}`:                 "invalid_location",
-		`{"locationId":"central-library","radiusMeters":500}`:                      "invalid_alert_preference",
-		`{"enabled":true,"locationId":"central-library","radiusMeters":500,"x":1}`: "invalid_json",
+		`{"enabled":true,"locationId":"central-library","radiusMeters":500}`:       "invalid_radius",
+		`{"enabled":true,"locationId":"central-library","radiusMeters":-1}`:        "invalid_radius",
+		`{"enabled":true,"locationId":"nowhere","radiusMeters":250}`:               "invalid_location",
+		`{"enabled":true,"locationId":"annex","radiusMeters":250}`:                 "invalid_location",
+		`{"locationId":"central-library","radiusMeters":250}`:                      "invalid_alert_preference",
+		`{"enabled":true,"locationId":"central-library","radiusMeters":250,"x":1}`: "invalid_json",
 	} {
 		response := rawRequest(a, "PUT", "/api/v1/orders/alerts", "courier", "", []byte(body))
 		if response.Code != 400 || !strings.Contains(response.Body.String(), code) {
@@ -164,9 +166,9 @@ func TestAlertsAPIValidatesPreferencesAndSubscriptions(t *testing.T) {
 		}
 	}
 	phone := push.device(t, "phone")
-	enableAlerts(t, a, "courier", "central-library", 500, phone)
+	enableAlerts(t, a, "courier", "central-library", 250, phone)
 	got = request(t, a, "GET", "/api/v1/orders/alerts", "courier", "", nil)
-	if json.Unmarshal(got.Body.Bytes(), &settings) != nil || settings.Preference == nil || *settings.Preference != (alertPreference{true, "central-library", 500}) || settings.Devices != 1 {
+	if json.Unmarshal(got.Body.Bytes(), &settings) != nil || settings.Preference == nil || *settings.Preference != (alertPreference{true, "central-library", 250}) || settings.Devices != 1 {
 		t.Fatalf("preference not saved: %s", got.Body.String())
 	}
 	if strings.Contains(got.Body.String(), phone.endpoint) {
@@ -230,7 +232,7 @@ func TestAlertsAPIValidatesPreferencesAndSubscriptions(t *testing.T) {
 	if json.Unmarshal(got.Body.Bytes(), &settings) != nil || settings.PushAvailable || settings.VAPIDPublicKey != "" {
 		t.Fatalf("unconfigured push advertised: %s", got.Body.String())
 	}
-	response := request(t, a, "PUT", "/api/v1/orders/alerts", "courier", "", map[string]any{"enabled": true, "locationId": "central-library", "radiusMeters": 500})
+	response := request(t, a, "PUT", "/api/v1/orders/alerts", "courier", "", map[string]any{"enabled": true, "locationId": "central-library", "radiusMeters": 250})
 	if response.Code != 503 || !strings.Contains(response.Body.String(), "push_unavailable") {
 		t.Fatalf("got %d %s", response.Code, response.Body.String())
 	}
@@ -239,9 +241,9 @@ func TestAlertsAPIValidatesPreferencesAndSubscriptions(t *testing.T) {
 func TestNearbyAlertsReachOnlyCouriersInRange(t *testing.T) {
 	a, push := alertsApp(t)
 	courierPhone, courierLaptop := push.device(t, "courier-phone"), push.device(t, "courier-laptop")
-	enableAlerts(t, a, "courier", "central-library", 500, courierPhone, courierLaptop) // COM2 pickup is ~315 m away
-	enableAlerts(t, a, "other", "central-library", 200, push.device(t, "other"))       // out of range
-	enableAlerts(t, a, "requester", "com2", 1000, push.device(t, "requester"))         // never alerted about their own errand
+	enableAlerts(t, a, "courier", "com2", 0, courierPhone, courierLaptop)        // the COM2 pickup itself
+	enableAlerts(t, a, "other", "central-library", 250, push.device(t, "other")) // COM2 is ~315 m away
+	enableAlerts(t, a, "requester", "com2", 250, push.device(t, "requester"))    // never alerted about their own errand
 
 	o := createdForTest(t, a, "nearby-1")
 	runAlerts(t, a)
@@ -260,7 +262,7 @@ func TestNearbyAlertsReachOnlyCouriersInRange(t *testing.T) {
 			t.Fatalf("unexpected push headers %v", h)
 		}
 		if m.payload["orderId"] != o.ID || m.payload["url"] != "/orders?view=open&order="+url.QueryEscape(o.ID) ||
-			m.payload["body"] != "Campus Cafe (COM2) · about 320 m from your alert location. Open Help a friend to see all nearby errands." {
+			m.payload["body"] != "Campus Cafe (COM2) · at your alert location. Open Help a friend to see all nearby errands." {
 			t.Fatalf("unexpected payload %+v", m.payload)
 		}
 	}
@@ -286,7 +288,7 @@ func TestNearbyAlertsReachOnlyCouriersInRange(t *testing.T) {
 		t.Fatal("non-creation event alerted")
 	}
 	// Turning alerts off stops them.
-	assertStatus(t, request(t, a, "PUT", "/api/v1/orders/alerts", "courier", "", map[string]any{"enabled": false, "locationId": "central-library", "radiusMeters": 500}), 200)
+	assertStatus(t, request(t, a, "PUT", "/api/v1/orders/alerts", "courier", "", map[string]any{"enabled": false, "locationId": "com2", "radiusMeters": 0}), 200)
 	createdForTest(t, a, "nearby-3")
 	runAlerts(t, a)
 	if len(push.messages()) != 2 {
@@ -296,7 +298,7 @@ func TestNearbyAlertsReachOnlyCouriersInRange(t *testing.T) {
 
 func TestNearbyAlertsSkipBusyCouriersAndStaleOrders(t *testing.T) {
 	a, push := alertsApp(t)
-	enableAlerts(t, a, "courier", "central-library", 500, push.device(t, "courier"))
+	enableAlerts(t, a, "courier", "com2", 0, push.device(t, "courier"))
 	for i := range 3 {
 		busy := createdForTest(t, a, "busy-"+strconv.Itoa(i))
 		mustAction(t, a, busy.ID, "courier", "accept", "accepted")
@@ -325,7 +327,7 @@ func TestNearbyAlertsSkipBusyCouriersAndStaleOrders(t *testing.T) {
 
 func TestNearbyAlertsWaitForCatalogueAndIgnoreUnconfiguredPush(t *testing.T) {
 	a, push := alertsApp(t)
-	enableAlerts(t, a, "courier", "central-library", 500, push.device(t, "courier"))
+	enableAlerts(t, a, "courier", "com2", 0, push.device(t, "courier"))
 	locations := a.push.locations
 	a.push.locations = &CatalogueClient{BaseURL: "http://127.0.0.1:1", InternalToken: testSupplierInternalToken, Client: &http.Client{Timeout: time.Second}}
 	o := createdForTest(t, a, "catalogue-down")
@@ -352,7 +354,7 @@ func TestPushSenderRetriesRemovesAndSkips(t *testing.T) {
 	a, push := alertsApp(t)
 	busy, gone, rejected, denied := push.device(t, "busy"), push.device(t, "gone"), push.device(t, "rejected"), push.device(t, "denied")
 	busy.status, gone.status, rejected.status, denied.status = 503, 410, 400, 403
-	enableAlerts(t, a, "courier", "central-library", 1000, busy, gone, rejected, denied)
+	enableAlerts(t, a, "courier", "com2", 0, busy, gone, rejected, denied)
 	createdForTest(t, a, "sender")
 	runAlerts(t, a)
 	if workflowCount(t, a, "SELECT count(*) FROM push_subscriptions WHERE endpoint=$1", gone.endpoint) != 0 {
@@ -411,11 +413,11 @@ func TestNearbyAlertsMigrationNeverAnnouncesExistingErrands(t *testing.T) {
 	existing := createdForTest(t, a, "before-upgrade")
 	workflowSQL(t, a, "DROP TABLE push_deliveries, push_subscriptions, nearby_alert_preferences")
 	workflowSQL(t, a, "DELETE FROM workflow_receipts WHERE consumer_name=$1", nearbyAlertConsumer)
-	workflowSQL(t, a, "DELETE FROM schema_migrations WHERE name='013_nearby_alerts.sql'")
+	workflowSQL(t, a, "DELETE FROM schema_migrations WHERE name IN ('013_nearby_alerts.sql','014_alert_radius.sql')")
 	if err := Migrate(context.Background(), a.db); err != nil {
 		t.Fatal(err)
 	}
-	enableAlerts(t, a, "courier", "central-library", 500, push.device(t, "courier"))
+	enableAlerts(t, a, "courier", "com2", 0, push.device(t, "courier"))
 	runAlerts(t, a)
 	if deliveries(t, a, "order_id=$1", existing.ID) != 0 || len(push.messages()) != 0 {
 		t.Fatal("existing errand announced after upgrade")
@@ -438,7 +440,7 @@ func TestScheduledImportNeverAlertsNearbyCouriers(t *testing.T) {
 	a.backgroundCatalogue = resolverFunc(func(_ context.Context, r PlaceRef, _ string) (Place, error) {
 		return Place{Type: r.Type, ID: r.ID, Name: r.ID}, nil
 	})
-	enableAlerts(t, a, "courier", "central-library", 500, push.device(t, "courier"))
+	enableAlerts(t, a, "courier", "com2", 0, push.device(t, "courier"))
 	start := time.Date(time.Now().Year()+1, 1, 2, 9, 0, 0, 0, time.FixedZone("SGT", 28800))
 	request, _ := json.Marshal(map[string]any{"pickup": PlaceRef{"location", "com2"}, "delivery": PlaceRef{"location", "utown"}, "items": []Item{{Name: "Tea", Quantity: 1}}, "offeredCredits": 10, "windowStart": start})
 	data, _ := json.Marshal(map[string]any{"id": "scheduled-alert-test", "requesterId": testUserID, "status": "scheduled", "expiresAt": start.Add(30 * time.Minute), "windowStart": start})

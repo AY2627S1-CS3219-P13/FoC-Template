@@ -14,7 +14,8 @@ import {
   formatDistance,
   openComparator,
   alertState,
-  radiusLabel,
+  alertScope,
+  alertCoverage,
   base64UrlBytes,
   subscriptionBody,
   deepLink,
@@ -533,7 +534,7 @@ function renderAlerts() {
   $("alerts-state").textContent = !alerts.loaded
     ? "Checking alert settings…"
     : state.key === "on" && where
-      ? `On for this device · ${radiusLabel(preference.radiusMeters)} of ${where.name}`
+      ? `On for this device · ${alertScope(preference.radiusMeters, where.name)}`
       : state.message;
   $("alerts-panel").dataset.state = alerts.loaded ? state.key : "loading";
   if (preference && !alerts.locationTouched && $("alerts-location").value !== preference.locationId) fillAlertLocations();
@@ -545,6 +546,24 @@ function renderAlerts() {
   $("alerts-save").hidden = $("alerts-disable").hidden = state.key !== "on";
   $("alerts-save").disabled = alerts.busy || !$("alerts-location").value;
   $("alerts-disable").disabled = alerts.busy;
+  renderCoverage(usable);
+}
+// Lists the campus locations the chosen location and distance would cover.
+function renderCoverage(usable) {
+  const covered = usable ? alertCoverage(places, $("alerts-location").value, Number($("alerts-radius").value)) : [];
+  $("alerts-coverage").hidden = !covered.length;
+  if (!covered.length) return;
+  const total = places.filter(placeable).length;
+  $("alerts-coverage-title").textContent = `New errands with a pickup at these places will alert you (${covered.length} of ${total} campus locations):`;
+  $("alerts-coverage-list").replaceChildren(
+    ...covered.map((place, i) => {
+      const item = document.createElement("li");
+      const where = i === 0 ? "your location" : formatDistance(place.distance) || "under 50 m";
+      const suppliers = place.suppliers ? ` · ${place.suppliers} supplier${place.suppliers === 1 ? "" : "s"}` : "";
+      item.textContent = `${place.name} · ${where}${suppliers}`;
+      return item;
+    }),
+  );
 }
 async function savePreference(enabled) {
   const data = await api("/alerts", {

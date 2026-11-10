@@ -15,6 +15,8 @@ import {
   openComparator,
   alertState,
   radiusLabel,
+  alertScope,
+  alertCoverage,
   base64UrlBytes,
   subscriptionBody,
   deepLink,
@@ -131,18 +133,40 @@ test("scheduled creation preserves int64 values and replaces manual expiry",()=>
 
 test("alert panel states follow browser support, permission and the account", () => {
   const base = { supported: true, secure: true, permission: "default", pushAvailable: true, preference: null, subscribed: false, devices: 0 };
-  const on = { enabled: true, locationId: "com2", radiusMeters: 500 };
+  const on = { enabled: true, locationId: "com2", radiusMeters: 250 };
   assert.equal(alertState({ ...base, supported: false }).key, "unsupported");
   assert.equal(alertState({ ...base, secure: false }).key, "insecure");
   assert.equal(alertState({ ...base, pushAvailable: false }).key, "unavailable");
   assert.equal(alertState({ ...base, permission: "denied", preference: on, subscribed: true }).key, "blocked");
   assert.equal(alertState(base).key, "off");
   assert.equal(alertState({ ...base, preference: { ...on, enabled: false }, subscribed: true }).key, "off");
-  assert.deepEqual(alertState({ ...base, preference: on, subscribed: true }), { key: "on", message: "On for this device · within 500 m" });
+  assert.deepEqual(alertState({ ...base, preference: on, subscribed: true }), { key: "on", message: "On for this device · within 250 m" });
   assert.equal(alertState({ ...base, preference: on, devices: 2 }).key, "elsewhere");
   assert.equal(alertState({ ...base, preference: on, devices: 0 }).key, "off");
-  assert.equal(radiusLabel(200), "within 200 m");
-  assert.equal(radiusLabel(1000), "within 1 km");
+  assert.equal(radiusLabel(0), "this location only");
+  assert.equal(radiusLabel(100), "within 100 m");
+  assert.equal(alertScope(0, "COM2"), "at COM2 only");
+  assert.equal(alertScope(250, "COM2"), "within 250 m of COM2");
+});
+
+test("alert coverage lists exactly the campus locations that would alert, nearest first", () => {
+  // Seeded coordinates: Terrace is 58 m from COM2, Central Library 315 m.
+  const places = [
+    { type: "location", id: "com2", name: "COM2", latitude: 1.293925, longitude: 103.774153 },
+    { type: "location", id: "terrace", name: "Terrace", latitude: 1.29389, longitude: 103.77363 },
+    { type: "location", id: "central-library", name: "Central Library", latitude: 1.296558, longitude: 103.773111 },
+    { type: "location", id: "annex", name: "Annex" },
+    { type: "supplier", id: "s1", name: "Cafe", locationId: "com2" },
+    { type: "supplier", id: "s2", name: "Printer", locationId: "com2" },
+    { type: "supplier", id: "s3", name: "Shop", locationId: "terrace" },
+  ];
+  const names = (radius) => alertCoverage(places, "com2", radius).map((p) => `${p.name} ${p.distance} ${p.suppliers}`);
+  assert.deepEqual(names(0), ["COM2 0 2"]);
+  assert.deepEqual(names(100), ["COM2 0 2", "Terrace 58 1"]);
+  assert.deepEqual(names(250), ["COM2 0 2", "Terrace 58 1"]);
+  assert.deepEqual(names(315), ["COM2 0 2", "Terrace 58 1", "Central Library 315 0"]);
+  assert.deepEqual(alertCoverage(places, "annex", 250), []);
+  assert.deepEqual(alertCoverage(places, "", 250), []);
 });
 
 test("subscriptions send only the documented fields and keys decode to bytes", () => {

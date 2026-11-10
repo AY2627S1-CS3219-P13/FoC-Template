@@ -17,8 +17,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Nearby errand alerts: couriers choose a campus location and radius; each new
-// open errand whose pickup is within range becomes a Web Push notification.
+// Nearby errand alerts: couriers choose a campus location and radius (0 m for
+// that location only, 100 m or 250 m); each new open errand whose pickup is
+// within range becomes a Web Push notification.
 // See NEARBY-ALERTS.md for the design.
 
 const (
@@ -64,7 +65,7 @@ type alertPreference struct {
 	RadiusMeters int    `json:"radiusMeters"`
 }
 
-func validRadius(meters int) bool { return meters == 200 || meters == 500 || meters == 1000 }
+func validRadius(meters int) bool { return meters == 0 || meters == 100 || meters == 250 }
 
 func (a *App) alertSettings(w http.ResponseWriter, r *http.Request) error {
 	body := map[string]any{"pushAvailable": a.push != nil, "vapidPublicKey": nil, "preference": nil, "devices": 0}
@@ -103,7 +104,7 @@ func (a *App) saveAlertPreference(w http.ResponseWriter, r *http.Request) error 
 		return problem(400, "invalid_alert_preference", "Send enabled, locationId and radiusMeters.")
 	}
 	if !validRadius(body.RadiusMeters) {
-		return problem(400, "invalid_radius", "Choose a radius of 200, 500 or 1000 metres.")
+		return problem(400, "invalid_radius", "Choose this location only (0), 100 or 250 metres.")
 	}
 	cookie, _ := r.Cookie(a.cfg.SessionCookie)
 	session := ""
@@ -425,9 +426,13 @@ func alertPayload(orderID string, pickup Place, distance int64) map[string]any {
 	if pickup.Type == "supplier" && pickup.LocationName != "" {
 		place += " (" + pickup.LocationName + ")"
 	}
+	where := alertDistance(distance) + " from your alert location"
+	if distance == 0 {
+		where = "at your alert location"
+	}
 	return map[string]any{
 		"v": 1, "orderId": orderID, "title": "New errand nearby",
-		"body": place + " · " + alertDistance(distance) + " from your alert location. Open Help a friend to see all nearby errands.",
+		"body": place + " · " + where + ". Open Help a friend to see all nearby errands.",
 		"url":  "/orders?view=open&order=" + url.QueryEscape(orderID),
 	}
 }

@@ -1,6 +1,6 @@
 # Nearby errand alerts (Web Push) — design
 
-Status: implemented (migration 013, `alerts.go`, `webpush.go`, `web/sw.js`); API.md has the contract. Builds on nearest-pickup sorting
+Status: implemented (migrations 013 and 014, `alerts.go`, `webpush.go`, `web/sw.js`); API.md has the contract. Builds on nearest-pickup sorting
 (campus coordinates from Supplier, `distanceMeters` in `internal/order/proximity.go`).
 
 ## 1. Purpose and scope
@@ -27,7 +27,7 @@ project brief) and iOS home-screen installation (section 13).
 | Implementation | Go standard library for RFC 8291 encryption and RFC 8292 VAPID; no new module dependency |
 | Preference owner | Order Service, keyed by the User UUID from the validated session |
 | Preference granularity | One preference per courier, shared by all their devices |
-| Radius | Fixed set: 200, 500 or 1000 m |
+| Radius | Fixed set: 0 m (the chosen location and its suppliers only), 100 m or 250 m. Across the 15 seeded campus locations these cover on average 1, 1.8 and 3.8 locations (7%, 12% and 25%). Migration 014 replaced the original 200/500/1000 m set and moved existing preferences to 250 m |
 | Rate limit | Per-courier cooldown of 2 minutes. Missed alerts are acceptable: the notification leads to the full list |
 | Delivery history | Delete delivery rows 7 days after creation |
 | Busy couriers | Skipped when matching if they already have three active orders, the acceptance limit; no cooldown is used |
@@ -65,7 +65,7 @@ CREATE TABLE nearby_alert_preferences (
     user_id uuid PRIMARY KEY,                 -- User UUID from the session; no cross-service FK
     enabled boolean NOT NULL,
     location_id text NOT NULL,                -- Supplier campus location ID, checked when saved
-    radius_meters integer NOT NULL CHECK (radius_meters IN (200, 500, 1000)),
+    radius_meters integer NOT NULL CHECK (radius_meters IN (200, 500, 1000)), -- (0, 100, 250) since migration 014
     last_alerted_at timestamptz,              -- cooldown
     updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -118,7 +118,7 @@ already covers them.
 | Method and path | Body / response | Notes |
 | --- | --- | --- |
 | `GET /api/v1/orders/alerts` | `{pushAvailable, vapidPublicKey, preference: {enabled, locationId, radiusMeters} \| null, devices}` | `pushAvailable:false` when not configured |
-| `PUT /api/v1/orders/alerts` | `{enabled, locationId, radiusMeters}` | Location checked through Supplier with the user's session; radius ∈ {200,500,1000} → `400 invalid_radius` / `invalid_location` |
+| `PUT /api/v1/orders/alerts` | `{enabled, locationId, radiusMeters}` | Location checked through Supplier with the user's session; radius ∈ {0,100,250} → `400 invalid_radius` / `invalid_location` |
 | `PUT /api/v1/orders/alerts/subscription` | `{endpoint, keys: {p256dh, auth}}` → 204 | Upsert by endpoint; validated per section 9 |
 | `DELETE /api/v1/orders/alerts/subscription` | `{endpoint}` → 204 | Removes only the caller's own row |
 
@@ -194,7 +194,10 @@ older than 7 days.
   worker to activate before subscribing.
 - `/orders?view=open&order=<id>` opens Help a friend and selects that errand.
 - **Nearby alerts** panel in Help a friend: on/off toggle, location (prefilled
-  from **Start from**) and radius 200/500/1000 m. Enabling runs:
+  from **Start from**) and radius (this location only, 100 m or 250 m). Below
+  the form, the panel lists the campus locations that choice covers, nearest
+  first, with each one's distance and supplier count, computed in the browser
+  with the same distance as matching. Enabling runs:
   permission request → `register('/orders/sw.js')` → `pushManager.subscribe({
   userVisibleOnly: true, applicationServerKey })` → `PUT …/subscription` →
   `PUT /alerts`.
@@ -300,12 +303,12 @@ unless a team member can test on iOS 16.4+.
 Public HTTPS ingress is not active yet (it waits on real SMTP), so the demo runs
 on a laptop. `localhost` and an SSM tunnel are secure origins.
 
-1. Chrome profile B (courier): enable alerts for **Central Library, 500 m**, then
-   close the Orders tab (Chrome keeps running).
-2. Chrome profile A (requester): create an errand from a COM2 supplier (~320 m).
+1. Chrome profile B (courier): choose **COM2, 100 m**; the panel lists COM2 and
+   Terrace (~60 m). Turn alerts on, then close the Orders tab (Chrome keeps running).
+2. Chrome profile A (requester): create an errand from a COM2 or Terrace supplier.
 3. A system notification appears within a few seconds; clicking it opens Help a
    friend with that errand selected.
-4. Create an errand at Prince George's Park (~800 m): no notification arrives.
+4. Create an errand at Central Library (~320 m): no notification arrives.
 5. Show the consumer in publication-status and the delivery log lines.
 
 With ingress active, the same flow works on an Android phone through the
