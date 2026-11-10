@@ -272,6 +272,9 @@ func TestAlertPayloadNamesPlaceAndDistanceOnly(t *testing.T) {
 			t.Fatalf("%d m: got %q want %q", meters, got, want)
 		}
 	}
+	if same := alertPayload("x", Place{Type: "supplier", ID: testSupplierID, Name: "Campus Cafe", LocationName: "COM2"}, 0); same["body"] != "Campus Cafe (COM2) · at your alert location. Open Help a friend to see all nearby errands." {
+		t.Fatalf("same-location payload %+v", same)
+	}
 	if location := alertPayload("x", Place{Type: "location", ID: "com2", Name: "COM2"}, 100); !strings.HasPrefix(location["body"].(string), "COM2 · about 100 m") {
 		t.Fatal("location pickup body", location["body"])
 	}

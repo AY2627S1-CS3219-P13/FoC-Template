@@ -249,10 +249,14 @@
           </div>
           <div class="alerts-form">
             <label>Near <select id="alerts-location"></select></label>
-            <label>Distance <select id="alerts-radius"><option value="200">Within 200 m</option><option value="500">Within 500 m</option><option value="1000">Within 1 km</option></select></label>
+            <label>Distance <select id="alerts-radius"><option value="0">This location only</option><option value="100">Within 100 m</option><option value="250">Within 250 m</option></select></label>
             <button id="alerts-enable">Turn on alerts</button>
             <button id="alerts-save" class="secondary" hidden>Save changes</button>
             <button id="alerts-disable" class="secondary" hidden>Turn off on this device</button>
+          </div>
+          <div id="alerts-coverage" class="alerts-coverage" hidden>
+            <p id="alerts-coverage-title" class="muted"></p>
+            <ul id="alerts-coverage-list"></ul>
           </div>
           <p id="alerts-message" class="error" role="alert" hidden></p>
         </section>

@@ -93,14 +93,20 @@ test("a courier turns nearby alerts on, changes them and turns them off on this 
   await expect(page.locator("#alerts-enable")).toBeDisabled();
 
   await page.locator("#alerts-location").selectOption("central-library");
-  await page.locator("#alerts-radius").selectOption("500");
+  await page.locator("#alerts-radius").selectOption("250");
+  // Before saving, the panel lists exactly the places that would alert: COM2 is ~315 m away.
+  await expect(page.locator("#alerts-coverage-title")).toContainText(/\(1 of \d+ campus locations\)/);
+  await expect(page.locator("#alerts-coverage-list li")).toHaveText(["Central Library · your location"]);
+  await page.locator("#alerts-location").selectOption("com2");
+  await expect(page.locator("#alerts-coverage-list li")).toHaveText(["COM2 · your location · 1 supplier"]);
+  await page.locator("#alerts-location").selectOption("central-library");
   await page.locator("#alerts-enable").click();
-  await expect(page.locator("#alerts-state")).toHaveText("On for this device · within 500 m of Central Library");
+  await expect(page.locator("#alerts-state")).toHaveText("On for this device · within 250 m of Central Library");
   await expect(page.locator("#alerts-message")).toBeHidden();
   expect(await settings(page)).toMatchObject({
     pushAvailable: true,
     devices: 1,
-    preference: { enabled: true, locationId: "central-library", radiusMeters: 500 },
+    preference: { enabled: true, locationId: "central-library", radiusMeters: 250 },
   });
   const worker = await page.evaluate(async () => (await navigator.serviceWorker.getRegistration("/orders/"))?.active?.scriptURL);
   expect(worker).toMatch(/\/orders\/sw\.js$/);
@@ -108,13 +114,13 @@ test("a courier turns nearby alerts on, changes them and turns them off on this 
   // The account preference and this browser's subscription survive a reload.
   await page.reload();
   await page.getByRole("button", { name: "Help a friend", exact: true }).click();
-  await expect(page.locator("#alerts-state")).toHaveText("On for this device · within 500 m of Central Library");
+  await expect(page.locator("#alerts-state")).toHaveText("On for this device · within 250 m of Central Library");
   await expect(page.locator("#alerts-location")).toHaveValue("central-library");
 
-  await page.locator("#alerts-radius").selectOption("1000");
+  await page.locator("#alerts-radius").selectOption("0");
   await page.locator("#alerts-save").click();
-  await expect(page.locator("#alerts-state")).toHaveText("On for this device · within 1 km of Central Library");
-  expect((await settings(page)).preference.radiusMeters).toBe(1000);
+  await expect(page.locator("#alerts-state")).toHaveText("On for this device · at Central Library only");
+  expect((await settings(page)).preference.radiusMeters).toBe(0);
 
   await page.locator("#alerts-disable").click();
   await expect(page.locator("#alerts-state")).toContainText("Off. Get a notification");
@@ -127,16 +133,16 @@ test("a subscription the browser drops is noticed without a reload", async ({ pa
   await start(page);
   await page.getByRole("button", { name: "Help a friend", exact: true }).click();
   await page.locator("#alerts-location").selectOption("central-library");
-  await page.locator("#alerts-radius").selectOption("500");
+  await page.locator("#alerts-radius").selectOption("250");
   await page.locator("#alerts-enable").click();
-  await expect(page.locator("#alerts-state")).toHaveText("On for this device · within 500 m of Central Library");
+  await expect(page.locator("#alerts-state")).toHaveText("On for this device · within 250 m of Central Library");
   // Chrome discards subscriptions when site permission is reset or turned off
   // from a notification; the stub models that by forgetting its subscription.
   await page.evaluate(() => localStorage.removeItem("ui-test-push-subscription"));
   await expect(page.locator("#alerts-state")).toContainText("On for another of your devices", { timeout: 6000 });
   await expect(page.locator("#alerts-enable")).toBeVisible();
   await page.locator("#alerts-enable").click();
-  await expect(page.locator("#alerts-state")).toHaveText("On for this device · within 500 m of Central Library");
+  await expect(page.locator("#alerts-state")).toHaveText("On for this device · within 250 m of Central Library");
 });
 
 test("blocked notifications explain how to recover and keep alerts off", async ({ page }) => {
@@ -166,7 +172,7 @@ test("another device's alerts are reported, and other views hide the panel", asy
   await page.addInitScript(() => localStorage.setItem("foc-orders-start-from", "central-library"));
   await page.route("**/api/v1/orders/alerts", (route) =>
     route.fulfill({
-      json: { pushAvailable: true, vapidPublicKey: "B".padEnd(87, "A"), preference: { enabled: true, locationId: "com2", radiusMeters: 200 }, devices: 1 },
+      json: { pushAvailable: true, vapidPublicKey: "B".padEnd(87, "A"), preference: { enabled: true, locationId: "com2", radiusMeters: 100 }, devices: 1 },
     }),
   );
   await start(page);
@@ -180,7 +186,7 @@ test("another device's alerts are reported, and other views hide the panel", asy
   await page.locator("#alerts-location").selectOption("central-library");
   await page.locator("#reload-list").click();
   await expect(page.locator("#alerts-location")).toHaveValue("central-library");
-  await expect(page.locator("#alerts-radius")).toHaveValue("200");
+  await expect(page.locator("#alerts-radius")).toHaveValue("100");
   await page.getByRole("button", { name: "My deliveries", exact: true }).click();
   await expect(page.locator("#alerts-panel")).toBeHidden();
 });

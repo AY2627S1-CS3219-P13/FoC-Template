@@ -328,7 +328,8 @@ snapshot refreshes. Notifications never directly overwrite cached order state.
 
 ### Nearby alerts
 
-A courier chooses one campus location and a radius of 200, 500 or 1000 m. When
+A courier chooses one campus location and a radius: 0 (that location and its
+suppliers only), 100 or 250 m. When
 a new errand's pickup is within that straight-line distance, each of their
 registered browsers receives a Web Push notification, even with the site closed.
 The design is in `NEARBY-ALERTS.md`.
@@ -338,7 +339,7 @@ uncompressed P-256 point for `PushManager.subscribe`, or `null`), `preference`
 (`{enabled, locationId, radiusMeters}` or `null`) and `devices`. Endpoints and
 keys are never returned.
 
-`PUT /api/v1/orders/alerts` takes `{"enabled":true,"locationId":"central-library","radiusMeters":500}`
+`PUT /api/v1/orders/alerts` takes `{"enabled":true,"locationId":"central-library","radiusMeters":250}`
 and returns `{"preference":{...}}`. All three fields are required. Other radii
 return `400 invalid_radius`. The location is checked through Supplier with the
 caller's session; an unknown location or one without coordinates returns
