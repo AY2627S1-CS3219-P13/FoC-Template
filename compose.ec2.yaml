@@ -8,87 +8,80 @@ x-logging: &logging
     max-file: "3"
     labels: "com.docker.compose.service"
 
+# Every container in this file is long-lived and has its logs bounded. Defined
+# once so a service added here cannot inherit the unmanaged defaults by omission.
+x-service: &service
+  restart: unless-stopped
+  logging: *logging
+
 services:
   user-db:
-    restart: unless-stopped
-    logging: *logging
+    <<: *service
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U foc_user -d foc_user"]
   supplier-db:
-    restart: unless-stopped
-    logging: *logging
+    <<: *service
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U foc_supplier -d foc_supplier"]
   credit-db:
-    restart: unless-stopped
-    logging: *logging
+    <<: *service
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U foc_credit -d foc_credit"]
   order-db:
-    restart: unless-stopped
-    logging: *logging
+    <<: *service
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U foc_order -d foc_order"]
   mailpit:
-    restart: unless-stopped
-    logging: *logging
+    <<: *service
 
   user-service:
+    <<: *service
     build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/user-service:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
-    restart: unless-stopped
-    logging: *logging
   supplier-service:
+    <<: *service
     build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/supplier-service:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
-    restart: unless-stopped
-    logging: *logging
   credit-service:
+    <<: *service
     build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/credit-service:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
-    restart: unless-stopped
-    logging: *logging
   order-service:
+    <<: *service
+    build: !reset null
     environment:
       ORDER_PRICING_URL: http://pricing-service:8080
       ORDER_PRICING_TOKEN: ${PRICING_QUOTE_TOKEN:?Run sh order_pricing/scripts/init-env.sh}
       ORDER_PRICING_SOURCE_TOKEN: ${PRICING_ORDER_SOURCE_TOKEN:?Run sh order_pricing/scripts/init-env.sh}
-    build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/order-service:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
-    restart: unless-stopped
-    logging: *logging
   frontend:
+    <<: *service
     build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/frontend:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
-    restart: unless-stopped
-    logging: *logging
   smoke:
     environment:
       SMOKE_PRICING: "1"
   pricing-db:
+    <<: *service
     extends:
       file: ./order_pricing/compose.runtime.yaml
       service: pricing-db
-    restart: unless-stopped
-    logging: *logging
     healthcheck:
       test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U foc_pricing -d foc_pricing"]
   pricing-service:
+    <<: *service
+    build: !reset null
     extends:
       file: ./order_pricing/compose.runtime.yaml
       service: pricing-service
-    build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/pricing-service:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
-    restart: unless-stopped
-    logging: *logging
   gateway:
+    <<: *service
+    build: !reset null
     depends_on:
       pricing-service:
         condition: service_healthy
-    build: !reset null
     image: ${ECR_REGISTRY:?Set ECR_REGISTRY}/foc/gateway:${FOC_IMAGE_TAG:?Set FOC_IMAGE_TAG}
-    restart: unless-stopped
-    logging: *logging
     ports: !override
       - "${GATEWAY_BIND_ADDRESS:-127.0.0.1}:3000:8080"
     volumes:

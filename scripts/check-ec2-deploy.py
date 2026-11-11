@@ -105,7 +105,13 @@ class DeployTests(unittest.TestCase):
             if self.action(call) == "up":
                 self.assertIn("--no-build", call)
                 self.assertIn("never", call)
-        self.assertEqual(sum(c[0] == "docker" and c[1] == "inspect" for c in calls), len(SERVICES))
+        # One capture of the running tag before any stop, then one verification
+        # inspect per service after the release.
+        inspects = [c for c in calls if c[0] == "docker" and c[1] == "inspect"]
+        self.assertEqual(len(inspects), len(SERVICES) + 1)
+        self.assertEqual(inspects[0][-1], "container-gateway")
+        self.assertEqual([c[-1] for c in inspects[1:]], ["container-" + s for s in SERVICES])
+        self.assertNotIn("restoring", result.stderr)
 
     def test_legacy_schedule_blocks_deployment_before_download_or_stop(self):
         result = self.run_deploy(LEGACY_SCHEDULE="1")
@@ -150,6 +156,15 @@ class DeployTests(unittest.TestCase):
         result = self.run_deploy(FAIL_READY="1")
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("Deployment ready:", result.stdout)
+
+    def test_failed_gate_restores_the_previous_release(self):
+        result = self.run_deploy(FAIL_ACTION="exec")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("restoring", result.stderr)
+        full = [c for c in self.calls()
+                if self.action(c) == "up" and all(s in c for s in SERVICES)]
+        self.assertEqual(len(full), 1)
+        self.assertIn("Restored", result.stderr)
 
     def test_pricing_readiness_failure_is_not_success(self):
         result = self.run_deploy(FAIL_ACTION="exec")
