@@ -51,6 +51,36 @@ if compose ps --all --format '{{.Service}}' | grep -qx schedule-order; then
   echo 'Legacy Schedule container found. Complete schedule-order/README.md offline cutover and remove that application container before deploying.' >&2
   exit 1
 fi
+# Remember what is running so a failed release can be undone. Tags are immutable,
+# so the previous images are still cached locally.
+previous_tag=''
+container=$(compose ps -q gateway 2>/dev/null || true)
+if [ -n "$container" ]; then
+  previous_tag=$(docker inspect --format '{{.Config.Image}}' "$container" 2>/dev/null | sed 's|.*:||')
+  # Only a full commit SHA can be redeployed; anything else leaves this empty.
+  [ "${#previous_tag}" -eq 40 ] || previous_tag=''
+fi
+
+# Restore the previous release if this one fails after a service was stopped.
+# Images roll back; database migrations do not.
+rollback() {
+  status=$?
+  if [ "$status" -eq 0 ] || [ -z "${release_started:-}" ] || [ -z "$previous_tag" ]; then
+    exit "$status"
+  fi
+  echo "Deployment of $FOC_IMAGE_TAG failed; restoring $previous_tag" >&2
+  FOC_IMAGE_TAG=$previous_tag
+  export FOC_IMAGE_TAG
+  if compose up --no-build --pull never -d --wait --wait-timeout 120 \
+      user-service supplier-service credit-service order-service pricing-service frontend gateway; then
+    echo "Restored $previous_tag; the failed release is not deployed." >&2
+  else
+    echo "Rollback to $previous_tag failed; the host needs manual attention." >&2
+  fi
+  exit "$status"
+}
+trap rollback EXIT
+
 # Immutable tags cannot change; existing cached images can safely be reused.
 # A missing image or failed download aborts before any running service is stopped.
 compose pull --policy missing user-service supplier-service credit-service order-service pricing-service frontend gateway
@@ -60,6 +90,7 @@ compose pull --policy missing user-service supplier-service credit-service order
 compose run --rm --no-deps user-service check-config
 
 # Order upgrades prohibit old writers and require the new Credit endpoint first.
+release_started=1
 compose stop pricing-service order-service
 compose up --no-build --pull never -d --wait --wait-timeout 120 user-service supplier-service credit-service
 for service in user-service supplier-service credit-service; do
